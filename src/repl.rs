@@ -3,17 +3,17 @@ use color_eyre::eyre::Result;
 use logos::Logos;
 use nu_ansi_term::{Color, Style};
 use reedline::{
-    DefaultHinter, Highlighter, Hinter, History, Prompt,
-    PromptEditMode, PromptViMode, Reedline, SqliteBackedHistory,
-    StyledText, ValidationResult, Validator,
+    DefaultHinter, Highlighter, Hinter, History, Prompt, PromptEditMode,
+    PromptViMode, Reedline, SqliteBackedHistory, StyledText, ValidationResult,
+    Validator,
 };
 
 use std::borrow::Cow;
 use std::env;
 
 use crate::lexer::{
-    is_conversion, is_keywordy, is_mutator, is_operator,
-    is_predicate, is_special_form, Token,
+    Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate,
+    is_special_form,
 };
 
 pub fn history() -> Result<Box<dyn History>> {
@@ -34,11 +34,7 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
     struct SchemeHighlighter;
 
     impl Highlighter for SchemeHighlighter {
-        fn highlight(
-            &self,
-            line: &str,
-            _cursor: usize,
-        ) -> StyledText {
+        fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
             let mut result = StyledText::new();
             let mut lexer = Token::lexer(line);
 
@@ -53,21 +49,13 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                         x if is_special_form(x) => {
                             Style::new().fg(Color::Green)
                         }
-                        x if is_keywordy(x) => {
-                            Style::new().fg(Color::Purple)
-                        }
+                        x if is_keywordy(x) => Style::new().fg(Color::Purple),
                         x if is_predicate(x) => {
                             Style::new().fg(Color::LightBlue)
                         }
-                        x if is_mutator(x) => {
-                            Style::new().fg(Color::Red)
-                        }
-                        x if is_conversion(x) => {
-                            Style::new().fg(Color::Yellow)
-                        }
-                        x if is_operator(x) => {
-                            Style::new().fg(Color::LightRed)
-                        }
+                        x if is_mutator(x) => Style::new().fg(Color::Red),
+                        x if is_conversion(x) => Style::new().fg(Color::Yellow),
+                        x if is_operator(x) => Style::new().fg(Color::LightRed),
                         _ if previous == Some(Token::LParen) => {
                             Style::new().fg(Color::LightCyan)
                         }
@@ -77,21 +65,16 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                     | Ok(Token::Decimal(_))
                     | Ok(Token::Binary)
                     | Ok(Token::Octal)
-                    | Ok(Token::Hex) => {
-                        Style::new().fg(Color::Green)
+                    | Ok(Token::Hex) => Style::new().fg(Color::Green),
+                    Ok(Token::String(_)) => Style::new().fg(Color::LightRed),
+                    Ok(Token::Character(_)) => {
+                        Style::new().fg(Color::LightCyan).italic()
                     }
-                    Ok(Token::String(_)) => {
-                        Style::new().fg(Color::LightRed)
-                    }
-                    Ok(Token::Character(_)) => Style::new()
-                        .fg(Color::LightCyan)
-                        .italic(),
                     Ok(Token::True) | Ok(Token::False) => {
                         Style::new().fg(Color::LightGreen).bold()
                     }
                     Ok(Token::LParen) | Ok(Token::RParen)
-                    | Ok(Token::LBracket)
-                    | Ok(Token::RBracket) => {
+                    | Ok(Token::LBracket) | Ok(Token::RBracket) => {
                         Style::new().fg(Color::Purple)
                     }
                     Ok(Token::Quote)
@@ -128,10 +111,10 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
 }
 
 pub fn hinter() -> Result<Box<dyn Hinter>> {
-    let h =
-        Box::new(DefaultHinter::default().with_style(
-            Style::new().italic().fg(Color::LightGray),
-        ));
+    let h = Box::new(
+        DefaultHinter::default()
+            .with_style(Style::new().italic().fg(Color::LightGray)),
+    );
 
     Ok(h)
 }
@@ -141,12 +124,8 @@ pub fn validator() -> Result<Box<dyn Validator>> {
 
     impl Validator for SchemeValidator {
         fn validate(&self, line: &str) -> ValidationResult {
-            let lparens =
-                line.chars().filter(|c| *c == '(').count()
-                    as i64;
-            let rparens =
-                line.chars().filter(|c| *c == ')').count()
-                    as i64;
+            let lparens = line.chars().filter(|c| *c == '(').count() as i64;
+            let rparens = line.chars().filter(|c| *c == ')').count() as i64;
 
             if lparens - rparens != 0 {
                 ValidationResult::Incomplete
@@ -179,9 +158,7 @@ pub fn prompt() -> Result<Box<dyn Prompt>> {
             prompt_mode: reedline::PromptEditMode,
         ) -> std::borrow::Cow<str> {
             match prompt_mode {
-                PromptEditMode::Default => {
-                    Cow::Borrowed("( ) λ ")
-                }
+                PromptEditMode::Default => Cow::Borrowed("( ) λ "),
                 PromptEditMode::Vi(PromptViMode::Insert) => {
                     Cow::Borrowed("[I] λ ")
                 }
@@ -189,15 +166,11 @@ pub fn prompt() -> Result<Box<dyn Prompt>> {
                     Cow::Borrowed("[N] λ ")
                 }
                 PromptEditMode::Emacs => Cow::Borrowed("(E) λ "),
-                PromptEditMode::Custom(_) => {
-                    Cow::Borrowed("(-) λ ")
-                }
+                PromptEditMode::Custom(_) => Cow::Borrowed("(-) λ "),
             }
         }
 
-        fn render_prompt_multiline_indicator(
-            &self,
-        ) -> std::borrow::Cow<str> {
+        fn render_prompt_multiline_indicator(&self) -> std::borrow::Cow<str> {
             Cow::Owned(format!("{}| ", " ".repeat(10)))
         }
 

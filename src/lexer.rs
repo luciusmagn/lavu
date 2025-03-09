@@ -1,12 +1,12 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Logos, Span};
-use num::{bigint::ParseBigIntError, BigInt};
+use num::{BigInt, bigint::ParseBigIntError};
 use strum::EnumIs;
 use thiserror::Error;
 
 use std::str::FromStr;
 
-use crate::chars::{parse_char, ParseCharError};
+use crate::chars::{ParseCharError, parse_char};
 
 #[derive(Error, PartialEq, Debug, Clone)]
 pub enum LexerError {
@@ -204,14 +204,11 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::eyre::ensure;
     use color_eyre::Result;
+    use color_eyre::eyre::ensure;
 
     #[track_caller]
-    fn test_single(
-        s: &str,
-        pred: impl Fn(&Token) -> bool,
-    ) -> Result<()> {
+    fn test_single(s: &str, pred: impl Fn(&Token) -> bool) -> Result<()> {
         let tokens = tokenize(s);
 
         ensure!(tokens.len() > 0, "no tokens parsed: {}", s);
@@ -300,8 +297,7 @@ mod tests {
 
     #[test]
     fn test_strings_and_chars() {
-        let input =
-            r#""hello world" "escaped \"quotes\"" #\a #\space"#;
+        let input = r#""hello world" "escaped \"quotes\"" #\a #\space"#;
         let tokens = tokenize(input);
 
         assert!(tokens[0].0.is_string());

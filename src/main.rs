@@ -1,3 +1,4 @@
+use ast::ariadne_yap;
 use color_eyre::eyre::Result;
 use interpreter::GerbilInterpreter;
 use reedline::Signal;
@@ -17,6 +18,8 @@ mod chars;
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    flungus();
+
     let (mut line_editor, prompt) = line_editor()?;
     let mut interpreter = GerbilInterpreter::new()?;
 
@@ -28,20 +31,39 @@ fn main() -> Result<()> {
             Ok(Signal::Success(buffer)) => {
                 let lexed = tokenize(&buffer);
 
-                // Evaluate in Gerbil
-                if let Err(e) = interpreter.eval(&buffer) {
-                    println!(
-                        "Error communicating with Gerbil: {}",
-                        e
-                    );
+                // Check for unclosed expressions
+                if let Some(error_idx) = parser::find_unclosed_sexp(&lexed) {
+                    if let Err(e) =
+                        parser::create_diagnostic(&buffer, &lexed, error_idx)
+                    {
+                        println!("Error creating diagnostic: {}", e);
+                    }
                     continue;
                 }
 
-                // Print output
-                for line in interpreter.get_output() {
-                    println!("{}", line);
+                // Try to parse the input
+                match parser::parse(&lexed) {
+                    Ok(expressions) => {
+                        println!("{:#?}", lexed);
+                        println!("{:#?}", expressions);
+                        ariadne_yap(&buffer, &lexed, &expressions);
+
+                        // Evaluate in Gerbil (for now)
+                        if let Err(e) = interpreter.eval(&buffer) {
+                            println!("Error communicating with Gerbil: {}", e);
+                            continue;
+                        }
+
+                        // Print output
+                        for line in interpreter.get_output() {
+                            println!("{}", line);
+                        }
+                        interpreter.clear_output();
+                    }
+                    Err(errors) => {
+                        println!("Parse errors: {:?}", errors);
+                    }
                 }
-                interpreter.clear_output();
             }
             Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
                 println!("\nAborted!");
@@ -55,4 +77,43 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn flungus() {
+    println!();
+    println!();
+    println!();
+    println!();
+
+    let input = r#"
+(define brungus 'dung)
+
+;; Factorial function
+(define (factorial n)
+  (if (= n 0)
+      1
+      (* n (factorial (- n 1)))))
+
+;; Map function
+(define (my-map f lst)
+  (if (null? lst)
+      '()
+      (cons (f (car lst))
+            (my-map f (cdr lst))))
+
+;; Simple list length
+(define (length lst)
+  (if (null? lst)
+      0
+      (+ 1 (length (cdr lst)))))
+"#;
+
+    let lexed = tokenize(&input);
+
+    // Check for unclosed expressions
+    if let Some(error_idx) = parser::find_unclosed_sexp(&lexed) {
+        if let Err(e) = parser::create_diagnostic(&input, &lexed, error_idx) {
+            println!("Error creating diagnostic: {}", e);
+        }
+    }
 }

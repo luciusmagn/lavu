@@ -41,8 +41,6 @@ pub fn parse_char(s: &str) -> Result<char, ParseCharError> {
         "newline" => Ok('\n'),
         "tab" => Ok('\t'),
         "return" => Ok('\r'),
-        _ => Err(ParseCharError::UnknownNamedChar(
-            char_part.to_string(),
-        )),
+        _ => Err(ParseCharError::UnknownNamedChar(char_part.to_string())),
     }
 }

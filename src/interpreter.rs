@@ -20,16 +20,9 @@ impl GerbilInterpreter {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let stdin =
-            process.stdin.take().expect("Failed to open stdin");
-        let stdout = process
-            .stdout
-            .take()
-            .expect("Failed to open stdout");
-        let stderr = process
-            .stderr
-            .take()
-            .expect("Failed to open stderr");
+        let stdin = process.stdin.take().expect("Failed to open stdin");
+        let stdout = process.stdout.take().expect("Failed to open stdout");
+        let stderr = process.stderr.take().expect("Failed to open stderr");
 
         let output_buffer = Arc::new(Mutex::new(Vec::new()));
         let buffer_clone = Arc::clone(&output_buffer);
@@ -45,9 +38,7 @@ impl GerbilInterpreter {
                     // Skip the prompt lines
                     let mut final_line = line.clone();
 
-                    while final_line.starts_with("> ")
-                        && final_line.len() > 2
-                    {
+                    while final_line.starts_with("> ") && final_line.len() > 2 {
                         final_line = final_line[2..].into();
                     }
 
@@ -58,8 +49,7 @@ impl GerbilInterpreter {
             // Read stderr
             for line in stderr_reader.lines() {
                 if let Ok(line) = line {
-                    let mut buffer =
-                        buffer_clone.lock().unwrap();
+                    let mut buffer = buffer_clone.lock().unwrap();
                     buffer.push(format!("ERROR: {}", line));
                 }
             }
