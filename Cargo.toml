@@ -1,0 +1,17 @@
+[package]
+name = "lavu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ariadne = { version = "0.5.0", features = ["concolor", "auto-color"] }
+bigdecimal = "0.4.7"
+chrono = { version = "0.4.40", features = ["serde"] }
+chumsky = "0.9.3"
+color-eyre = "0.6.3"
+dirs = "6.0.0"
+logos = "0.15.0"
+nu-ansi-term = "0.50.1"
+num = "0.4.3"
+reedline = { version = "0.38.0", features = ["system_clipboard", "sqlite"] }
+thiserror = "2.0.12"

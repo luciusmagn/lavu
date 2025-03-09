@@ -1,0 +1,57 @@
+use color_eyre::eyre::Result;
+use interpreter::GerbilInterpreter;
+use reedline::Signal;
+
+mod lexer;
+use lexer::tokenize;
+
+mod interpreter;
+mod parser;
+
+mod repl;
+use repl::{line_editor, print_logo};
+
+mod chars;
+
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    let (mut line_editor, prompt) = line_editor()?;
+    let mut interpreter = GerbilInterpreter::new()?;
+
+    print_logo();
+
+    loop {
+        let sig = line_editor.read_line(&*prompt);
+        match sig {
+            Ok(Signal::Success(buffer)) => {
+                let lexed = tokenize(&buffer);
+
+                // Evaluate in Gerbil
+                if let Err(e) = interpreter.eval(&buffer) {
+                    println!(
+                        "Error communicating with Gerbil: {}",
+                        e
+                    );
+                    continue;
+                }
+
+                // Print output
+                for line in interpreter.get_output() {
+                    println!("{}", line);
+                }
+                interpreter.clear_output();
+            }
+            Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
+                println!("\nAborted!");
+                interpreter.close()?;
+                break;
+            }
+            x => {
+                println!("Event: {:?}", x);
+            }
+        }
+    }
+
+    Ok(())
+}

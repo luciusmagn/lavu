@@ -1,0 +1,646 @@
+#+title: Implementation
+
+* AST Definition
+** TODO Create src/ast.rs to define your abstract syntax tree
+   Create the file structure for defining Scheme values and expressions.
+
+** TODO Define core expression types (literals, symbols, lists, etc.)
+*** TODO Define Value enum for all Scheme values
+    Create a comprehensive enum covering numbers, strings, symbols, etc.
+
+*** TODO Implement number types (integers, floats, rationals)
+    Support the full R5RS numeric tower if possible.
+
+*** TODO Create symbol type with potential interning system
+    Consider interning for performance benefits with symbol comparison.
+
+*** TODO Design pair/list structure for cons cells
+    Decide between shared mutable data or immutable structures.
+
+*** TODO Add vector, string, and character representations
+    Include all basic Scheme data types in your Value enum.
+
+** TODO Design representation for special forms
+*** TODO Create Expression enum for all expression types
+    Separate from values - represents things to be evaluated.
+
+*** TODO Define structures for variable references and definitions
+    Include both variable lookup and definition syntax.
+
+*** TODO Implement lambda representation with parameters and body
+    Store formal parameters list and body expressions.
+
+*** TODO Create conditional expressions (if, cond, etc.)
+    Support predicates and multiple branches with proper semantics.
+
+*** TODO Add representation for sequence expressions (begin)
+    Allow multiple expressions to be evaluated in sequence.
+
+*** TODO Include source location info in all AST nodes
+    Critical for error reporting - store file, line, column for each node.
+
+** TODO Create visitor traits for traversing/transforming the AST
+*** TODO Define visitor pattern interface for AST traversal
+    Create trait that can walk the entire AST structure.
+
+*** TODO Implement basic visitors (printer, equality checker)
+    Start with simple visitors to verify the pattern works.
+
+*** TODO Add transformation visitors for AST manipulation
+    Allow for AST modification/optimization passes.
+
+*** TODO Create utilities for common AST operations
+    Add helper methods for frequently used transformations.
+
+* Parser Implementation
+** TODO Complete src/parser.rs using chumsky
+   Build a complete parser using the chumsky combinators.
+
+** TODO Parse literals (numbers, strings, booleans)
+*** TODO Create parsers for different numeric formats
+    Handle integers, floats, fractions, and complex numbers.
+
+*** TODO Implement string parser with escape sequences
+    Support standard escape sequences (\n, \t, \", etc.).
+
+*** TODO Add boolean and character parsers
+    Parse #t, #f and character literals (#\a, #\space, etc.).
+
+*** TODO Support different numeric bases
+    Parse binary (#b), octal (#o), decimal (#d), and hex (#x) notations.
+
+** TODO Parse lists and dotted pairs
+*** TODO Implement basic list parser with balanced parentheses
+    Parse standard lists with correct nesting.
+
+*** TODO Add support for dotted pair notation
+    Handle improper lists with (a b . c) syntax.
+
+*** TODO Handle nested lists with proper recursion
+    Ensure deeply nested lists are parsed correctly.
+
+*** TODO Create proper error recovery for malformed lists
+    Provide helpful errors when parentheses are unbalanced.
+
+** TODO Handle quote, quasiquote, unquote syntax
+*** TODO Implement quote (') and syntactic sugar for quotation
+    Convert shorthand 'x to (quote x) in the AST.
+
+*** TODO Add quasiquote (`) with proper nesting
+    Support backquote for template creation.
+
+*** TODO Support unquote (,) and unquote-splicing (,@)
+    Handle interpolation within quasiquoted templates.
+
+*** TODO Convert shorthand forms to their full expressions
+    Expand all quote shorthand to their full forms in the AST.
+
+** TODO Parse vectors and other R5RS data types
+*** TODO Implement vector syntax (#(...))
+    Parse vector literals correctly.
+
+*** TODO Add support for all R5RS datum types
+    Ensure all standard data types are supported.
+
+*** TODO Handle comments properly (both line and block)
+    Filter out comments without affecting program semantics.
+
+*** TODO Create parsers for all specialized syntax
+    Support any specialized syntax required by R5RS.
+
+** TODO Integrate error reporting with ariadne
+*** TODO Track source spans for all parsed elements
+    Maintain exact source locations during parsing.
+
+*** TODO Generate descriptive error messages with context
+    Create human-readable error descriptions.
+
+*** TODO Use ariadne for visual error reporting
+    Leverage ariadne's visualization capabilities.
+
+*** TODO Implement error recovery strategies
+    Allow the parser to continue after certain errors.
+
+* Environment Design
+** TODO Create src/environment.rs
+   Define the module for variable environments.
+
+** TODO Implement lexical scoping with environment chains
+*** TODO Design Environment struct with parent reference
+    Create a structure that can reference its parent scope.
+
+*** TODO Create symbol-to-value mapping storage
+    Decide between HashMap, BTreeMap, or custom implementation.
+
+*** TODO Implement lookup that traverses the parent chain
+    Search current environment, then parent chain if not found.
+
+*** TODO Add child environment creation functionality
+    Support creating nested scopes with proper parent links.
+
+*** TODO Support proper variable shadowing
+    Ensure local variables correctly shadow outer variables.
+
+** TODO Design efficient symbol lookup mechanism
+*** TODO Implement symbol interning for performance
+    Use string interning to make symbol comparison faster.
+
+*** TODO Create optimized lookup algorithms
+    Consider caching or indexing for frequently used variables.
+
+*** TODO Consider caching frequent lookups
+    Add a cache for commonly accessed variables.
+
+*** TODO Add debugging aids for environment inspection
+    Create tools to inspect environment state during execution.
+
+** TODO Add support for environment mutation (set!)
+*** TODO Implement variable mutation with proper scoping
+    Allow changing existing variables in the correct scope.
+
+*** TODO Handle undefined variable errors
+    Generate appropriate errors for undefined variables.
+
+*** TODO Maintain distinction between definition and assignment
+    Track the difference between define and set! semantics.
+
+*** TODO Support various binding types
+    Consider implementing immutable/mutable distinctions.
+
+* Evaluation System
+** TODO Replace Gerbil wrapper with native evaluator
+*** TODO Create src/evaluator.rs module
+    Set up the core evaluation system.
+
+*** TODO Design core evaluation function/structure
+    Create the main evaluate(expr, env) function.
+
+*** TODO Remove Gerbil dependency completely
+    Fully replace the external interpreter with native code.
+
+*** TODO Implement main evaluation loop
+    Create the REPL's evaluation cycle.
+
+** TODO Implement core evaluation logic for each AST node
+*** TODO Create pattern matching for different expression types
+    Handle each expression variant appropriately.
+
+*** TODO Implement literal evaluation
+    Literals evaluate to themselves.
+
+*** TODO Add symbol resolution (environment lookup)
+    Symbols evaluate to their values in the environment.
+
+*** TODO Handle list evaluation and procedure application
+    Evaluate first element as procedure, rest as arguments.
+
+*** TODO Implement special form evaluation
+    Add special handling for forms that don't follow normal evaluation.
+
+** TODO Handle tail calls correctly (TCO)
+*** TODO Identify tail positions in expressions
+    Determine which expressions are in tail position.
+
+*** TODO Implement trampolining or continuation-passing style
+    Choose an implementation approach for TCO.
+
+*** TODO Optimize self-recursive calls
+    Add special handling for common recursive patterns.
+
+*** TODO Test with deeply recursive algorithms
+    Verify TCO works with factorial, Fibonacci, etc.
+
+** TODO Implement continuations if aiming for full R5RS
+*** TODO Design continuation data structure
+    Create a representation for captured execution states.
+
+*** TODO Implement call/cc and continuation capturing
+    Support capturing the current execution context.
+
+*** TODO Add support for continuation invocation
+    Allow invoking continuations to jump to captured points.
+
+*** TODO Test with continuation-heavy examples
+    Verify with coroutines, exceptions, and other patterns.
+
+*** TODO Handle complex control flows with continuations
+    Support advanced control patterns like backtracking.
+
+* Core Special Forms
+** TODO Implement define, set!, if, begin
+*** TODO Create variable definition logic
+    Handle both variable and function definitions.
+
+*** TODO Support procedure shorthand (define (f x) ...)
+    Convert to full lambda form internally.
+
+*** TODO Implement variable assignment
+    Update existing variables in the correct scope.
+
+*** TODO Add conditional evaluation with proper semantics
+    Implement if with proper Scheme semantics.
+
+*** TODO Handle sequence evaluation with begin
+    Evaluate multiple expressions in sequence.
+
+** TODO Add lambda with proper closure semantics
+*** TODO Design closure structure with environment capture
+    Capture the lexical environment at definition time.
+
+*** TODO Implement parameter binding mechanism
+    Bind arguments to parameters in a new environment.
+
+*** TODO Support rest parameters (...) syntax
+    Handle variadic functions with rest arguments.
+
+*** TODO Handle lexical scoping correctly
+    Ensure closures capture the right variables.
+
+*** TODO Add proper procedure application
+    Implement function application with argument evaluation.
+
+** TODO Implement cond, and, or forms
+*** TODO Create cond with else clause support
+    Support multi-branched conditionals with final else.
+
+*** TODO Add => result binding in cond
+    Support the => syntax for binding test results.
+
+*** TODO Implement short-circuiting and
+    Stop evaluation after first false value.
+
+*** TODO Implement short-circuiting or
+    Return first true value without evaluating rest.
+
+*** TODO Test with complex conditional expressions
+    Verify nested and complex conditional logic.
+
+** TODO Add let, let*, letrec variants
+*** TODO Implement let with parallel binding
+    All bindings are evaluated before any body expressions.
+
+*** TODO Create let* with sequential binding
+    Each binding is available to subsequent bindings.
+
+*** TODO Add letrec for recursive definitions
+    Support mutually recursive function definitions.
+
+*** TODO Support named let for iteration
+    Implement named let as syntactic sugar for recursion.
+
+*** TODO Test complex binding patterns
+    Verify all binding forms work as expected.
+
+** TODO Implement other standard special forms
+*** TODO Add do for iteration
+    Support structured iteration with test and body.
+
+*** TODO Implement case for pattern matching
+    Add multi-way branching based on value comparison.
+
+*** TODO Create delay for lazy evaluation
+    Support promise creation for delayed evaluation.
+
+*** TODO Support quasiquotation evaluation
+    Implement template evaluation with interpolation.
+
+*** TODO Add any other R5RS special forms
+    Verify all standard special forms are supported.
+
+* Standard Procedures
+** TODO Create src/stdlib.rs for standard procedures
+   Define the standard library implementation.
+
+** TODO Implement arithmetic
+*** TODO Create numeric operation implementations
+    Implement basic arithmetic operations.
+
+*** TODO Handle type promotion and coercion
+    Apply proper numeric type conversion rules.
+
+*** TODO Implement comparison operators
+    Add numeric comparison functions.
+
+*** TODO Add numeric predicates and tests
+    Include number?, integer?, etc.
+
+*** TODO Support full numeric tower if needed
+    Consider exact/inexact, complex numbers support.
+
+** TODO Add list operations
+*** TODO Implement basic pair operations
+    Add car, cdr, cons, and variants (cadr, etc.).
+
+*** TODO Add list construction and manipulation
+    Include list, append, length, etc.
+
+*** TODO Create higher-order list functions
+    Implement map, for-each, filter, etc.
+
+*** TODO Implement list utility functions
+    Add member, assoc, and related functions.
+
+*** TODO Add association list operations
+    Support association lists for simple key-value usage.
+
+** TODO Implement predicates
+*** TODO Create identity predicate (eq?)
+    Use pointer identity for eq? comparison.
+
+*** TODO Add value equality (eqv?)
+    Compare values with type-specific rules.
+
+*** TODO Implement structural equality (equal?)
+    Add deep structural comparison.
+
+*** TODO Add type predicates for all data types
+    Include pair?, vector?, string?, etc.
+
+*** TODO Support compound predicates
+    Add and/or predicates combinations.
+
+** TODO Add string/character procedures
+*** TODO Implement string manipulation functions
+    Include substring, string-append, etc.
+
+*** TODO Create string comparison operations
+    Add string=?, string<?, etc.
+
+*** TODO Add character operations and predicates
+    Include char=?, char-upcase, etc.
+
+*** TODO Support string<->list conversions
+    Add string->list and list->string.
+
+*** TODO Implement string utility functions
+    Include other standard string operations.
+
+** TODO Implement vectors, port I/O procedures
+*** TODO Create vector operations
+    Include make-vector, vector-ref, etc.
+
+*** TODO Add basic file I/O functionality
+    Support file reading/writing operations.
+
+*** TODO Implement port operations
+    Add read, write, display, etc.
+
+*** TODO Support standard input/output ports
+    Handle console I/O properly.
+
+*** TODO Add formatted output capabilities
+    Support output formatting features.
+
+* Error Handling
+** TODO Create meaningful error types in src/errors.rs
+*** TODO Define error type hierarchy
+    Create a structured error system with categories.
+
+*** TODO Create variants for different error categories
+    Include syntax, runtime, type errors, etc.
+
+*** TODO Implement standard error traits
+    Support std::error::Error and Display.
+
+*** TODO Add context and source information
+    Include contextual information in errors.
+
+*** TODO Create custom error formatter
+    Format errors in a clear, helpful way.
+
+** TODO Track source locations throughout evaluation
+*** TODO Propagate source info through parsing and evaluation
+    Maintain location data at each step.
+
+*** TODO Track current expression in evaluation
+    Know which expression caused an error.
+
+*** TODO Generate stack traces with source locations
+    Create helpful stack traces for debugging.
+
+*** TODO Add file/line/column tracking
+    Track exact source positions.
+
+** TODO Produce helpful error messages with ariadne
+*** TODO Create error report formatters
+    Design how errors are presented to users.
+
+*** TODO Add syntax highlighting for error context
+    Highlight relevant code in error messages.
+
+*** TODO Implement suggestion system
+    Offer suggestions for fixing common errors.
+
+*** TODO Create multi-line error visualization
+    Show errors in context with surrounding code.
+
+*** TODO Support error code explanations
+    Add detailed explanations for error types.
+
+** TODO Handle runtime errors gracefully
+*** TODO Implement proper exception handling
+    Catch and report errors without crashing.
+
+*** TODO Add recovery mechanisms
+    Allow continuing after certain types of errors.
+
+*** TODO Create detailed diagnostic information
+    Provide extensive debug info for errors.
+
+*** TODO Support error continuation
+    Allow proceeding after errors when possible.
+
+*** TODO Add debugging facilities for runtime errors
+    Create tools to diagnose runtime issues.
+
+* REPL Improvements
+** TODO Connect REPL to your new interpreter
+*** TODO Replace Gerbil calls with your evaluator
+    Switch to your native evaluation.
+
+*** TODO Update main loop for native evaluation
+    Modify the REPL loop to use your evaluator.
+
+*** TODO Maintain state between inputs
+    Preserve environment across multiple inputs.
+
+*** TODO Handle multi-line expressions properly
+    Support entering expressions across multiple lines.
+
+** TODO Add debugging commands
+*** TODO Create meta-commands with prefix
+    Add commands like ,help, ,env, ,trace.
+
+*** TODO Implement environment inspection
+    Allow viewing current environment bindings.
+
+*** TODO Add expression evaluation tracing
+    Show step-by-step evaluation for debugging.
+
+*** TODO Create value inspection commands
+    Add ways to examine complex data structures.
+
+*** TODO Add support for loading files
+    Allow loading Scheme files into the environment.
+
+** TODO Implement tab completion for defined identifiers
+*** TODO Track all available symbols for completion
+    Maintain a list of defined symbols for completion.
+
+*** TODO Integrate with reedline completion
+    Connect to the existing reedline completion system.
+
+*** TODO Add contextual completion suggestions
+    Offer context-aware suggestions when possible.
+
+*** TODO Support partial matching
+    Complete partially typed identifiers.
+
+*** TODO Add documentation hints on completion
+    Show brief docs when completing standard functions.
+
+** TODO Add pretty-printing for complex data structures
+*** TODO Create custom formatters for all data types
+    Format each data type clearly and consistently.
+
+*** TODO Handle circular references
+    Detect and appropriately format circular structures.
+
+*** TODO Add syntax highlighting for output
+    Colorize output for better readability.
+
+*** TODO Implement customizable output format
+    Allow users to configure output formatting.
+
+*** TODO Add truncation for large structures
+    Avoid overwhelming output with large data structures.
+
+* Testing Framework
+** TODO Create comprehensive unit tests
+*** TODO Set up test modules for each component
+    Create a test structure that mirrors your code.
+
+*** TODO Write parser unit tests
+    Test parsing of various expressions and edge cases.
+
+*** TODO Create evaluator test suite
+    Test evaluation of expressions with known outputs.
+
+*** TODO Test standard library functions
+    Verify all standard procedures work as expected.
+
+*** TODO Add error case testing
+    Explicitly test that errors are handled properly.
+
+** TODO Add integration tests with standard Scheme examples
+*** TODO Create test runner for .scm files
+    Support running external Scheme files as tests.
+
+*** TODO Implement test cases for common algorithms
+    Test sorting, searching, and other algorithms.
+
+*** TODO Add R5RS example testing
+    Test with examples from the R5RS specification.
+
+*** TODO Create regression test suite
+    Prevent regressions when making changes.
+
+*** TODO Test complex program evaluation
+    Verify more complex programs work correctly.
+
+** TODO Implement R5RS test suite
+*** TODO Port official R5RS tests if available
+    Find and adapt standard R5RS tests.
+
+*** TODO Create conformance tests for each feature
+    Test each R5RS feature explicitly.
+
+*** TODO Test standard procedure implementations
+    Verify all standard procedures behave correctly.
+
+*** TODO Verify special form behavior
+    Test that special forms follow R5RS semantics.
+
+*** TODO Generate conformance report
+    Create a report showing R5RS compliance level.
+
+** TODO Add performance benchmarks
+*** TODO Create benchmarking framework
+    Build tools for measuring interpreter performance.
+
+*** TODO Implement standard algorithm benchmarks
+    Test performance with common algorithms.
+
+*** TODO Compare with other Scheme implementations
+    Benchmark against established implementations.
+
+*** TODO Track memory usage
+    Monitor memory consumption during evaluation.
+
+*** TODO Add profiling for optimization
+    Identify and address performance bottlenecks.
+
+* Documentation & Packaging
+** TODO Add documentation comments to all public APIs
+*** TODO Document all types and functions
+    Add doc comments to all public items.
+
+*** TODO Include examples in documentation
+    Provide usage examples for each component.
+
+*** TODO Add cross-references between related items
+    Link related functionality in documentation.
+
+*** TODO Document error conditions
+    Explain when and why errors can occur.
+
+*** TODO Create module-level documentation
+    Add overview documentation for each module.
+
+** TODO Create README with usage examples
+*** TODO Write project overview
+    Explain what your implementation is and does.
+
+*** TODO Add installation instructions
+    Provide clear setup instructions.
+
+*** TODO Create quick-start examples
+    Show basic usage with simple examples.
+
+*** TODO Document command-line options
+    Explain available CLI options.
+
+*** TODO Include development workflow
+    Explain how to contribute to the project.
+
+** TODO Document any deviations from R5RS
+*** TODO Create compatibility notes
+    List any compatibility considerations.
+
+*** TODO List intentional differences
+    Document where you deliberately differ from R5RS.
+
+*** TODO Document extensions beyond R5RS
+    Explain any additional features you've added.
+
+*** TODO Add compatibility mode information
+    Document any strict R5RS mode if available.
+
+*** TODO Create migration guide from other Schemes
+    Help users coming from other Scheme implementations.
+
+** TODO Prepare for potential publishing to crates.io
+*** TODO Choose appropriate license
+    Select and document a license for your project.
+
+*** TODO Update package metadata
+    Set version, authors, repository fields, etc.
+
+*** TODO Create example programs
+    Add example programs showing usage.
+
+*** TODO Add keywords and categories
+    Set appropriate metadata for searchability.
+
+*** TODO Set up documentation generation
+    Configure automatic docs.rs generation.
