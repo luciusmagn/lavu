@@ -11,6 +11,7 @@ mod parser;
 mod repl;
 use repl::{line_editor, print_logo};
 
+mod ast;
 mod chars;
 
 fn main() -> Result<()> {

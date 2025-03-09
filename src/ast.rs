@@ -1,6 +1,8 @@
-use num_bigint::BigInt;
-use num_complex::Complex;
-use num_rational::BigRational;
+use bigdecimal::BigDecimal;
+use num::BigInt;
+use num::BigRational;
+use num::Complex;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -72,8 +74,8 @@ pub enum Expr {
 /// Symbol with hygiene information
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Symbol {
-    name: String,
-    uid: Option<usize>, // For hygiene in macros
+    pub name: String,
+    pub uid: Option<usize>, // For hygiene in macros
 }
 
 /// Definition forms
@@ -192,8 +194,8 @@ pub enum Template {
 /// Port types for I/O
 #[derive(Clone, Debug)]
 pub enum Port {
-    Input(std::fs::File),
-    Output(std::fs::File),
+    Input(Rc<std::fs::File>),
+    Output(Rc<std::fs::File>),
     InputString(String, usize),
     OutputString(RefCell<String>),
 }

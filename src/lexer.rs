@@ -29,7 +29,7 @@ impl Default for LexerError {
     }
 }
 
-#[derive(Logos, Debug, PartialEq, EnumIs)]
+#[derive(Logos, Debug, PartialEq, EnumIs, Hash, Eq, Clone)]
 #[logos(error = LexerError)]
 pub enum Token {
     // Identifiers
@@ -270,6 +270,18 @@ mod tests {
         test_single("a34kTMNs", Token::is_identifier)?;
 
         test_single("...", Token::is_identifier)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_linecomment() -> Result<()> {
+        test_single(
+            ";;; The Fact procedure computes the factorial",
+            Token::is_line_comment,
+        )?;
+        test_single(";;", Token::is_line_comment)?;
+        test_single(";", Token::is_line_comment)?;
 
         Ok(())
     }
