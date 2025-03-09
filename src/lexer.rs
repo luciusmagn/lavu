@@ -34,7 +34,7 @@ impl Default for LexerError {
 pub enum Token {
     // Identifiers
     #[regex(
-        r"[a-zA-Z!$%&*/:<=>?^_~-][a-zA-Z0-9!$%&*/:<>=?^_~+-]*",
+        r"([a-zA-Z!$%&*/:<=>?^_~+@-][a-zA-Z0-9!$%&*/:<>=?^_~+@-]*)|(\.\.\.)",
         |lex| lex.slice().to_string()
     )]
     Identifier(String),
@@ -204,6 +204,21 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use color_eyre::eyre::ensure;
+    use color_eyre::Result;
+
+    #[track_caller]
+    fn test_single(
+        s: &str,
+        pred: impl Fn(&Token) -> bool,
+    ) -> Result<()> {
+        let tokens = tokenize(s);
+
+        ensure!(tokens.len() > 0, "no tokens parsed: {}", s);
+        ensure!(pred(&tokens[0].0), "test failed: {}", s);
+
+        Ok(())
+    }
 
     #[test]
     fn test_identifiers() {
@@ -219,6 +234,44 @@ mod tests {
         assert_eq!(tokens[4].1, "set!");
         assert!(tokens[6].0.is_identifier());
         assert_eq!(tokens[6].1, "string->symbol");
+    }
+
+    #[test]
+    fn test_identifiers2() -> Result<()> {
+        test_single("!", Token::is_identifier)?;
+        test_single("$", Token::is_identifier)?;
+        test_single("%", Token::is_identifier)?;
+        test_single("&", Token::is_identifier)?;
+        test_single("*", Token::is_identifier)?;
+        test_single("+", Token::is_identifier)?;
+        test_single("-", Token::is_identifier)?;
+        test_single("/", Token::is_identifier)?;
+        test_single(":", Token::is_identifier)?;
+        test_single("<", Token::is_identifier)?;
+        test_single("=", Token::is_identifier)?;
+        test_single(">", Token::is_identifier)?;
+        test_single("?", Token::is_identifier)?;
+        test_single("@", Token::is_identifier)?;
+        test_single("^", Token::is_identifier)?;
+        test_single("_", Token::is_identifier)?;
+        test_single("~", Token::is_identifier)?;
+        // dot omitted because it is not a valid identifier on its own
+
+        test_single("lambda", Token::is_identifier)?;
+        test_single("list->vector", Token::is_identifier)?;
+        test_single("<=?", Token::is_identifier)?;
+        test_single(
+            "the-word-recursion-has-many-meanings",
+            Token::is_identifier,
+        )?;
+        test_single("q", Token::is_identifier)?;
+        test_single("soup", Token::is_identifier)?;
+        test_single("V17a", Token::is_identifier)?;
+        test_single("a34kTMNs", Token::is_identifier)?;
+
+        test_single("...", Token::is_identifier)?;
+
+        Ok(())
     }
 
     #[test]
