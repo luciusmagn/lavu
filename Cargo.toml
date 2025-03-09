@@ -14,4 +14,5 @@ logos = "0.15.0"
 nu-ansi-term = "0.50.1"
 num = "0.4.3"
 reedline = { version = "0.38.0", features = ["system_clipboard", "sqlite"] }
+strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"

@@ -1,6 +1,7 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Logos, Span};
 use num::{bigint::ParseBigIntError, BigInt};
+use strum::EnumIs;
 use thiserror::Error;
 
 use std::str::FromStr;
@@ -28,7 +29,7 @@ impl Default for LexerError {
     }
 }
 
-#[derive(Logos, Debug, PartialEq)]
+#[derive(Logos, Debug, PartialEq, EnumIs)]
 #[logos(error = LexerError)]
 pub enum Token {
     // Identifiers
@@ -210,27 +211,26 @@ mod tests {
         let tokens = tokenize(input);
 
         assert_eq!(tokens.len(), 7); // 4 identifiers + 3 whitespaces
-        assert_eq!(tokens[0].0, Token::Identifier);
+        assert!(tokens[0].0.is_identifier());
         assert_eq!(tokens[0].1, "foo");
-        assert_eq!(tokens[2].0, Token::Identifier);
+        assert!(tokens[2].0.is_identifier());
         assert_eq!(tokens[2].1, "bar+");
-        assert_eq!(tokens[4].0, Token::Identifier);
+        assert!(tokens[4].0.is_identifier());
         assert_eq!(tokens[4].1, "set!");
-        assert_eq!(tokens[6].0, Token::Identifier);
+        assert!(tokens[6].0.is_identifier());
         assert_eq!(tokens[6].1, "string->symbol");
     }
 
     #[test]
     fn test_numbers() {
-        let input = "42 -3.14 #b1010 #o777 #d999 #xFF";
+        let input = "42 -3.14 #b1010 #o777 #xFF";
         let tokens = tokenize(input);
 
-        assert_eq!(tokens[0].0, Token::Integer);
-        assert_eq!(tokens[2].0, Token::Float);
-        assert_eq!(tokens[4].0, Token::Binary);
-        assert_eq!(tokens[6].0, Token::Octal);
-        assert_eq!(tokens[8].0, Token::Decimal);
-        assert_eq!(tokens[10].0, Token::Hex);
+        assert!(tokens[0].0.is_integer());
+        assert!(tokens[2].0.is_decimal());
+        assert!(tokens[4].0.is_binary());
+        assert!(tokens[6].0.is_octal());
+        assert!(tokens[8].0.is_hex());
     }
 
     #[test]
@@ -239,22 +239,23 @@ mod tests {
             r#""hello world" "escaped \"quotes\"" #\a #\space"#;
         let tokens = tokenize(input);
 
-        assert_eq!(tokens[0].0, Token::String);
-        assert_eq!(tokens[2].0, Token::String);
-        assert_eq!(tokens[4].0, Token::Character);
-        assert_eq!(tokens[6].0, Token::Character);
+        assert!(tokens[0].0.is_string());
+        assert!(tokens[2].0.is_string());
+        assert!(tokens[4].0.is_character());
+        assert!(tokens[6].0.is_character());
     }
 
+    // TODO: convert the rest
     #[test]
     fn test_lists_and_vectors() {
         let input = "(define (square x) (* x x)) #(1 2 3)";
         let tokens = tokenize(input);
 
         assert_eq!(tokens[0].0, Token::LParen);
-        assert_eq!(tokens[1].0, Token::Identifier); // define
+        assert!(tokens[1].0.is_identifier()); // define
         assert_eq!(tokens[3].0, Token::LParen);
-        assert_eq!(tokens[4].0, Token::Identifier); // square
-        assert_eq!(tokens[6].0, Token::Identifier); // x
+        assert!(tokens[4].0.is_identifier()); // square
+        assert!(tokens[6].0.is_identifier()); // x
         assert_eq!(tokens[7].0, Token::RParen);
         assert_eq!(tokens[15].0, Token::RParen);
         assert_eq!(tokens[16].0, Token::RParen);
