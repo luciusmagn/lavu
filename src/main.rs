@@ -18,7 +18,7 @@ mod chars;
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    flungus();
+    //flungus();
 
     let (mut line_editor, prompt) = line_editor()?;
     let mut interpreter = GerbilInterpreter::new()?;
@@ -44,8 +44,11 @@ fn main() -> Result<()> {
                 // Try to parse the input
                 match parser::parse(&lexed) {
                     Ok(expressions) => {
+                        println!("lexed tokens:");
                         println!("{:#?}", lexed);
+                        println!("parsed ast:");
                         println!("{:#?}", expressions);
+                        println!("ariadne diagnostics:");
                         ariadne_yap(&buffer, &lexed, &expressions);
 
                         // Evaluate in Gerbil (for now)

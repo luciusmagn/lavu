@@ -93,6 +93,111 @@ pub fn ariadne_yap(
                     children.as_slice(),
                 );
             }
+            SExp::Vector(children, span) => {
+                Report::build(ReportKind::Advice, ("input.ss", 0..input.len()))
+                    .with_message("Parsed a vector")
+                    .with_label(
+                        Label::new((
+                            "input.ss",
+                            tokens_nws[span.start].2.start
+                                ..tokens_nws[span.end - 1].2.end,
+                        ))
+                        .with_message("This is a vector")
+                        .with_color(Color::Green),
+                    )
+                    .finish()
+                    .eprint(("input.ss", Source::from(input)));
+
+                ariadne_yap(
+                    input,  //&input[tokens[span.start].2.start..tokens[span.end].2.end],
+                    tokens, //&tokens[span.clone()],
+                    children.as_slice(),
+                );
+            }
+            SExp::Quote(children, span) => {
+                Report::build(ReportKind::Advice, ("input.ss", 0..input.len()))
+                    .with_message("Parsed a quoted expression")
+                    .with_label(
+                        Label::new((
+                            "input.ss",
+                            tokens_nws[span.start].2.start
+                                ..tokens_nws[span.end - 1].2.end,
+                        ))
+                        .with_message("This is a quoted expression")
+                        .with_color(Color::Green),
+                    )
+                    .finish()
+                    .eprint(("input.ss", Source::from(input)));
+
+                ariadne_yap(
+                    input,  //&input[tokens[span.start].2.start..tokens[span.end].2.end],
+                    tokens, //&tokens[span.clone()],
+                    &[children.as_ref().clone()],
+                );
+            }
+            SExp::Quasiquote(children, span) => {
+                Report::build(ReportKind::Advice, ("input.ss", 0..input.len()))
+                    .with_message("Parsed a quasiquote")
+                    .with_label(
+                        Label::new((
+                            "input.ss",
+                            tokens_nws[span.start].2.start
+                                ..tokens_nws[span.end - 1].2.end,
+                        ))
+                        .with_message("This is a quasiquote")
+                        .with_color(Color::Green),
+                    )
+                    .finish()
+                    .eprint(("input.ss", Source::from(input)));
+
+                ariadne_yap(
+                    input,  //&input[tokens[span.start].2.start..tokens[span.end].2.end],
+                    tokens, //&tokens[span.clone()],
+                    &[children.as_ref().clone()],
+                );
+            }
+            SExp::Unquote(children, span) => {
+                Report::build(ReportKind::Advice, ("input.ss", 0..input.len()))
+                    .with_message("Parsed an unquote expression")
+                    .with_label(
+                        Label::new((
+                            "input.ss",
+                            tokens_nws[span.start].2.start
+                                ..tokens_nws[span.end - 1].2.end,
+                        ))
+                        .with_message("This is an unquote")
+                        .with_color(Color::Green),
+                    )
+                    .finish()
+                    .eprint(("input.ss", Source::from(input)));
+
+                ariadne_yap(
+                    input,  //&input[tokens[span.start].2.start..tokens[span.end].2.end],
+                    tokens, //&tokens[span.clone()],
+                    &[children.as_ref().clone()],
+                );
+            }
+            SExp::UnquoteSplicing(children, span) => {
+                Report::build(ReportKind::Advice, ("input.ss", 0..input.len()))
+                    .with_message("Parsed an unquote splice")
+                    .with_label(
+                        Label::new((
+                            "input.ss",
+                            tokens_nws[span.start].2.start
+                                ..tokens_nws[span.end - 1].2.end,
+                        ))
+                        .with_message("This is an unquote splice")
+                        .with_color(Color::Green),
+                    )
+                    .finish()
+                    .eprint(("input.ss", Source::from(input)));
+
+                ariadne_yap(
+                    input,  //&input[tokens[span.start].2.start..tokens[span.end].2.end],
+                    tokens, //&tokens[span.clone()],
+                    &[children.as_ref().clone()],
+                );
+            }
             _ => unimplemented!(),
         }
     }
