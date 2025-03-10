@@ -1,6 +1,8 @@
 use ariadne::{Color, Label, Report, ReportKind, Source};
+use bigdecimal::BigDecimal;
 use color_eyre::eyre::Result;
 use logos::Span as LogosSpan;
+use num::{complex, BigInt};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -12,10 +14,11 @@ pub enum Atom {
     Identifier(String),
     Integer(num::BigInt),
     Decimal(bigdecimal::BigDecimal),
+    Real((BigInt, BigInt)),
+    Complex(complex::Complex<BigDecimal>),
     String(String),
     Boolean(bool),
     Character(char),
-    Special(Token),
 }
 
 #[derive(Debug, PartialEq, Clone)]

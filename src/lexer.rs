@@ -1,12 +1,15 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Logos, Span};
-use num::{BigInt, bigint::ParseBigIntError};
+use num::{
+    bigint::ParseBigIntError, complex::ParseComplexError, BigInt, Complex, Num,
+};
 use strum::EnumIs;
 use thiserror::Error;
 
+use std::rc::Rc;
 use std::str::FromStr;
 
-use crate::chars::{ParseCharError, parse_char};
+use crate::chars::{parse_char, ParseCharError};
 
 #[derive(Error, PartialEq, Debug, Clone)]
 pub enum LexerError {
@@ -18,6 +21,9 @@ pub enum LexerError {
 
     #[error("char parse error: {0}")]
     CharParseError(#[from] ParseCharError),
+
+    #[error("complex number parse error: {0}")]
+    ComplexNumParseError(#[from] Rc<ParseComplexError<ParseBigDecimalError>>),
 
     #[error("other error")]
     DefaultError,
@@ -48,19 +54,53 @@ pub enum Token {
     Integer(BigInt),
 
     #[regex(
+        r"[+-]?[0-9]+/[0-9]+",
+        priority = 3,
+        callback = |lex| {
+            Ok::<_, ParseBigIntError>((
+                BigInt::from_str(lex.slice().split("/").next().unwrap())?,
+                BigInt::from_str(lex.slice().split("/").nth(1).unwrap())?
+            ))
+        }
+    )]
+    Real((BigInt, BigInt)),
+
+    #[regex(
+        r"[+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
+        |lex| Complex::from_str(lex.slice())
+            .map_err(|e| Rc::new(e))
+    )]
+    Complex(Complex<BigDecimal>),
+
+    #[regex(
         r"[+-]?[0-9]+\.[0-9]+",
         |lex| BigDecimal::from_str(lex.slice())
     )]
     Decimal(BigDecimal),
 
-    #[regex(r"#[bB][01]+")]
-    Binary,
+    #[regex(
+        r"#[bB][01]+",
+        |lex| BigInt::from_str_radix(&lex.slice()[2..], 2)
+    )]
+    Binary(BigInt),
 
-    #[regex(r"#[oO][0-7]+")]
-    Octal,
+    #[regex(
+        r"#[oO][0-7]+",
+        |lex| BigInt::from_str_radix(&lex.slice()[2..], 8)
+    )]
+    Octal(BigInt),
 
-    #[regex(r"#[xX][0-9a-fA-F]+")]
-    Hex,
+    #[regex(
+        r"#[xX][0-9a-fA-F]+",
+        |lex| BigInt::from_str_radix(&lex.slice()[2..], 16)
+    )]
+    Hex(BigInt),
+
+    #[regex(
+        r"#[dD][0-9]+",
+        |lex| BigInt::from_str(&lex.slice()[2..])
+    )]
+    DecInteger(BigInt),
 
     // Strings
     #[regex(
@@ -204,8 +244,8 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::Result;
     use color_eyre::eyre::ensure;
+    use color_eyre::Result;
 
     #[track_caller]
     fn test_single(s: &str, pred: impl Fn(&Token) -> bool) -> Result<()> {

@@ -12,8 +12,8 @@ use std::borrow::Cow;
 use std::env;
 
 use crate::lexer::{
-    Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate,
-    is_special_form,
+    is_conversion, is_keywordy, is_mutator, is_operator, is_predicate,
+    is_special_form, Token,
 };
 
 pub fn history() -> Result<Box<dyn History>> {
@@ -63,9 +63,9 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                     },
                     Ok(Token::Integer(_))
                     | Ok(Token::Decimal(_))
-                    | Ok(Token::Binary)
-                    | Ok(Token::Octal)
-                    | Ok(Token::Hex) => Style::new().fg(Color::Green),
+                    | Ok(Token::Binary(_))
+                    | Ok(Token::Octal(_))
+                    | Ok(Token::Hex(_)) => Style::new().fg(Color::Green),
                     Ok(Token::String(_)) => Style::new().fg(Color::LightRed),
                     Ok(Token::Character(_)) => {
                         Style::new().fg(Color::LightCyan).italic()

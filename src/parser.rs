@@ -1,4 +1,5 @@
 use chumsky::prelude::*;
+use chumsky::primitive::*;
 use color_eyre::Result;
 use logos::Span;
 
@@ -8,6 +9,30 @@ use crate::ast1::{Atom, SExp};
 use crate::lexer::Token;
 
 type TokenWithSpan<'a> = (Token, &'a str, Span);
+
+pub fn atom() -> FilterMap<
+    impl Fn(Range<usize>, Token) -> Result<SExp, Simple<Token>>,
+    Simple<Token>,
+> {
+    filter_map(|span: Range<usize>, token: Token| match token {
+        Token::Identifier(name) => Ok(SExp::Atom(Atom::Identifier(name), span)),
+        Token::Integer(n) => Ok(SExp::Atom(Atom::Integer(n), span)),
+        Token::Decimal(d) => Ok(SExp::Atom(Atom::Decimal(d), span)),
+        Token::Complex(c) => Ok(SExp::Atom(Atom::Complex(c), span)),
+        Token::Real((n1, n2)) => Ok(SExp::Atom(Atom::Real((n1, n2)), span)),
+        Token::String(s) => Ok(SExp::Atom(Atom::String(s), span)),
+        Token::Character(c) => Ok(SExp::Atom(Atom::Character(c), span)),
+        Token::True => Ok(SExp::Atom(Atom::Boolean(true), span)),
+        Token::False => Ok(SExp::Atom(Atom::Boolean(false), span)),
+        Token::Binary(integer)
+        | Token::Octal(integer)
+        | Token::Hex(integer) => Ok(SExp::Atom(Atom::Integer(integer), span)),
+        _ => Err(Simple::custom(
+            span,
+            format!("Expected atom, got {:?}", token),
+        )),
+    })
+}
 
 pub fn parse(
     tokens: &[TokenWithSpan],
@@ -28,23 +53,6 @@ pub fn parse(
         .collect();
 
     // Build the parser
-    let atom = filter_map(|span: Range<usize>, token: Token| match token {
-        Token::Identifier(name) => Ok(SExp::Atom(Atom::Identifier(name), span)),
-        Token::Integer(n) => Ok(SExp::Atom(Atom::Integer(n), span)),
-        Token::Decimal(d) => Ok(SExp::Atom(Atom::Decimal(d), span)),
-        Token::String(s) => Ok(SExp::Atom(Atom::String(s), span)),
-        Token::Character(c) => Ok(SExp::Atom(Atom::Character(c), span)),
-        Token::True => Ok(SExp::Atom(Atom::Boolean(true), span)),
-        Token::False => Ok(SExp::Atom(Atom::Boolean(false), span)),
-        Token::Binary | Token::Octal | Token::Hex => {
-            Ok(SExp::Atom(Atom::Special(token), span))
-        }
-        _ => Err(Simple::custom(
-            span,
-            format!("Expected atom, got {:?}", token),
-        )),
-    });
-
     let expr = recursive(|expr| {
         let list = expr
             .clone()
@@ -80,7 +88,7 @@ pub fn parse(
             });
 
         choice((
-            atom,
+            atom(),
             list,
             vector,
             quote,
