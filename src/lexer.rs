@@ -178,7 +178,7 @@ pub enum Token {
 pub fn special_forms() -> &'static [&'static str] {
     &[
         "define",
-        "set!",
+        //"set!",
         "lambda",
         "if",
         "cond",

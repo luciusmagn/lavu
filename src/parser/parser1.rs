@@ -5,7 +5,7 @@ use logos::Span;
 
 use std::ops::Range;
 
-use crate::ast1::{Atom, SExp};
+use crate::ast::ast1::{Atom, SExp};
 use crate::lexer::Token;
 
 type TokenWithSpan<'a> = (Token, &'a str, Span);

@@ -1,4 +1,3 @@
-use ast1::ariadne_yap;
 use color_eyre::eyre::Result;
 use interpreter::GerbilInterpreter;
 use reedline::Signal;
@@ -7,18 +6,20 @@ mod lexer;
 use lexer::tokenize;
 
 mod interpreter;
+
 mod parser;
+use parser::parser1;
 
 mod repl;
 use repl::{line_editor, print_logo};
 
-mod ast1;
+mod ast;
+use ast::ast1::ariadne_yap;
+
 mod chars;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-
-    //flungus();
 
     let (mut line_editor, prompt) = line_editor()?;
     let mut interpreter = GerbilInterpreter::new()?;
@@ -32,9 +33,9 @@ fn main() -> Result<()> {
                 let lexed = tokenize(&buffer);
 
                 // Check for unclosed expressions
-                if let Some(error_idx) = parser::find_unclosed_sexp(&lexed) {
+                if let Some(error_idx) = parser1::find_unclosed_sexp(&lexed) {
                     if let Err(e) =
-                        parser::create_diagnostic(&buffer, &lexed, error_idx)
+                        parser1::create_diagnostic(&buffer, &lexed, error_idx)
                     {
                         println!("Error creating diagnostic: {}", e);
                     }
@@ -42,7 +43,7 @@ fn main() -> Result<()> {
                 }
 
                 // Try to parse the input
-                match parser::parse(&lexed) {
+                match parser1::parse(&lexed) {
                     Ok(expressions) => {
                         println!("lexed tokens:");
                         println!("{:#?}", lexed);
