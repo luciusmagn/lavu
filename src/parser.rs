@@ -1,27 +1,11 @@
 use chumsky::prelude::*;
 use color_eyre::Result;
 use logos::Span;
-use thiserror::Error;
 
 use std::ops::Range;
 
-use crate::ast::{Atom, SExp};
+use crate::ast1::{Atom, SExp};
 use crate::lexer::Token;
-
-#[derive(Debug, Error)]
-pub enum ParseError {
-    #[error("Unexpected token: {0:?}")]
-    UnexpectedToken(Token),
-
-    #[error("Unclosed delimiter at position {0}")]
-    UnclosedDelimiter(usize),
-
-    #[error("Unexpected end of input")]
-    UnexpectedEOF,
-
-    #[error("Other parse error: {0}")]
-    Other(String),
-}
 
 type TokenWithSpan<'a> = (Token, &'a str, Span);
 
@@ -41,12 +25,6 @@ pub fn parse(
     let tokens_only: Vec<Token> = filtered_tokens
         .iter()
         .map(|(token, _, _)| token.clone())
-        .collect();
-
-    // Keep a mapping of token positions to their spans
-    let spans: Vec<Range<usize>> = filtered_tokens
-        .iter()
-        .map(|(_, _, span)| span.clone())
         .collect();
 
     // Build the parser

@@ -1,4 +1,4 @@
-use ast::ariadne_yap;
+use ast1::ariadne_yap;
 use color_eyre::eyre::Result;
 use interpreter::GerbilInterpreter;
 use reedline::Signal;
@@ -12,7 +12,7 @@ mod parser;
 mod repl;
 use repl::{line_editor, print_logo};
 
-mod ast;
+mod ast1;
 mod chars;
 
 fn main() -> Result<()> {
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
                         println!("parsed ast:");
                         println!("{:#?}", expressions);
                         println!("ariadne diagnostics:");
-                        ariadne_yap(&buffer, &lexed, &expressions);
+                        ariadne_yap(&buffer, &lexed, &expressions)?;
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
@@ -80,43 +80,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn flungus() {
-    println!();
-    println!();
-    println!();
-    println!();
-
-    let input = r#"
-(define brungus 'dung)
-
-;; Factorial function
-(define (factorial n)
-  (if (= n 0)
-      1
-      (* n (factorial (- n 1)))))
-
-;; Map function
-(define (my-map f lst)
-  (if (null? lst)
-      '()
-      (cons (f (car lst))
-            (my-map f (cdr lst))))
-
-;; Simple list length
-(define (length lst)
-  (if (null? lst)
-      0
-      (+ 1 (length (cdr lst)))))
-"#;
-
-    let lexed = tokenize(&input);
-
-    // Check for unclosed expressions
-    if let Some(error_idx) = parser::find_unclosed_sexp(&lexed) {
-        if let Err(e) = parser::create_diagnostic(&input, &lexed, error_idx) {
-            println!("Error creating diagnostic: {}", e);
-        }
-    }
 }
