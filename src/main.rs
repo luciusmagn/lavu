@@ -48,12 +48,14 @@ fn main() -> Result<()> {
                 // Try to parse the input
                 match parser1::parse(&lexed) {
                     Ok(expressions) => {
+                        /*
                         println!("lexed tokens:");
                         println!("{:#?}", lexed);
                         println!("parsed ast:");
                         println!("{:#?}", expressions);
                         println!("ariadne diagnostics:");
                         ariadne_yap(&buffer, &lexed, &expressions)?;
+                        */
 
                         let parsed2 =
                             parser2::parse(&buffer, &lexed, &expressions)?;
@@ -71,7 +73,10 @@ fn main() -> Result<()> {
                         let parsed5 =
                             parser5::parse(&buffer, &lexed, &parsed4)?;
 
-                        println!("{parsed5:#?}");
+                        let parsed6 =
+                            parser6::parse(&buffer, &lexed, &parsed5)?;
+
+                        println!("{:#?}", parsed6.forms);
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
