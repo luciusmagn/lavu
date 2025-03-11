@@ -1,0 +1,65 @@
+* Lavu Scheme
+** Project Goals
+Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
+- Maximum comprehensibility through tiny, well-defined passes
+- Excellent REPL experience with advanced inspection features
+- Support for type inference and analysis
+- Ability to query procedures and values for their types (similar to Idris's :t feature)
+- Support the whole R5RS standard
+
+** Implementation Philosophy
+- Take tiny steps with well-defined scope
+- Prioritize inspectability over performance
+  - No optimizations at all
+- Build strong foundations for type analysis
+- Create a learning tool rather than a production compiler
+
+** Architecture
+- AST-based compiler with multiple small transformation passes
+- Symbol table with rich metadata
+- Type inference via flow typing and constraints
+
+** Compiler Passes
+
+*** Identification Passes
+1. Identify symbol literals (Quote + Identifier)
+2. Identify core special forms (lambda, if, set!, begin, quote)
+3. Identify let (regular form)
+4. Identify named let (separate from regular let)
+5. Identify letrec and let*
+6. Identify cond and case
+7. Identify do
+8. Identify and & or
+9. Identify delay
+10. Identify internal defines
+
+*** Rewrite Passes
+11. Rewrite case into cond
+12. Rewrite cond into if
+13. Rewrite do into letrec
+14. Rewrite named let into letrec + lambda
+15. Rewrite letrec into let + set!
+16. Rewrite let* into nested lets
+17. Rewrite regular let into lambda
+18. Rewrite delay into (make-promise <lambda>)
+19. Rewrite quasiquote
+20. Rewrite and & or into if
+21. Handle internal defines
+
+** Type System
+- Flow typing with constraints
+- Type inference for procedure parameters and return values
+- Type queries in the REPL
+- Support for union types (e.g., number? | string?)
+- Special handling for set! to maintain type safety
+
+** REPL Features
+- :t command to show inferred types for expressions and procedures
+- Syntax highlighting and enhanced UI via reedline
+- Rich error messages with source locations
+- Inspection of evaluation steps
+
+** R5RS Compliance
+- Full support for R5RS special and derived forms
+- Implementation of macros via define-syntax and syntax-rules
+- Standard library with proper type annotations
