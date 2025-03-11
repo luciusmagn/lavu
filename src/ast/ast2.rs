@@ -1,35 +1,58 @@
-use color_eyre::eyre::bail;
-use color_eyre::Result;
+use logos::Span as LogosSpan;
+use std::ops::Range;
 
 use crate::ast::ast1::SExp;
+use crate::lexer::Token;
 
-use super::ast1::Atom;
-
+#[derive(Debug, PartialEq, Clone)]
 pub enum Definition {
-    Plain(String, SExp),
-    LambdaShorthand(SExp, Vec<SExp>),
+    // Variable definition: (define var expr)
+    Variable((String, Range<usize>), Box<SExp>),
+    // Procedure shorthand: (define (name args...) body...)
+    Procedure(
+        (String, Range<usize>),
+        Vec<(String, Range<usize>)>,
+        Vec<SExp>,
+    ),
 }
 
 impl Definition {
-    // TODO: Probably produce report
-    fn name(&self) -> Result<String> {
+    pub fn name(&self) -> String {
         match self {
-            Definition::Plain(name, _) => Ok(name.clone()),
-            Definition::LambdaShorthand(SExp::List(arglist, _), _) => {
-                if let Some(SExp::Atom(Atom::Identifier(name), _)) =
-                    arglist.get(0)
-                {
-                    Ok(name.clone())
-                } else {
-                    bail!("The name of a (define ...) must be an identifier")
-                }
-            }
-            _ => bail!("(define ...) must be followed by either a list or an identifier"),
+            Definition::Variable((name, _), _) => name.clone(),
+            Definition::Procedure((name, _), _, _) => name.clone(),
+        }
+    }
+
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            Definition::Variable((_, span), _) => span.clone(),
+            Definition::Procedure((_, span), _, _) => span.clone(),
         }
     }
 }
 
-pub enum Stage2Ast {
-    SExp(SExp),
+#[derive(Debug, PartialEq, Clone)]
+pub enum TopLevelForm {
     Definition(Definition),
+    Expression(SExp),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Program {
+    pub forms: Vec<TopLevelForm>,
+    pub source: String,
+    pub tokens: Vec<(Token, String, LogosSpan)>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum LambdaBodyForm {
+    Definition(Definition),
+    Expression(SExp),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct LambdaBody {
+    pub forms: Vec<LambdaBodyForm>,
+    pub has_definitions: bool,
 }

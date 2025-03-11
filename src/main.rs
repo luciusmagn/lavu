@@ -8,7 +8,7 @@ use lexer::tokenize;
 mod interpreter;
 
 mod parser;
-use parser::parser1;
+use parser::{parser1, parser2};
 
 mod repl;
 use repl::{line_editor, print_logo};
@@ -51,6 +51,11 @@ fn main() -> Result<()> {
                         println!("{:#?}", expressions);
                         println!("ariadne diagnostics:");
                         ariadne_yap(&buffer, &lexed, &expressions)?;
+
+                        let parsed2 =
+                            parser2::parse(&buffer, &lexed, &expressions);
+
+                        println!("{parsed2:#?}");
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {

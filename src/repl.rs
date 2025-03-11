@@ -47,7 +47,7 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                 let style = match &token_result {
                     Ok(Token::Identifier(_)) => match text {
                         x if is_special_form(x) => {
-                            dbg!(Style::new().fg(Color::Green))
+                            Style::new().fg(Color::Green)
                         }
                         x if is_keywordy(x) => Style::new().fg(Color::Purple),
                         x if is_predicate(x) => {
