@@ -1,3 +1,10 @@
 pub mod parser1;
+pub mod parser10;
 pub mod parser2;
 pub mod parser3;
+pub mod parser4;
+pub mod parser5;
+pub mod parser6;
+pub mod parser7;
+pub mod parser8;
+pub mod parser9;
