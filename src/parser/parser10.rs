@@ -136,7 +136,15 @@ fn convert_expression(expr: &Expression9) -> Result<Expression> {
                                     span.clone(),
                                 ));
                             } else {
-                                bail!("Second element of let must be a list of bindings");
+                                let new_elements = elements
+                                    .iter()
+                                    .map(|e| convert_expression(e))
+                                    .collect::<Result<Vec<_>>>()?;
+
+                                return Ok(Expression::List(
+                                    new_elements,
+                                    span.clone(),
+                                ));
                             }
                         }
                         "if" => {

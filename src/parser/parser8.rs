@@ -78,7 +78,16 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
                                 span.clone(),
                             ));
                         } else {
-                            bail!("Second element of let must be a list of bindings");
+                            // TODO: this would be handled by the named let pass
+                            let new_elements = elements
+                                .iter()
+                                .map(|e| convert_expression(e))
+                                .collect::<Result<Vec<_>>>()?;
+
+                            return Ok(Expression::List(
+                                new_elements,
+                                span.clone(),
+                            ));
                         }
                     }
                     // Handle other special forms

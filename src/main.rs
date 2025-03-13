@@ -10,8 +10,8 @@ mod interpreter;
 
 mod parser;
 use parser::{
-    parser1, parser10, parser2, parser3, parser4, parser5, parser6, parser7,
-    parser8, parser9,
+    parser1, parser10, parser11, parser12, parser13, parser14, parser15,
+    parser2, parser3, parser4, parser5, parser6, parser7, parser8, parser9,
 };
 
 mod repl;
@@ -89,8 +89,21 @@ fn main() -> Result<()> {
                         let parsed10 =
                             parser10::parse(&buffer, &lexed, &parsed9)?;
 
-                        //println!("{:#?}", parsed10.forms);
-                        report_let_forms(&buffer, &lexed, &parsed10)?;
+                        //report_let_forms(&buffer, &lexed, &parsed10)?;
+
+                        let parsed11 =
+                            parser11::parse(&buffer, &lexed, &parsed10)?;
+
+                        let parsed12 =
+                            parser12::parse(&buffer, &lexed, &parsed11)?;
+
+                        let parsed13 =
+                            parser13::parse(&buffer, &lexed, &parsed12)?;
+
+                        let parsed14 =
+                            parser14::parse(&buffer, &lexed, &parsed13)?;
+
+                        println!("{:#?}", parsed14.forms);
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {

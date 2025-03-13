@@ -4,28 +4,28 @@ use logos::Span as LogosSpan;
 use std::ops::Range;
 
 use crate::ast::ast1::Atom;
-use crate::ast::ast8::{
-    Definition as Definition8, Expression as Expression8,
-    TopLevelForm as TopLevelForm8,
+use crate::ast::ast10::{
+    Definition as Definition10, Expression as Expression10,
+    TopLevelForm as TopLevelForm10,
 };
-use crate::ast::ast9::{Definition, Expression, Program, TopLevelForm};
+use crate::ast::ast11::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
 
-fn convert_top_level_form(form: &TopLevelForm8) -> Result<TopLevelForm> {
+fn convert_top_level_form(form: &TopLevelForm10) -> Result<TopLevelForm> {
     match form {
-        TopLevelForm8::Definition(def) => {
+        TopLevelForm10::Definition(def) => {
             Ok(TopLevelForm::Definition(convert_definition(def)?))
         }
-        TopLevelForm8::Expression(expr) => {
+        TopLevelForm10::Expression(expr) => {
             let new_expr = convert_expression(expr)?;
             Ok(TopLevelForm::Expression(new_expr))
         }
     }
 }
 
-fn convert_definition(def: &Definition8) -> Result<Definition> {
+fn convert_definition(def: &Definition10) -> Result<Definition> {
     match def {
-        Definition8::Variable((name, span), expr) => {
+        Definition10::Variable((name, span), expr) => {
             let new_expr = convert_expression(expr)?;
             Ok(Definition::Variable(
                 (name.clone(), span.clone()),
@@ -36,14 +36,16 @@ fn convert_definition(def: &Definition8) -> Result<Definition> {
 }
 
 fn parse_bindings(
-    bindings_exprs: &[Expression8],
+    bindings_exprs: &[Expression10],
 ) -> Result<Vec<((String, Range<usize>), Expression)>> {
     let mut bindings = Vec::new();
     for binding_expr in bindings_exprs {
         match binding_expr {
-            Expression8::List(pair, _) if pair.len() == 2 => {
-                if let Expression8::Atom(Atom::Identifier(var_name), var_span) =
-                    &pair[0]
+            Expression10::List(pair, _) if pair.len() == 2 => {
+                if let Expression10::Atom(
+                    Atom::Identifier(var_name),
+                    var_span,
+                ) = &pair[0]
                 {
                     let init_expr = convert_expression(&pair[1])?;
                     bindings.push((
@@ -60,22 +62,120 @@ fn parse_bindings(
     Ok(bindings)
 }
 
-fn convert_expression(expr: &Expression8) -> Result<Expression> {
+fn convert_expression(expr: &Expression10) -> Result<Expression> {
     match expr {
-        Expression8::Atom(atom, span) => {
+        Expression10::Atom(atom, span) => {
             Ok(Expression::Atom(atom.clone(), span.clone()))
         }
 
-        Expression8::List(elements, span) => {
+        Expression10::List(elements, span) => {
             // Check for special forms
             if !elements.is_empty() {
-                if let Expression8::Atom(Atom::Identifier(keyword), _) =
+                if let Expression10::Atom(Atom::Identifier(keyword), _) =
                     &elements[0]
                 {
                     match keyword.as_str() {
+                        "case" if elements.len() >= 3 => {
+                            // Parse case form: (case key clause...)
+                            let key_expr = convert_expression(&elements[1])?;
+                            let mut clauses = Vec::new();
+                            let mut else_clause = None;
+
+                            // Process each clause
+                            for clause_expr in &elements[2..] {
+                                if let Expression10::List(clause_elements, _) =
+                                    clause_expr
+                                {
+                                    if clause_elements.is_empty() {
+                                        bail!("Case clause cannot be empty");
+                                    }
+
+                                    // Check for else clause
+                                    if let Expression10::Atom(
+                                        Atom::Identifier(clause_key),
+                                        _,
+                                    ) = &clause_elements[0]
+                                    {
+                                        if clause_key == "else" {
+                                            if else_clause.is_some() {
+                                                bail!("Multiple else clauses in case expression");
+                                            }
+
+                                            if clause_elements.len() < 2 {
+                                                bail!("Else clause must have at least one result expression");
+                                            }
+
+                                            else_clause = Some(
+                                                clause_elements[1..]
+                                                    .iter()
+                                                    .map(|e| {
+                                                        convert_expression(e)
+                                                    })
+                                                    .collect::<Result<Vec<_>>>(
+                                                    )?,
+                                            );
+
+                                            continue; // Skip to next clause
+                                        }
+                                    }
+
+                                    // Regular clause with datums
+                                    if let Expression10::List(datums, _) =
+                                        &clause_elements[0]
+                                    {
+                                        let datum_exprs = datums
+                                            .iter()
+                                            .map(|e| convert_expression(e))
+                                            .collect::<Result<Vec<_>>>()?;
+
+                                        let result_exprs = clause_elements[1..]
+                                            .iter()
+                                            .map(|e| convert_expression(e))
+                                            .collect::<Result<Vec<_>>>()?;
+
+                                        clauses
+                                            .push((datum_exprs, result_exprs));
+                                    } else {
+                                        bail!(
+                                            "Case clause datums must be a list"
+                                        );
+                                    }
+                                } else {
+                                    bail!("Each case clause must be a list");
+                                }
+                            }
+
+                            return Ok(Expression::Case(
+                                Box::new(key_expr),
+                                clauses,
+                                else_clause,
+                                span.clone(),
+                            ));
+                        }
+                        "letrec" if elements.len() >= 3 => {
+                            // Parse letrec form
+                            if let Expression10::List(bindings_exprs, _) =
+                                &elements[1]
+                            {
+                                let bindings = parse_bindings(bindings_exprs)?;
+
+                                let body = elements[2..]
+                                    .iter()
+                                    .map(|e| convert_expression(e))
+                                    .collect::<Result<Vec<_>>>()?;
+
+                                return Ok(Expression::LetRec(
+                                    bindings,
+                                    body,
+                                    span.clone(),
+                                ));
+                            } else {
+                                bail!("Second element of letrec must be a list of bindings");
+                            }
+                        }
                         "let*" if elements.len() >= 3 => {
                             // Parse let* form
-                            if let Expression8::List(bindings_exprs, _) =
+                            if let Expression10::List(bindings_exprs, _) =
                                 &elements[1]
                             {
                                 let bindings = parse_bindings(bindings_exprs)?;
@@ -96,7 +196,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
                         }
                         "let" if elements.len() >= 3 => {
                             // Parse let form
-                            if let Expression8::List(bindings_exprs, _) =
+                            if let Expression10::List(bindings_exprs, _) =
                                 &elements[1]
                             {
                                 let bindings = parse_bindings(bindings_exprs)?;
@@ -154,7 +254,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
                             return Ok(Expression::Begin(exprs, span.clone()));
                         }
                         "set!" if elements.len() == 3 => {
-                            if let Expression8::Atom(
+                            if let Expression10::Atom(
                                 Atom::Identifier(var_name),
                                 var_span,
                             ) = &elements[1]
@@ -184,7 +284,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             Ok(Expression::List(new_elements, span.clone()))
         }
 
-        Expression8::Vector(elements, span) => {
+        Expression10::Vector(elements, span) => {
             let new_elements = elements
                 .iter()
                 .map(|e| convert_expression(e))
@@ -193,33 +293,33 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             Ok(Expression::Vector(new_elements, span.clone()))
         }
 
-        Expression8::Quote(inner, span) => Ok(Expression::Quote(
+        Expression10::Quote(inner, span) => Ok(Expression::Quote(
             Box::new(convert_expression(inner)?),
             span.clone(),
         )),
 
-        Expression8::Quasiquote(inner, span) => Ok(Expression::Quasiquote(
+        Expression10::Quasiquote(inner, span) => Ok(Expression::Quasiquote(
             Box::new(convert_expression(inner)?),
             span.clone(),
         )),
 
-        Expression8::Unquote(inner, span) => Ok(Expression::Unquote(
+        Expression10::Unquote(inner, span) => Ok(Expression::Unquote(
             Box::new(convert_expression(inner)?),
             span.clone(),
         )),
 
-        Expression8::UnquoteSplicing(inner, span) => {
+        Expression10::UnquoteSplicing(inner, span) => {
             Ok(Expression::UnquoteSplicing(
                 Box::new(convert_expression(inner)?),
                 span.clone(),
             ))
         }
 
-        Expression8::SymbolLiteral(name, span) => {
+        Expression10::SymbolLiteral(name, span) => {
             Ok(Expression::SymbolLiteral(name.clone(), span.clone()))
         }
 
-        Expression8::Lambda(params, body, span) => {
+        Expression10::Lambda(params, body, span) => {
             let new_body = body
                 .iter()
                 .map(|e| convert_expression(e))
@@ -228,7 +328,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             Ok(Expression::Lambda(params.clone(), new_body, span.clone()))
         }
 
-        Expression8::SetBang(var, val, span) => {
+        Expression10::SetBang(var, val, span) => {
             let new_val = convert_expression(val)?;
             Ok(Expression::SetBang(
                 var.clone(),
@@ -237,7 +337,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             ))
         }
 
-        Expression8::Begin(exprs, span) => {
+        Expression10::Begin(exprs, span) => {
             let new_exprs = exprs
                 .iter()
                 .map(|e| convert_expression(e))
@@ -246,7 +346,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             Ok(Expression::Begin(new_exprs, span.clone()))
         }
 
-        Expression8::If(cond, then_expr, else_expr, span) => {
+        Expression10::If(cond, then_expr, else_expr, span) => {
             let new_cond = convert_expression(cond)?;
             let new_then = convert_expression(then_expr)?;
             let new_else = match else_expr {
@@ -262,7 +362,7 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
             ))
         }
 
-        Expression8::Let(bindings, body, span) => {
+        Expression10::Let(bindings, body, span) => {
             let new_bindings = bindings
                 .iter()
                 .map(|((name, name_span), expr)| {
@@ -278,15 +378,49 @@ fn convert_expression(expr: &Expression8) -> Result<Expression> {
 
             Ok(Expression::Let(new_bindings, new_body, span.clone()))
         }
+
+        Expression10::LetStar(bindings, body, span) => {
+            let new_bindings = bindings
+                .iter()
+                .map(|((name, name_span), expr)| {
+                    let new_expr = convert_expression(expr)?;
+                    Ok(((name.clone(), name_span.clone()), new_expr))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let new_body = body
+                .iter()
+                .map(|e| convert_expression(e))
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(Expression::LetStar(new_bindings, new_body, span.clone()))
+        }
+
+        Expression10::LetRec(bindings, body, span) => {
+            let new_bindings = bindings
+                .iter()
+                .map(|((name, name_span), expr)| {
+                    let new_expr = convert_expression(expr)?;
+                    Ok(((name.clone(), name_span.clone()), new_expr))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let new_body = body
+                .iter()
+                .map(|e| convert_expression(e))
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(Expression::LetRec(new_bindings, new_body, span.clone()))
+        }
     }
 }
 
 pub fn parse(
     input: &str,
     tokens: &[(Token, &str, LogosSpan)],
-    program8: &crate::ast::ast8::Program,
+    program10: &crate::ast::ast10::Program,
 ) -> Result<Program> {
-    let forms = program8
+    let forms = program10
         .forms
         .iter()
         .map(|form| convert_top_level_form(form))
