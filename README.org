@@ -22,9 +22,9 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 ** Compiler Passes
 
 *** Identification Passes
-1. Identify symbol literals (Quote + Identifier)
-2. Identify core special forms (lambda, if, set!, begin, quote)
-3. Identify let (regular form)
+1. (x) Identify symbol literals (Quote + Identifier)
+2. (x) Identify core special forms (lambda, if, set!, begin, quote)
+3. (x) Identify let (regular form)
 4. Identify named let (separate from regular let)
 5. Identify letrec and let*
 6. Identify cond and case

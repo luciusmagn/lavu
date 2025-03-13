@@ -1,3 +1,4 @@
+#![allow(unused)]
 use color_eyre::eyre::Result;
 use interpreter::GerbilInterpreter;
 use reedline::Signal;
@@ -17,7 +18,7 @@ mod repl;
 use repl::{line_editor, print_logo};
 
 mod ast;
-use ast::ast1::ariadne_yap;
+use ast::{ast1::ariadne_yap, ast10::report_let_forms};
 
 mod chars;
 
@@ -54,8 +55,8 @@ fn main() -> Result<()> {
                         println!("parsed ast:");
                         println!("{:#?}", expressions);
                         println!("ariadne diagnostics:");
-                        ariadne_yap(&buffer, &lexed, &expressions)?;
                         */
+                        //ariadne_yap(&buffer, &lexed, &expressions)?;
 
                         let parsed2 =
                             parser2::parse(&buffer, &lexed, &expressions)?;
@@ -76,7 +77,20 @@ fn main() -> Result<()> {
                         let parsed6 =
                             parser6::parse(&buffer, &lexed, &parsed5)?;
 
-                        println!("{:#?}", parsed6.forms);
+                        let parsed7 =
+                            parser7::parse(&buffer, &lexed, &parsed6)?;
+
+                        let parsed8 =
+                            parser8::parse(&buffer, &lexed, &parsed7)?;
+
+                        let parsed9 =
+                            parser9::parse(&buffer, &lexed, &parsed8)?;
+
+                        let parsed10 =
+                            parser10::parse(&buffer, &lexed, &parsed9)?;
+
+                        //println!("{:#?}", parsed10.forms);
+                        report_let_forms(&buffer, &lexed, &parsed10)?;
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
