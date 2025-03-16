@@ -53,19 +53,19 @@ Outstandinng issues:
 21. Handle internal defines
 
 ** Type System
-- Flow typing with constraints
-- Type inference for procedure parameters and return values
-- Type queries in the REPL
-- Support for union types (e.g., (number? | string?))
-- Special handling for set! to maintain type safety
+- (Planned) Flow typing with constraints
+- (Planned) Type inference for procedure parameters and return values
+- (Planned) Type queries in the REPL
+- (Planned) Support for union types (e.g., (number? | string?))
+- (Planned) Special handling for set! to maintain type safety
 
 ** REPL Features
-- :t command to show inferred types for expressions and procedures
-- Syntax highlighting and enhanced UI via reedline
-- Rich error messages with source locations
-- Inspection of evaluation steps
+- (Planned) :t command to show inferred types for expressions and procedures
+- (Done) Syntax highlighting and enhanced UI via reedline
+- (Planned) Rich error messages with source locations
+- (Planned) Inspection of evaluation steps
 
 ** R5RS Compliance
-- Full support for R5RS special and derived forms
-- Implementation of macros via define-syntax and syntax-rules
-- Standard library with proper type annotations
+- (Planned) Full support for R5RS special and derived forms
+- (Planned) Implementation of macros via define-syntax and syntax-rules
+- (Planned) Standard library with proper type annotations
