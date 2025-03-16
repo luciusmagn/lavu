@@ -22,6 +22,9 @@ use ast::{ast1::ariadne_yap, ast10::report_let_forms};
 
 mod chars;
 
+mod transform;
+use transform::*;
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
@@ -92,7 +95,9 @@ fn main() -> Result<()> {
 
                         let parsed16 = parser16::parse(&buffer, &lexed, &parsed15)?;
 
-                        println!("{:#?}", parsed16.forms);
+                        let transformed1 = transform1::transform(&buffer, &lexed, &parsed16)?;
+
+                        println!("{:#?}", transformed1.forms);
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
