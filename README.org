@@ -19,7 +19,7 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Create a learning tool rather than a production compiler
 
 ** Architecture
-- AST-based compiler with multiple small transformation passes
+- AST-based interpreter with multiple small transformation passes
 - Symbol table with rich metadata
 - Type inference via flow typing and constraints
 
