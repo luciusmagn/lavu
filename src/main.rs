@@ -25,6 +25,8 @@ mod chars;
 mod transform;
 use transform::*;
 
+mod printer;
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
@@ -97,7 +99,8 @@ fn main() -> Result<()> {
 
                         let transformed1 = transform1::transform(&buffer, &lexed, &parsed16)?;
 
-                        println!("{:#?}", transformed1.forms);
+                        //println!("{:#?}", transformed1.forms);
+                        println!("{}", printer::pretty_print(&transformed1));
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
