@@ -10,8 +10,8 @@ mod interpreter;
 
 mod parser;
 use parser::{
-    parser1, parser10, parser11, parser12, parser13, parser14, parser15,
-    parser2, parser3, parser4, parser5, parser6, parser7, parser8, parser9,
+    parser1, parser10, parser11, parser12, parser13, parser14, parser15, parser16, parser2,
+    parser3, parser4, parser5, parser6, parser7, parser8, parser9,
 };
 
 mod repl;
@@ -38,9 +38,7 @@ fn main() -> Result<()> {
 
                 // Check for unclosed expressions
                 if let Some(error_idx) = parser1::find_unclosed_sexp(&lexed) {
-                    if let Err(e) =
-                        parser1::create_diagnostic(&buffer, &lexed, error_idx)
-                    {
+                    if let Err(e) = parser1::create_diagnostic(&buffer, &lexed, error_idx) {
                         println!("Error creating diagnostic: {}", e);
                     }
                     continue;
@@ -58,52 +56,43 @@ fn main() -> Result<()> {
                         */
                         //ariadne_yap(&buffer, &lexed, &expressions)?;
 
-                        let parsed2 =
-                            parser2::parse(&buffer, &lexed, &expressions)?;
+                        let parsed2 = parser2::parse(&buffer, &lexed, &expressions)?;
 
                         //println!("{parsed2:#?}");
 
-                        let parsed3 =
-                            parser3::parse(&buffer, &lexed, &parsed2)?;
+                        let parsed3 = parser3::parse(&buffer, &lexed, &parsed2)?;
 
                         //println!("{parsed3:#?}");
 
-                        let parsed4 =
-                            parser4::parse(&buffer, &lexed, &parsed3)?;
+                        let parsed4 = parser4::parse(&buffer, &lexed, &parsed3)?;
 
-                        let parsed5 =
-                            parser5::parse(&buffer, &lexed, &parsed4)?;
+                        let parsed5 = parser5::parse(&buffer, &lexed, &parsed4)?;
 
-                        let parsed6 =
-                            parser6::parse(&buffer, &lexed, &parsed5)?;
+                        let parsed6 = parser6::parse(&buffer, &lexed, &parsed5)?;
 
-                        let parsed7 =
-                            parser7::parse(&buffer, &lexed, &parsed6)?;
+                        let parsed7 = parser7::parse(&buffer, &lexed, &parsed6)?;
 
-                        let parsed8 =
-                            parser8::parse(&buffer, &lexed, &parsed7)?;
+                        let parsed8 = parser8::parse(&buffer, &lexed, &parsed7)?;
 
-                        let parsed9 =
-                            parser9::parse(&buffer, &lexed, &parsed8)?;
+                        let parsed9 = parser9::parse(&buffer, &lexed, &parsed8)?;
 
-                        let parsed10 =
-                            parser10::parse(&buffer, &lexed, &parsed9)?;
+                        let parsed10 = parser10::parse(&buffer, &lexed, &parsed9)?;
 
                         //report_let_forms(&buffer, &lexed, &parsed10)?;
 
-                        let parsed11 =
-                            parser11::parse(&buffer, &lexed, &parsed10)?;
+                        let parsed11 = parser11::parse(&buffer, &lexed, &parsed10)?;
 
-                        let parsed12 =
-                            parser12::parse(&buffer, &lexed, &parsed11)?;
+                        let parsed12 = parser12::parse(&buffer, &lexed, &parsed11)?;
 
-                        let parsed13 =
-                            parser13::parse(&buffer, &lexed, &parsed12)?;
+                        let parsed13 = parser13::parse(&buffer, &lexed, &parsed12)?;
 
-                        let parsed14 =
-                            parser14::parse(&buffer, &lexed, &parsed13)?;
+                        let parsed14 = parser14::parse(&buffer, &lexed, &parsed13)?;
 
-                        println!("{:#?}", parsed14.forms);
+                        let parsed15 = parser15::parse(&buffer, &lexed, &parsed14)?;
+
+                        let parsed16 = parser16::parse(&buffer, &lexed, &parsed15)?;
+
+                        println!("{:#?}", parsed16.forms);
 
                         // Evaluate in Gerbil (for now)
                         if let Err(e) = interpreter.eval(&buffer) {
