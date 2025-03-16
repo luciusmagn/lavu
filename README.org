@@ -1,11 +1,15 @@
 * Lavu Scheme
+Lavu stands for lavender, good plant.
+
 ** Project Goals
 Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Maximum comprehensibility through tiny, well-defined passes
 - Excellent REPL experience with advanced inspection features
+  - we reedline maxing up in this bitch
 - Support for type inference and analysis
 - Ability to query procedures and values for their types (similar to Idris's :t feature)
 - Support the whole R5RS standard
+- Ideally, it should also be trivial to bind Rust stuff into the Scheme
 
 ** Implementation Philosophy
 - Take tiny steps with well-defined scope
@@ -20,18 +24,20 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Type inference via flow typing and constraints
 
 ** Compiler Passes
+Outstandinng issues:
+**** TODO Reduce the massive amount of code duplication that we have, but not really (since the code is same, but types are different)
 
 *** Identification Passes
 1. (x) Identify symbol literals (Quote + Identifier)
 2. (x) Identify core special forms (lambda, if, set!, begin, quote)
 3. (x) Identify let (regular form)
-4. Identify named let (separate from regular let)
-5. Identify letrec and let*
-6. Identify cond and case
-7. Identify do
-8. Identify and & or
-9. Identify delay
-10. Identify internal defines
+4. (x) Identify named let (separate from regular let)
+5. (x) Identify letrec and let*
+6. (x) Identify cond and case
+7. (x) Identify do
+8. (x) Identify and & or
+9. (x) Identify delay
+10. (x) Identify internal defines
 
 *** Rewrite Passes
 11. Rewrite case into cond
@@ -50,7 +56,7 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Flow typing with constraints
 - Type inference for procedure parameters and return values
 - Type queries in the REPL
-- Support for union types (e.g., number? | string?)
+- Support for union types (e.g., (number? | string?))
 - Special handling for set! to maintain type safety
 
 ** REPL Features
