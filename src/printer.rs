@@ -5,7 +5,7 @@ pub fn pretty_print(program: &Program) -> String {
     let mut result = String::new();
     for form in &program.forms {
         result.push_str(&pretty_print_form(form, 0));
-        result.push_str("\n");
+        result.push('\n');
     }
     result
 }
@@ -36,11 +36,13 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
 
     match expr {
         Expression::Atom(atom, _) => pretty_print_atom(atom),
+
         Expression::List(elements, _) => {
             if elements.is_empty() {
                 return format!("{}()", spaces);
             }
 
+            // Try one-line format first
             let one_line = format!(
                 "({})",
                 elements
@@ -54,22 +56,34 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 return format!("{}{}", spaces, one_line);
             }
 
-            let mut result = format!("{}(\n", spaces);
-            for element in elements {
-                result.push_str(&format!(
-                    "{}{}\n",
-                    " ".repeat(indent + 2),
-                    pretty_print_expression(element, indent + 2)
-                ));
+            // Multi-line format
+            let mut result = format!("{}(", spaces);
+
+            // Handle first element specially - often the function/operator
+            if !elements.is_empty() {
+                result.push_str(&pretty_print_expression(&elements[0], 0));
+
+                // Add other elements with proper indentation
+                for element in &elements[1..] {
+                    result.push('\n');
+                    result.push_str(&format!(
+                        "{}{}",
+                        " ".repeat(indent + 2),
+                        pretty_print_expression(element, 0)
+                    ));
+                }
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
+
         Expression::Vector(elements, _) => {
             if elements.is_empty() {
                 return format!("{}#()", spaces);
             }
 
+            // Try one-line format first
             let one_line = format!(
                 "#({})",
                 elements
@@ -83,26 +97,46 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 return format!("{}{}", spaces, one_line);
             }
 
-            let mut result = format!("{}#(\n", spaces);
-            for element in elements {
-                result.push_str(&format!(
-                    "{}{}\n",
-                    " ".repeat(indent + 2),
-                    pretty_print_expression(element, indent + 2)
-                ));
+            // Multi-line format
+            let mut result = format!("{}#(", spaces);
+
+            // Handle first element specially
+            if !elements.is_empty() {
+                result.push_str(&pretty_print_expression(&elements[0], 0));
+
+                // Add other elements with proper indentation
+                for element in &elements[1..] {
+                    result.push('\n');
+                    result.push_str(&format!(
+                        "{}{}",
+                        " ".repeat(indent + 2),
+                        pretty_print_expression(element, 0)
+                    ));
+                }
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
-        Expression::Quote(expr, _) => format!("{}'({})", spaces, pretty_print_expression(expr, 0)),
-        Expression::Quasiquote(expr, _) => {
-            format!("{}`({})", spaces, pretty_print_expression(expr, 0))
+
+        Expression::Quote(inner, _) => {
+            format!("{}'({})", spaces, pretty_print_expression(inner, 0))
         }
-        Expression::Unquote(expr, _) => format!("{},{}", spaces, pretty_print_expression(expr, 0)),
-        Expression::UnquoteSplicing(expr, _) => {
-            format!("{},@{}", spaces, pretty_print_expression(expr, 0))
+
+        Expression::Quasiquote(inner, _) => {
+            format!("{}`({})", spaces, pretty_print_expression(inner, 0))
         }
+
+        Expression::Unquote(inner, _) => {
+            format!("{},{}", spaces, pretty_print_expression(inner, 0))
+        }
+
+        Expression::UnquoteSplicing(inner, _) => {
+            format!("{},@{}", spaces, pretty_print_expression(inner, 0))
+        }
+
         Expression::SymbolLiteral(sym, _) => format!("{}'{}", spaces, sym),
+
         Expression::Lambda(args, body, _) => {
             let args_str = args
                 .iter()
@@ -110,23 +144,28 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
 
+            // Format the lambda with proper indentation
             let mut result = format!("{}(lambda ({})", spaces, args_str);
 
             if body.is_empty() {
-                return format!("{})", result);
+                result.push(')');
+                return result;
             }
 
-            result.push_str("\n");
-            for expr in body {
+            // Format the body
+            for (i, expr) in body.iter().enumerate() {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}{}\n",
+                    "{}{}",
                     " ".repeat(indent + 2),
                     pretty_print_expression(expr, indent + 2)
                 ));
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
+
         Expression::SetBang((var, _), expr, _) => {
             format!(
                 "{}(set! {} {})",
@@ -135,149 +174,174 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 pretty_print_expression(expr, indent + 2)
             )
         }
+
         Expression::Begin(exprs, _) => {
             if exprs.is_empty() {
                 return format!("{}(begin)", spaces);
             }
 
-            let mut result = format!("{}(begin\n", spaces);
+            let mut result = format!("{}(begin", spaces);
+
+            // Format the body expressions
             for expr in exprs {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}{}\n",
+                    "{}{}",
                     " ".repeat(indent + 2),
                     pretty_print_expression(expr, indent + 2)
                 ));
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
+
         Expression::If(cond, then_expr, else_expr, _) => {
-            let mut result = format!(
-                "{}(if {}\n",
-                spaces,
-                pretty_print_expression(cond, indent + 2)
-            );
+            let mut result = format!("{}(if ", spaces);
+
+            // Condition - format appropriately
+            result.push_str(&pretty_print_expression(cond, 0));
+
+            // Then expression - use 4 spaces from the if for better alignment
+            result.push('\n');
             result.push_str(&format!(
-                "{}{}\n",
-                " ".repeat(indent + 2),
-                pretty_print_expression(then_expr, indent + 2)
+                "{spaces}{}{}",
+                " ".repeat(indent + 4), // Increased from +2 to +4
+                pretty_print_expression(then_expr, indent + 4)
             ));
 
+            // Else expression (if present)
             if let Some(else_e) = else_expr {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}{}\n",
-                    " ".repeat(indent + 2),
-                    pretty_print_expression(else_e, indent + 2)
+                    "{spaces}{}",
+                    pretty_print_expression(else_e, spaces.len() + indent + 4)
                 ));
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
+
         Expression::Let(bindings, body, _) => {
             let mut result = format!("{}(let (", spaces);
 
             if !bindings.is_empty() {
-                result.push_str("\n");
+                // Format the bindings
                 for ((var, _), expr) in bindings {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}({} {})\n",
+                        "{}({} {})",
                         " ".repeat(indent + 2),
                         var,
                         pretty_print_expression(expr, 0)
                     ));
                 }
+                result.push('\n');
                 result.push_str(&format!("{})", " ".repeat(indent)));
             } else {
-                result.push_str(")");
+                result.push(')');
             }
 
+            // Format the body
             if !body.is_empty() {
-                result.push_str("\n");
                 for expr in body {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "{}{}",
                         " ".repeat(indent + 2),
                         pretty_print_expression(expr, indent + 2)
                     ));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
+
         Expression::LetStar(bindings, body, _) => {
             let mut result = format!("{}(let* (", spaces);
 
             if !bindings.is_empty() {
-                result.push_str("\n");
+                // Format the bindings
                 for ((var, _), expr) in bindings {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}({} {})\n",
+                        "{}({} {})",
                         " ".repeat(indent + 2),
                         var,
                         pretty_print_expression(expr, 0)
                     ));
                 }
+                result.push('\n');
                 result.push_str(&format!("{})", " ".repeat(indent)));
             } else {
-                result.push_str(")");
+                result.push(')');
             }
 
+            // Format the body
             if !body.is_empty() {
-                result.push_str("\n");
                 for expr in body {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "{}{}",
                         " ".repeat(indent + 2),
                         pretty_print_expression(expr, indent + 2)
                     ));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
+
         Expression::LetRec(bindings, body, _) => {
             let mut result = format!("{}(letrec (", spaces);
 
             if !bindings.is_empty() {
-                result.push_str("\n");
+                // Format the bindings
                 for ((var, _), expr) in bindings {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}({} {})\n",
+                        "{}({} {})",
                         " ".repeat(indent + 2),
                         var,
                         pretty_print_expression(expr, 0)
                     ));
                 }
+                result.push('\n');
                 result.push_str(&format!("{})", " ".repeat(indent)));
             } else {
-                result.push_str(")");
+                result.push(')');
             }
 
+            // Format the body
             if !body.is_empty() {
-                result.push_str("\n");
                 for expr in body {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "{}{}",
                         " ".repeat(indent + 2),
                         pretty_print_expression(expr, indent + 2)
                     ));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
-        Expression::Case(key, clauses, else_clause, _) => {
-            let mut result = format!(
-                "{}(case {}\n",
-                spaces,
-                pretty_print_expression(key, indent + 2)
-            );
 
+        Expression::Case(key, clauses, else_clause, _) => {
+            let mut result = format!("{}(case ", spaces);
+
+            // Format key expression
+            result.push_str(&pretty_print_expression(key, 0));
+
+            // Format clauses
             for (datums, body) in clauses {
+                result.push('\n');
+
+                // Format datums
                 let datums_str = datums
                     .iter()
                     .map(|e| pretty_print_expression(e, 0))
@@ -286,127 +350,150 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
 
                 result.push_str(&format!("{}(({}) ", " ".repeat(indent + 2), datums_str));
 
+                // Format body
                 if body.is_empty() {
-                    result.push_str(")\n");
+                    result.push(')');
                     continue;
                 }
 
-                result.push_str("\n");
-                for expr in body {
+                for (i, expr) in body.iter().enumerate() {
+                    if i > 0 {
+                        result.push('\n');
+                    }
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "\n{}{}",
                         " ".repeat(indent + 4),
                         pretty_print_expression(expr, indent + 4)
                     ));
                 }
-                result.push_str(&format!("{})\n", " ".repeat(indent + 2)));
+                result.push_str(&format!("\n{})", " ".repeat(indent + 2)));
             }
 
+            // Format else clause
             if let Some(else_body) = else_clause {
+                result.push('\n');
                 result.push_str(&format!("{}(else ", " ".repeat(indent + 2)));
 
                 if else_body.is_empty() {
-                    result.push_str(")\n");
+                    result.push(')');
                 } else {
-                    result.push_str("\n");
-                    for expr in else_body {
+                    for (i, expr) in else_body.iter().enumerate() {
+                        if i > 0 {
+                            result.push('\n');
+                        }
                         result.push_str(&format!(
-                            "{}{}\n",
+                            "\n{}{}",
                             " ".repeat(indent + 4),
                             pretty_print_expression(expr, indent + 4)
                         ));
                     }
-                    result.push_str(&format!("{})\n", " ".repeat(indent + 2)));
+                    result.push_str(&format!("\n{})", " ".repeat(indent + 2)));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
-        Expression::Cond(clauses, else_clause, _) => {
-            let mut result = format!("{}(cond\n", spaces);
 
+        Expression::Cond(clauses, else_clause, _) => {
+            let mut result = format!("{}(cond", spaces);
+
+            // Format clauses
             for (test, body) in clauses {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}({} ",
+                    "{}({}",
                     " ".repeat(indent + 2),
                     pretty_print_expression(test, 0)
                 ));
 
+                // Format body
                 if body.is_empty() {
-                    result.push_str(")\n");
+                    result.push(')');
                     continue;
                 }
 
-                result.push_str("\n");
-                for expr in body {
+                for (i, expr) in body.iter().enumerate() {
+                    if i > 0 {
+                        result.push('\n');
+                    }
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "\n{}{}",
                         " ".repeat(indent + 4),
                         pretty_print_expression(expr, indent + 4)
                     ));
                 }
-                result.push_str(&format!("{})\n", " ".repeat(indent + 2)));
+                result.push_str(&format!("\n{})", " ".repeat(indent + 2)));
             }
 
+            // Format else clause
             if let Some(else_body) = else_clause {
-                result.push_str(&format!("{}(else ", " ".repeat(indent + 2)));
+                result.push('\n');
+                result.push_str(&format!("{}(else", " ".repeat(indent + 2)));
 
                 if else_body.is_empty() {
-                    result.push_str(")\n");
+                    result.push(')');
                 } else {
-                    result.push_str("\n");
-                    for expr in else_body {
+                    for (i, expr) in else_body.iter().enumerate() {
+                        if i > 0 {
+                            result.push('\n');
+                        }
                         result.push_str(&format!(
-                            "{}{}\n",
+                            "\n{}{}",
                             " ".repeat(indent + 4),
                             pretty_print_expression(expr, indent + 4)
                         ));
                     }
-                    result.push_str(&format!("{})\n", " ".repeat(indent + 2)));
+                    result.push_str(&format!("\n{})", " ".repeat(indent + 2)));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
+
         Expression::NamedLet((name, _), bindings, body, _) => {
             let mut result = format!("{}(let {} (", spaces, name);
 
             if !bindings.is_empty() {
-                result.push_str("\n");
+                // Format bindings
                 for ((var, _), expr) in bindings {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}({} {})\n",
+                        "{}({} {})",
                         " ".repeat(indent + 2),
                         var,
                         pretty_print_expression(expr, 0)
                     ));
                 }
+                result.push('\n');
                 result.push_str(&format!("{})", " ".repeat(indent)));
             } else {
-                result.push_str(")");
+                result.push(')');
             }
 
+            // Format body
             if !body.is_empty() {
-                result.push_str("\n");
                 for expr in body {
+                    result.push('\n');
                     result.push_str(&format!(
-                        "{}{}\n",
+                        "{}{}",
                         " ".repeat(indent + 2),
                         pretty_print_expression(expr, indent + 2)
                     ));
                 }
             }
 
-            result.push_str(&format!("{})", spaces));
+            result.push(')');
             result
         }
+
         Expression::And(exprs, _) => {
             if exprs.is_empty() {
                 return format!("{}(and)", spaces);
             }
 
+            // Try one-line formatting
             let one_line = format!(
                 "(and {})",
                 exprs
@@ -420,22 +507,28 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 return format!("{}{}", spaces, one_line);
             }
 
-            let mut result = format!("{}(and\n", spaces);
+            // Multi-line formatting
+            let mut result = format!("{}(and", spaces);
+
             for expr in exprs {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}{}\n",
+                    "{}{}",
                     " ".repeat(indent + 2),
                     pretty_print_expression(expr, indent + 2)
                 ));
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
+
         Expression::Or(exprs, _) => {
             if exprs.is_empty() {
                 return format!("{}(or)", spaces);
             }
 
+            // Try one-line formatting
             let one_line = format!(
                 "(or {})",
                 exprs
@@ -449,75 +542,85 @@ fn pretty_print_expression(expr: &Expression, indent: usize) -> String {
                 return format!("{}{}", spaces, one_line);
             }
 
-            let mut result = format!("{}(or\n", spaces);
+            // Multi-line formatting
+            let mut result = format!("{}(or", spaces);
+
             for expr in exprs {
+                result.push('\n');
                 result.push_str(&format!(
-                    "{}{}\n",
+                    "{}{}",
                     " ".repeat(indent + 2),
                     pretty_print_expression(expr, indent + 2)
                 ));
             }
-            result.push_str(&format!("{})", spaces));
+
+            result.push(')');
             result
         }
+
         Expression::Do(bindings, (test, result), body, _) => {
             let mut result_str = format!("{}(do (", spaces);
 
             if !bindings.is_empty() {
-                result_str.push_str("\n");
+                // Format bindings
                 for ((var, _), init, step) in bindings {
+                    result_str.push('\n');
+                    let step_str = match step {
+                        Some(step_expr) => format!(" {}", pretty_print_expression(step_expr, 0)),
+                        None => String::new(),
+                    };
+
                     result_str.push_str(&format!(
-                        "{}({} {} {})\n",
+                        "{}({} {}{})",
                         " ".repeat(indent + 2),
                         var,
                         pretty_print_expression(init, 0),
-                        match step {
-                            Some(step_expr) => pretty_print_expression(step_expr, 0),
-                            None => String::new(),
-                        }
+                        step_str
                     ));
                 }
+                result_str.push('\n');
                 result_str.push_str(&format!("{})", " ".repeat(indent)));
             } else {
-                result_str.push_str(")");
+                result_str.push(')');
             }
 
-            // Test and result
-            result_str.push_str(&format!(
-                " ({}\n",
-                pretty_print_expression(test, indent + 2)
-            ));
+            // Format test and result
+            result_str.push_str(&format!(" ({}", pretty_print_expression(test, 0)));
 
-            for expr in result {
-                result_str.push_str(&format!(
-                    "{}{}\n",
-                    " ".repeat(indent + 2),
-                    pretty_print_expression(expr, indent + 2)
-                ));
+            // Format result expressions
+            if result.is_empty() {
+                result_str.push(')');
+            } else {
+                for (i, expr) in result.iter().enumerate() {
+                    if i == 0 {
+                        result_str.push(' ');
+                    } else {
+                        result_str.push('\n');
+                        result_str.push_str(&" ".repeat(indent + 4));
+                    }
+                    result_str.push_str(&pretty_print_expression(expr, 0));
+                }
+                result_str.push(')');
             }
-            result_str.push_str(&format!("{})", " ".repeat(indent)));
 
-            // Body
+            // Format body expressions
             if !body.is_empty() {
-                result_str.push_str("\n");
                 for expr in body {
+                    result_str.push('\n');
                     result_str.push_str(&format!(
-                        "{}{}\n",
+                        "{}{}",
                         " ".repeat(indent + 2),
                         pretty_print_expression(expr, indent + 2)
                     ));
                 }
             }
 
-            result_str.push_str(&format!("{})", spaces));
+            result_str.push(')');
             result_str
         }
+
         Expression::Delay(expr, _) => {
-            format!(
-                "{}(delay {})",
-                spaces,
-                pretty_print_expression(expr, indent + 2)
-            )
+            format!("{}(delay {})", spaces, pretty_print_expression(expr, 0))
         }
     }
 }
