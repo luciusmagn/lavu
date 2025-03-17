@@ -62,48 +62,39 @@ fn main() -> Result<()> {
                         //ariadne_yap(&buffer, &lexed, &expressions)?;
 
                         let parsed2 = parser2::parse(&buffer, &lexed, &expressions)?;
-
-                        //println!("{parsed2:#?}");
-
                         let parsed3 = parser3::parse(&buffer, &lexed, &parsed2)?;
-
-                        //println!("{parsed3:#?}");
-
                         let parsed4 = parser4::parse(&buffer, &lexed, &parsed3)?;
-
                         let parsed5 = parser5::parse(&buffer, &lexed, &parsed4)?;
-
                         let parsed6 = parser6::parse(&buffer, &lexed, &parsed5)?;
-
                         let parsed7 = parser7::parse(&buffer, &lexed, &parsed6)?;
-
                         let parsed8 = parser8::parse(&buffer, &lexed, &parsed7)?;
-
                         let parsed9 = parser9::parse(&buffer, &lexed, &parsed8)?;
-
                         let parsed10 = parser10::parse(&buffer, &lexed, &parsed9)?;
 
                         //report_let_forms(&buffer, &lexed, &parsed10)?;
 
                         let parsed11 = parser11::parse(&buffer, &lexed, &parsed10)?;
-
                         let parsed12 = parser12::parse(&buffer, &lexed, &parsed11)?;
-
                         let parsed13 = parser13::parse(&buffer, &lexed, &parsed12)?;
-
                         let parsed14 = parser14::parse(&buffer, &lexed, &parsed13)?;
-
                         let parsed15 = parser15::parse(&buffer, &lexed, &parsed14)?;
-
                         let parsed16 = parser16::parse(&buffer, &lexed, &parsed15)?;
 
                         let transformed1 = transform1::transform(&buffer, &lexed, &parsed16)?;
+                        let transformed2 = transform2::transform(&buffer, &lexed, &transformed1)?;
+                        let transformed3 = transform3::transform(&buffer, &lexed, &transformed2)?;
+                        let transformed4 = transform4::transform(&buffer, &lexed, &transformed3)?;
+                        let transformed5 = transform5::transform(&buffer, &lexed, &transformed4)?;
+                        let transformed6 = transform6::transform(&buffer, &lexed, &transformed5)?;
+                        let transformed7 = transform7::transform(&buffer, &lexed, &transformed6)?;
+                        let transformed8 = transform8::transform(&buffer, &lexed, &transformed7)?;
+                        let transformed9 = transform9::transform(&buffer, &lexed, &transformed8)?;
 
                         //println!("{:#?}", transformed1.forms);
-                        println!("{}", printer::pretty_print(&transformed1));
+                        println!("{}", printer::pretty_print(&transformed9));
 
                         // Evaluate in Gerbil (for now)
-                        if let Err(e) = interpreter.eval(&buffer) {
+                        if let Err(e) = interpreter.eval(&printer::pretty_print(&transformed9)) {
                             println!("Error communicating with Gerbil: {}", e);
                             continue;
                         }
