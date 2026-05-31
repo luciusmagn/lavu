@@ -249,3 +249,6 @@ Scheme value is valid.
 ** First Occurrence Typing
 - Add branch-local predicate refinement for simple variable predicates
   such as =(string? x)= and merge branch constraints into union types.
+** REPL Type Query
+- Add the =? expr...= type query path using the new parser,
+  classifier, and inference engine.

@@ -1,6 +1,7 @@
 #![allow(unused)]
 use color_eyre::eyre::Result;
 use interpreter::GerbilInterpreter;
+use lavu::query::infer_query;
 use reedline::Signal;
 
 mod lexer;
@@ -41,6 +42,18 @@ fn main() -> Result<()> {
         let sig = line_editor.read_line(&*prompt);
         match sig {
             Ok(Signal::Success(buffer)) => {
+                if let Some(query) = buffer.trim_start().strip_prefix('?') {
+                    match infer_query(query) {
+                        Ok(types) => {
+                            for ty in types {
+                                println!("{}", ty);
+                            }
+                        }
+                        Err(error) => println!("Type query error: {}", error),
+                    }
+                    continue;
+                }
+
                 let lexed = tokenize(&buffer);
 
                 // Check for unclosed expressions
