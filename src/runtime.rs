@@ -476,4 +476,12 @@ mod tests {
         assert_eq!(eval_one("(and #t 1)"), "1");
         assert_eq!(eval_one("(or #f 7)"), "7");
     }
+
+    #[test]
+    fn evaluates_desugared_cond() {
+        assert_eq!(
+            eval_one("(cond ((string? 1) 10) ((number? 1) 20) (else 30))"),
+            "20"
+        );
+    }
 }

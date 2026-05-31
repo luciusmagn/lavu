@@ -129,6 +129,7 @@ fn classify_list(
         Some("let") => parse_let(span, origin, rest),
         Some("and") => parse_and(span, origin, rest),
         Some("or") => parse_or(span, origin, rest),
+        Some("cond") => parse_cond(span, origin, rest),
         _ => parse_apply(origin, head, rest),
     }
 }
@@ -368,6 +369,90 @@ fn parse_or(
     }
 }
 
+fn parse_cond(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    clauses: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    let mut result = Spanned {
+        node: boolean_literal(false),
+        span: span.clone(),
+        origin,
+    };
+
+    for clause in clauses.iter().rev() {
+        let Datum::List(items) = &clause.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "cond clause",
+                span: clause.span.clone(),
+            });
+        };
+        let Some((test, body)) = items.split_first() else {
+            return Err(SurfaceError::BadArity {
+                form: "cond clause",
+                expected: "a test and optional body expressions",
+                span: clause.span.clone(),
+            });
+        };
+
+        if identifier_name(test).as_deref() == Some("else") {
+            result = Spanned {
+                node: body_expr(body, clause.span.clone(), origin)?,
+                span: clause.span.clone(),
+                origin,
+            };
+            continue;
+        }
+
+        let condition = classify_expr(test)?;
+        let consequent = if body.is_empty() {
+            condition.clone()
+        } else {
+            Spanned {
+                node: body_expr(body, clause.span.clone(), origin)?,
+                span: clause.span.clone(),
+                origin,
+            }
+        };
+
+        result = Spanned {
+            node: Expr::If {
+                condition: Box::new(condition),
+                consequent: Box::new(consequent),
+                alternate: Some(Box::new(result)),
+            },
+            span: clause.span.clone(),
+            origin,
+        };
+    }
+
+    Ok(result.node)
+}
+
+fn body_expr(
+    body: &[Spanned<Datum>],
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Result<Expr, SurfaceError> {
+    match body {
+        [] => Ok(Expr::Begin(Vec::new())),
+        [single] => Ok(classify_expr(single)?.node),
+        many => Ok(Expr::Begin(
+            many.iter()
+                .map(classify_expr)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+    }
+    .map(|expr| match expr {
+        Expr::Begin(exprs) if exprs.is_empty() => Expr::Begin(vec![Spanned {
+            node: Expr::Literal(Atom::Boolean(false)),
+            span,
+            origin,
+        }]),
+        expr => expr,
+    })
+}
+
 fn boolean_literal(value: bool) -> Expr {
     Expr::Literal(Atom::Boolean(value))
 }
@@ -489,5 +574,13 @@ mod tests {
         let or_datums = parse("(or #f 1)").unwrap();
         let or_form = classify_top_level(&or_datums[0]).unwrap();
         assert!(matches!(or_form.node, TopLevel::Expr(Expr::Apply { .. })));
+    }
+
+    #[test]
+    fn desugars_cond_to_conditionals() {
+        let datums = parse("(cond ((string? x) 1) (else 2))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::If { .. })));
     }
 }

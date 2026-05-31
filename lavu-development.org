@@ -265,3 +265,6 @@ Scheme value is valid.
 ** Gerbil Removal
 - Remove the unused Gerbil process wrapper after switching the REPL to
   native evaluation.
+** Cond Classifier
+- Desugar =cond= clauses into nested =if= expressions on the stable
+  surface AST.
