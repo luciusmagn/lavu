@@ -285,3 +285,6 @@ Scheme value is valid.
   for premature variable use.
 - Teach inference to seed recursive bindings and infer application of
   locally unknown procedures.
+** Case Classifier
+- Add =eqv?= primitive metadata/runtime support and lower =case= through
+  a single-key lambda application plus nested equality tests.

@@ -129,6 +129,7 @@ impl Env {
             "vector?",
             "procedure?",
             "not",
+            "eqv?",
             "list",
             "reverse",
             "string-length",
@@ -311,6 +312,7 @@ fn apply_primitive(
             matches!(value, Value::Procedure(_) | Value::Primitive(_))
         }),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
+        "eqv?" => eqv(args, span),
         "list" => Ok(Value::List(args)),
         "reverse" => unary(args, span.clone(), |value| match value {
             Value::List(mut items) => {
@@ -424,6 +426,29 @@ fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::Boolean(
         chars.windows(2).all(|pair| pair[0] == pair[1]),
     ))
+}
+
+fn eqv(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [left, right]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span,
+    })?;
+
+    Ok(Value::Boolean(eqv_value(&left, &right)))
+}
+
+fn eqv_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Boolean(left), Value::Boolean(right)) => left == right,
+        (Value::Integer(left), Value::Integer(right)) => left == right,
+        (Value::Character(left), Value::Character(right)) => left == right,
+        (Value::String(left), Value::String(right)) => left == right,
+        (Value::Symbol(left), Value::Symbol(right)) => left == right,
+        (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
+        _ => false,
+    }
 }
 
 fn predicate(
@@ -598,6 +623,7 @@ mod tests {
     fn evaluates_list_reverse_and_char_comparison() {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
+        assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
     }
 
     #[test]
@@ -614,5 +640,10 @@ mod tests {
             eval_one("(cond ((string? 1) 10) ((number? 1) 20) (else 30))"),
             "20"
         );
+    }
+
+    #[test]
+    fn evaluates_desugared_case() {
+        assert_eq!(eval_one("(case 'b ((a c) 10) ((b d) 20) (else 30))"), "20");
     }
 }

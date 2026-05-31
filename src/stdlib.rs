@@ -64,6 +64,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::predicate("output-port?", Type::OutputPort),
         Primitive::predicate("eof-object?", Type::EofObject),
         Primitive::new("not", Type::procedure(vec![Type::Any], Type::Boolean)),
+        Primitive::new(
+            "eqv?",
+            Type::procedure(vec![Type::Any, Type::Any], Type::Boolean),
+        ),
         Primitive::new("+", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new("*", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new(
@@ -202,6 +206,10 @@ mod tests {
         assert_eq!(
             primitive("+").unwrap().signature.to_string(),
             "(->* number? number?)"
+        );
+        assert_eq!(
+            primitive("eqv?").unwrap().signature.to_string(),
+            "(-> any? any? boolean?)"
         );
         assert_eq!(
             primitive("char=?").unwrap().signature.to_string(),

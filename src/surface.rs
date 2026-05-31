@@ -136,6 +136,7 @@ fn classify_list(
         Some("and") => parse_and(span, origin, rest),
         Some("or") => parse_or(span, origin, rest),
         Some("cond") => parse_cond(span, origin, rest),
+        Some("case") => parse_case(span, origin, rest),
         _ => parse_apply(origin, head, rest),
     }
 }
@@ -604,6 +605,161 @@ fn parse_cond(
     Ok(result.node)
 }
 
+fn parse_case(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    if rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "case",
+            expected: "a key expression and at least one clause",
+            span,
+        });
+    }
+
+    let key = classify_expr(&rest[0])?;
+    let temp = Spanned {
+        node: format!("__lavu_case_key_{}", span.start),
+        span: rest[0].span.clone(),
+        origin,
+    };
+    let mut result = Spanned {
+        node: boolean_literal(false),
+        span: span.clone(),
+        origin,
+    };
+
+    for (index, clause) in rest[1..].iter().enumerate().rev() {
+        let Datum::List(items) = &clause.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "case clause",
+                span: clause.span.clone(),
+            });
+        };
+        let Some((head, body)) = items.split_first() else {
+            return Err(SurfaceError::BadArity {
+                form: "case clause",
+                expected: "datums and at least one body expression",
+                span: clause.span.clone(),
+            });
+        };
+        if body.is_empty() {
+            return Err(SurfaceError::BadArity {
+                form: "case clause",
+                expected: "at least one body expression",
+                span: clause.span.clone(),
+            });
+        }
+
+        if identifier_name(head).as_deref() == Some("else") {
+            if index != rest.len() - 2 {
+                return Err(SurfaceError::BadArity {
+                    form: "case",
+                    expected: "else clause last",
+                    span: clause.span.clone(),
+                });
+            }
+
+            result = Spanned {
+                node: body_expr(body, clause.span.clone(), origin)?,
+                span: clause.span.clone(),
+                origin,
+            };
+            continue;
+        }
+
+        let Datum::List(datums) = &head.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "case clause datums",
+                span: head.span.clone(),
+            });
+        };
+
+        let condition = case_datum_tests(&temp, datums, clause.span.clone(), origin);
+        let consequent = Spanned {
+            node: body_expr(body, clause.span.clone(), origin)?,
+            span: clause.span.clone(),
+            origin,
+        };
+        result = Spanned {
+            node: Expr::If {
+                condition: Box::new(condition),
+                consequent: Box::new(consequent),
+                alternate: Some(Box::new(result)),
+            },
+            span: clause.span.clone(),
+            origin,
+        };
+    }
+
+    Ok(Expr::Apply {
+        operator: Box::new(Spanned {
+            node: Expr::Lambda {
+                params: vec![temp],
+                body: vec![result],
+            },
+            span: span.clone(),
+            origin,
+        }),
+        operands: vec![key],
+    })
+}
+
+fn case_datum_tests(
+    key_name: &Spanned<String>,
+    datums: &[Spanned<Datum>],
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Spanned<Expr> {
+    datums.iter().rev().fold(
+        Spanned {
+            node: boolean_literal(false),
+            span: span.clone(),
+            origin,
+        },
+        |alternate, datum| {
+            let condition = Spanned {
+                node: Expr::Apply {
+                    operator: Box::new(Spanned {
+                        node: Expr::Variable("eqv?".to_string()),
+                        span: datum.span.clone(),
+                        origin,
+                    }),
+                    operands: vec![
+                        Spanned {
+                            node: Expr::Variable(key_name.node.clone()),
+                            span: key_name.span.clone(),
+                            origin: key_name.origin,
+                        },
+                        Spanned {
+                            node: Expr::Quote(Box::new(datum.clone())),
+                            span: datum.span.clone(),
+                            origin: datum.origin,
+                        },
+                    ],
+                },
+                span: datum.span.clone(),
+                origin,
+            };
+
+            Spanned {
+                node: Expr::If {
+                    condition: Box::new(condition),
+                    consequent: Box::new(Spanned {
+                        node: boolean_literal(true),
+                        span: datum.span.clone(),
+                        origin,
+                    }),
+                    alternate: Some(Box::new(alternate)),
+                },
+                span: span.clone(),
+                origin,
+            }
+        },
+    )
+}
+
 fn body_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
@@ -794,5 +950,13 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::If { .. })));
+    }
+
+    #[test]
+    fn desugars_case_to_single_key_application() {
+        let datums = parse("(case x ((a b) 1) (else 2))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
     }
 }

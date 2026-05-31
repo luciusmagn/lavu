@@ -691,4 +691,9 @@ mod tests {
             "number?"
         );
     }
+
+    #[test]
+    fn infers_case_result_type() {
+        assert_eq!(infer_one("(case 'b ((a c) 10) (else 30))"), "number?");
+    }
 }
