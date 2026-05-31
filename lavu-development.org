@@ -1,0 +1,223 @@
+#+title: Lavu Development Notes
+
+* Purpose
+This file records the design constraints and work log for finishing Lavu:
+parser and AST architecture, rewrites/normalization, native evaluation,
+the Rust standard library, REPL ergonomics, source diagnostics, and
+occurrence typing.
+
+* Language Scope
+- Lavu aims to support R5RS: nothing more, nothing less.
+- The one intentional future opening is SRFI-9, so user-defined record
+  types can eventually appear in inferred types.
+- Macros should be expanded before type inference. The type engine does
+  not need to infer macro-phase types, but macro expansion must preserve
+  source origins so diagnostics point back to user code.
+
+* Implementation Shape
+- Prefer a stable AST with reusable traversal over one new AST enum per
+  tiny pass.
+- Keep the tiny-pass learning style by making each parser, desugar, type,
+  or normalization pass small and inspectable.
+- Gerbil is temporary. The final implementation should use Lavu's native
+  parser, normalizer, type inference engine, evaluator, and standard
+  library.
+- Preserve source spans and origin metadata through parser, macro
+  expansion, rewrites, normalization, type inference, and evaluation.
+- Ariadne diagnostics and Reedline highlighting are core design
+  constraints, not presentation extras.
+- Future REPL stepping should inspect both Scheme rewrites/normalization
+  and type inference.
+
+* Parser And AST Direction
+The original staged-parser idea was good: each file should demonstrate
+one new concept. The current implementation bloated because every new
+AST enum requires copying all older variants and all recursive conversion
+logic into the next parser file.
+
+The likely replacement shape is:
+
+#+begin_src text
+Datum -> SurfaceExpr -> CoreExpr
+#+end_src
+
+- =Datum= represents parsed Scheme data: atoms, lists/pairs, vectors,
+  quote syntax, quasiquote syntax, and source spans.
+- =SurfaceExpr= represents recognized Scheme forms before aggressive
+  desugaring: =lambda=, =define=, =if=, =set!=, =begin=, =let= variants,
+  =cond=, =case=, =and=, =or=, =do=, =delay=, applications, and literals.
+- =CoreExpr= is the smaller evaluator target after derived forms are
+  normalized.
+
+Tiny pass files should remain, but they should operate over stable types
+with shared traversal helpers instead of defining a fresh enum for every
+stage.
+
+Quote handling should distinguish data from expressions. For example,
+=Quote(Datum)= is cleaner than =Quote(Expression)= because quoted
+program-looking data must not be classified, typechecked, or rewritten as
+runtime code.
+
+* Rewrites And Normalization
+- Preserve the current educational normalization pipeline, but make each
+  rewrite a small pass over stable ASTs.
+- Avoid losing source-level shape before diagnostics and type inference.
+- Lower derived R5RS forms to a small core only when the next stage
+  benefits from that core.
+- Future REPL stepping should expose each normalization step.
+
+* Standard Library
+- Implement the R5RS standard library in Rust rather than defining most
+  procedures in terms of each other.
+- Tag each primitive with a runtime implementation and a type scheme.
+- Predicate primitives also carry refinement metadata for occurrence
+  typing.
+- The runtime should support the full numeric tower. Type inference may
+  initially treat numeric values coarsely as =number?=, then refine later
+  if useful.
+
+* Occurrence Typing
+Occurrence typing should use predicate information to refine variables in
+control-flow positions.
+
+For example:
+
+#+begin_src scheme
+(lambda (x)
+  (if (string? x)
+      (string-length x)
+      (+ x 1)))
+#+end_src
+
+The true branch refines =x= to =string?=. The false branch refines =x=
+away from =string?=. The final function can infer:
+
+#+begin_src scheme
+(-> (U string? number?) number?)
+#+end_src
+
+The initial educational model should support:
+- Fresh type variables for lambda parameters.
+- Constraints from applications of typed primitives and known procedures.
+- Union types from branches and compatible constraints.
+- Predicate propositions for simple variable tests such as =(string? x)=.
+- Refinement propagation through =if=, =cond=, =and=, =or=, and =not=.
+- Clear diagnostics when a refinement conflicts with a required type.
+
+Full Typed Racket-style proposition logic is not an initial goal.
+
+* Displayed Type Syntax
+The REPL type query syntax is:
+
+#+begin_src scheme
+? expr...
+#+end_src
+
+Displayed types should resemble R5RS predicate names as closely as
+possible. These are displayed type atoms, not runtime predicate calls.
+The Lavu REPL can highlight them differently to make that clear.
+
+Core displayed atoms:
+
+#+begin_src scheme
+any?
+unknown?
+never?
+boolean?
+number?
+char?
+string?
+symbol?
+pair?
+null?
+list?
+vector?
+procedure?
+port?
+input-port?
+output-port?
+eof-object?
+#+end_src
+
+Unions:
+
+#+begin_src scheme
+(U string? number?)
+(U null? (pair? any? any?))
+#+end_src
+
+Procedures:
+
+#+begin_src scheme
+(-> number? number?)
+(-> char? char? boolean?)
+(-> string? number?)
+#+end_src
+
+Variadic procedures:
+
+#+begin_src scheme
+(->* number? number?)
+(-> char? char? * boolean?)
+#+end_src
+
+Structured types:
+
+#+begin_src scheme
+(listof number?)
+(listof any?)
+(pair? symbol? number?)
+#+end_src
+
+Polymorphic examples:
+
+#+begin_src scheme
+(-> (listof a) (listof a))
+(-> a (listof a))
+(-> (pair? a b) a)
+#+end_src
+
+Example REPL output:
+
+#+begin_src scheme
+? 1
+number?
+
+? "hi"
+string?
+
+? '(1 2 3)
+(listof number?)
+
+? (lambda (x) (+ x 1))
+(-> number? number?)
+
+? reverse
+(-> (listof a) (listof a))
+#+end_src
+
+=unknown?= means Lavu could not infer a useful type yet. =any?= means any
+Scheme value is valid.
+
+* Dynamic Features
+- =values= should be modeled with expression result types, for example
+  one value, many fixed values, or unknown-many values.
+- =apply= should eventually use procedure types with fixed and rest
+  arguments. A conservative initial type is acceptable.
+- =call/cc= should be supported at runtime, but type inference can be
+  deliberately approximate. Continuation invocation can initially widen
+  to =any?= or behave like =never?= internally when useful.
+
+* Work Log
+** Initial Direction
+- Record the parser/AST refactor direction: stable =Datum=,
+  =SurfaceExpr=, and =CoreExpr= instead of many numbered AST enums.
+- Record the need for shared traversal helpers to keep tiny passes tiny.
+- Record that quoted data should stay data, not classified expressions.
+- Record that Gerbil is temporary and Lavu should eventually run on its
+  native evaluator and Rust standard library.
+- Record the R5RS-only scope and future SRFI-9 opening.
+- Record the REPL type query syntax as =? expr...=.
+- Record the predicate-shaped displayed type syntax.
+- Record occurrence typing, typed Rust stdlib, macro expansion staging,
+  full numeric tower runtime, and future stepping goals.
