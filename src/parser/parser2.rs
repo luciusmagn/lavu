@@ -1,5 +1,5 @@
-use color_eyre::Result;
 use color_eyre::eyre::bail;
+use color_eyre::Result;
 use logos::Span as LogosSpan;
 
 use crate::ast::ast1::{Atom, SExp};

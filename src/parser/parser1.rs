@@ -10,8 +10,8 @@ use crate::lexer::Token;
 
 type TokenWithSpan<'a> = (Token, &'a str, Span);
 
-pub fn atom()
--> FilterMap<impl Fn(Range<usize>, Token) -> Result<SExp, Simple<Token>>, Simple<Token>> {
+pub fn atom(
+) -> FilterMap<impl Fn(Range<usize>, Token) -> Result<SExp, Simple<Token>>, Simple<Token>> {
     filter_map(|span: Range<usize>, token: Token| match token {
         Token::Identifier(name) => Ok(SExp::Atom(Atom::Identifier(name), span)),
         Token::Integer(n) => Ok(SExp::Atom(Atom::Integer(n), span)),

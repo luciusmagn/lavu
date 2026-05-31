@@ -1,4 +1,4 @@
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 use logos::Span as LogosSpan;
 use std::ops::Range;
 

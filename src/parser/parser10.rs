@@ -1,13 +1,13 @@
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 use logos::Span as LogosSpan;
 
 use std::ops::Range;
 
 use crate::ast::ast1::Atom;
+use crate::ast::ast10::{Definition, Expression, Program, TopLevelForm};
 use crate::ast::ast9::{
     Definition as Definition9, Expression as Expression9, TopLevelForm as TopLevelForm9,
 };
-use crate::ast::ast10::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
 
 fn convert_top_level_form(form: &TopLevelForm9) -> Result<TopLevelForm> {

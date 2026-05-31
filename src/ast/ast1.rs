@@ -2,7 +2,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use bigdecimal::BigDecimal;
 use color_eyre::eyre::Result;
 use logos::Span as LogosSpan;
-use num::{BigInt, complex};
+use num::{complex, BigInt};
 
 use std::fmt::Debug;
 use std::ops::Range;
