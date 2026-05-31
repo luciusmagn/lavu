@@ -107,6 +107,13 @@ impl Env {
     fn install_primitives(&self) {
         for name in [
             "+",
+            "-",
+            "*",
+            "=",
+            "<",
+            ">",
+            "<=",
+            ">=",
             "boolean?",
             "number?",
             "char?",
@@ -247,6 +254,13 @@ fn apply_primitive(
 ) -> Result<Value, EvalError> {
     match name {
         "+" => add(args, span),
+        "-" => subtract(args, span),
+        "*" => multiply(args, span),
+        "=" => numeric_compare(args, span, |a, b| a == b),
+        "<" => numeric_compare(args, span, |a, b| a < b),
+        ">" => numeric_compare(args, span, |a, b| a > b),
+        "<=" => numeric_compare(args, span, |a, b| a <= b),
+        ">=" => numeric_compare(args, span, |a, b| a >= b),
         "boolean?" => predicate(args, span, |value| matches!(value, Value::Boolean(_))),
         "number?" => predicate(args, span, |value| matches!(value, Value::Integer(_))),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
@@ -294,15 +308,67 @@ fn apply_primitive(
 }
 
 fn add(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    Ok(Value::Integer(
+        numeric_args(args, span)?.into_iter().sum::<BigInt>(),
+    ))
+}
+
+fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let mut numbers = numeric_args(args, span.clone())?.into_iter();
+    let Some(first) = numbers.next() else {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual: 0,
+            span,
+        });
+    };
+
+    let result = if numbers.len() == 0 {
+        -first
+    } else {
+        numbers.fold(first, |difference, n| difference - n)
+    };
+
+    Ok(Value::Integer(result))
+}
+
+fn multiply(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    Ok(Value::Integer(
+        numeric_args(args, span)?
+            .into_iter()
+            .fold(BigInt::from(1), |product, n| product * n),
+    ))
+}
+
+fn numeric_compare(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl Fn(&BigInt, &BigInt) -> bool,
+) -> Result<Value, EvalError> {
+    let numbers = numeric_args(args, span.clone())?;
+    if numbers.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: numbers.len(),
+            span,
+        });
+    }
+
+    Ok(Value::Boolean(
+        numbers.windows(2).all(|pair| pred(&pair[0], &pair[1])),
+    ))
+}
+
+fn numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<BigInt>, EvalError> {
     args.into_iter()
-        .try_fold(BigInt::from(0), |sum, value| match value {
-            Value::Integer(n) => Ok(sum + n),
+        .map(|value| match value {
+            Value::Integer(n) => Ok(n),
             _ => Err(EvalError::TypeError {
                 expected: "number?",
                 span: span.clone(),
             }),
         })
-        .map(Value::Integer)
+        .collect()
 }
 
 fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -451,6 +517,10 @@ mod tests {
     #[test]
     fn evaluates_primitive_arithmetic() {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
+        assert_eq!(eval_one("(- 10 3 2)"), "5");
+        assert_eq!(eval_one("(* 2 3 4)"), "24");
+        assert_eq!(eval_one("(= 2 2 2)"), "#t");
+        assert_eq!(eval_one("(< 1 2 3)"), "#t");
     }
 
     #[test]

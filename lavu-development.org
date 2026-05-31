@@ -273,3 +273,6 @@ Scheme value is valid.
 ** Define Procedure Shorthand
 - Support top-level =(define (name args...) body...)= by lowering it to a
   lambda definition.
+** Native Numeric Primitives
+- Add integer runtime support for subtraction, multiplication, and numeric
+  comparison primitives.
