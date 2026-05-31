@@ -288,3 +288,6 @@ Scheme value is valid.
 ** Case Classifier
 - Add =eqv?= primitive metadata/runtime support and lower =case= through
   a single-key lambda application plus nested equality tests.
+** Pair And List Primitives
+- Add native runtime support for =cons=, =car=, =cdr=, and =append= so
+  the evaluator matches the existing standard-library type metadata.

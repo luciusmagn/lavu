@@ -17,6 +17,7 @@ pub enum Value {
     String(String),
     Symbol(String),
     List(Vec<Value>),
+    Pair(Box<Value>, Box<Value>),
     Vector(Vec<Value>),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
@@ -130,8 +131,12 @@ impl Env {
             "procedure?",
             "not",
             "eqv?",
+            "cons",
+            "car",
+            "cdr",
             "list",
             "reverse",
+            "append",
             "string-length",
             "char=?",
         ] {
@@ -299,6 +304,7 @@ fn apply_primitive(
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
         "pair?" => predicate(args, span, |value| match value {
             Value::List(items) => !items.is_empty(),
+            Value::Pair(_, _) => true,
             _ => false,
         }),
         "null?" => predicate(
@@ -313,6 +319,9 @@ fn apply_primitive(
         }),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
+        "cons" => cons(args, span),
+        "car" => unary(args, span.clone(), |value| car(value, span)),
+        "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
         "list" => Ok(Value::List(args)),
         "reverse" => unary(args, span.clone(), |value| match value {
             Value::List(mut items) => {
@@ -324,6 +333,7 @@ fn apply_primitive(
                 span,
             }),
         }),
+        "append" => append(args, span),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -451,6 +461,62 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
     }
 }
 
+fn cons(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [head, tail]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span,
+    })?;
+
+    Ok(match tail {
+        Value::List(mut items) => {
+            items.insert(0, head);
+            Value::List(items)
+        }
+        tail => Value::Pair(Box::new(head), Box::new(tail)),
+    })
+}
+
+fn car(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
+    match value {
+        Value::List(items) if !items.is_empty() => Ok(items[0].clone()),
+        Value::Pair(head, _) => Ok(*head),
+        _ => Err(EvalError::TypeError {
+            expected: "pair?",
+            span,
+        }),
+    }
+}
+
+fn cdr(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
+    match value {
+        Value::List(items) if !items.is_empty() => Ok(Value::List(items[1..].to_vec())),
+        Value::Pair(_, tail) => Ok(*tail),
+        _ => Err(EvalError::TypeError {
+            expected: "pair?",
+            span,
+        }),
+    }
+}
+
+fn append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let mut result = Vec::new();
+    for arg in args {
+        match arg {
+            Value::List(items) => result.extend(items),
+            _ => {
+                return Err(EvalError::TypeError {
+                    expected: "list?",
+                    span,
+                });
+            }
+        }
+    }
+
+    Ok(Value::List(result))
+}
+
 fn predicate(
     args: Vec<Value>,
     span: SourceSpan,
@@ -536,6 +602,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
+            Value::Pair(head, tail) => write!(f, "({head} . {tail})"),
             Value::Vector(items) => {
                 write!(f, "#(")?;
                 for (index, item) in items.iter().enumerate() {
@@ -624,6 +691,15 @@ mod tests {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
+    }
+
+    #[test]
+    fn evaluates_pair_and_list_primitives() {
+        assert_eq!(eval_one("(cons 1 (list 2 3))"), "(1 2 3)");
+        assert_eq!(eval_one("(cons 1 2)"), "(1 . 2)");
+        assert_eq!(eval_one("(car (list 1 2 3))"), "1");
+        assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
+        assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
     }
 
     #[test]
