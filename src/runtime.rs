@@ -534,6 +534,14 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_recursive_top_level_definitions() {
+        assert_eq!(
+            eval_one("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)"),
+            "120"
+        );
+    }
+
+    #[test]
     fn evaluates_if_with_scheme_truthiness() {
         assert_eq!(eval_one("(if #f 1 2)"), "2");
         assert_eq!(eval_one("(if '() 1 2)"), "1");

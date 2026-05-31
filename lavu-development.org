@@ -276,3 +276,6 @@ Scheme value is valid.
 ** Native Numeric Primitives
 - Add integer runtime support for subtraction, multiplication, and numeric
   comparison primitives.
+** Recursive Native Definitions
+- Cover recursive top-level procedure definitions through the native
+  evaluator.
