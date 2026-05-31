@@ -252,3 +252,7 @@ Scheme value is valid.
 ** REPL Type Query
 - Add the =? expr...= type query path using the new parser,
   classifier, and inference engine.
+** Native Runtime Seed
+- Add a native evaluator on the stable surface AST for literals, quote,
+  variables, lambdas, if, begin, set!, define, and a first Rust primitive
+  set.
