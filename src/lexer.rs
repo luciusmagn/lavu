@@ -1,15 +1,13 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Logos, Span};
-use num::{
-    bigint::ParseBigIntError, complex::ParseComplexError, BigInt, Complex, Num,
-};
+use num::{BigInt, Complex, Num, bigint::ParseBigIntError, complex::ParseComplexError};
 use strum::EnumIs;
 use thiserror::Error;
 
 use std::rc::Rc;
 use std::str::FromStr;
 
-use crate::chars::{parse_char, ParseCharError};
+use crate::chars::{ParseCharError, parse_char};
 
 #[derive(Error, PartialEq, Debug, Clone)]
 pub enum LexerError {
@@ -244,8 +242,8 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::eyre::ensure;
     use color_eyre::Result;
+    use color_eyre::eyre::ensure;
 
     #[track_caller]
     fn test_single(s: &str, pred: impl Fn(&Token) -> bool) -> Result<()> {
@@ -297,10 +295,7 @@ mod tests {
         test_single("lambda", Token::is_identifier)?;
         test_single("list->vector", Token::is_identifier)?;
         test_single("<=?", Token::is_identifier)?;
-        test_single(
-            "the-word-recursion-has-many-meanings",
-            Token::is_identifier,
-        )?;
+        test_single("the-word-recursion-has-many-meanings", Token::is_identifier)?;
         test_single("q", Token::is_identifier)?;
         test_single("soup", Token::is_identifier)?;
         test_single("V17a", Token::is_identifier)?;

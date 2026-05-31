@@ -1,4 +1,4 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use logos::Span as LogosSpan;
 
 use std::ops::Range;
@@ -121,7 +121,9 @@ fn convert_expression(expr: &Expression14) -> Result<Expression> {
                                         span.clone(),
                                     ));
                                 } else {
-                                    bail!("Second element of do must be a list containing test and result expressions");
+                                    bail!(
+                                        "Second element of do must be a list containing test and result expressions"
+                                    );
                                 }
                             } else {
                                 bail!("First element of do must be a list of bindings");
@@ -168,12 +170,14 @@ fn convert_expression(expr: &Expression14) -> Result<Expression> {
                                             (name.clone(), name_span.clone()),
                                             bindings,
                                             body,
-                                            span.clone()
+                                            span.clone(),
                                         ));
                                     } else {
-                                        bail!("Third element of named let must be a list of bindings");
+                                        bail!(
+                                            "Third element of named let must be a list of bindings"
+                                        );
                                     }
-                                },
+                                }
 
                                 // Regular let: (let ((var val) ...) body ...)
                                 Expression14::List(bindings_exprs, _) => {
@@ -185,9 +189,11 @@ fn convert_expression(expr: &Expression14) -> Result<Expression> {
                                         .collect::<Result<Vec<_>>>()?;
 
                                     return Ok(Expression::Let(bindings, body, span.clone()));
-                                },
+                                }
 
-                                _ => bail!("Second element of let must be either an identifier (for named let) or a list of bindings"),
+                                _ => bail!(
+                                    "Second element of let must be either an identifier (for named let) or a list of bindings"
+                                ),
                             }
                         }
                         "cond" if elements.len() >= 2 => {
@@ -212,7 +218,9 @@ fn convert_expression(expr: &Expression14) -> Result<Expression> {
                                             }
 
                                             if clause_elements.len() < 2 {
-                                                bail!("Else clause must have at least one result expression");
+                                                bail!(
+                                                    "Else clause must have at least one result expression"
+                                                );
                                             }
 
                                             else_clause = Some(
@@ -264,7 +272,9 @@ fn convert_expression(expr: &Expression14) -> Result<Expression> {
                                             }
 
                                             if clause_elements.len() < 2 {
-                                                bail!("Else clause must have at least one result expression");
+                                                bail!(
+                                                    "Else clause must have at least one result expression"
+                                                );
                                             }
 
                                             else_clause = Some(

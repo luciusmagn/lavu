@@ -1,19 +1,16 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use logos::Span as LogosSpan;
 
 use crate::ast::ast1::Atom;
 use crate::ast::ast6::{
-    Definition as Definition6, Expression as Expression6,
-    TopLevelForm as TopLevelForm6,
+    Definition as Definition6, Expression as Expression6, TopLevelForm as TopLevelForm6,
 };
 use crate::ast::ast7::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
 
 fn convert_top_level_form(form: &TopLevelForm6) -> Result<TopLevelForm> {
     match form {
-        TopLevelForm6::Definition(def) => {
-            Ok(TopLevelForm::Definition(convert_definition(def)?))
-        }
+        TopLevelForm6::Definition(def) => Ok(TopLevelForm::Definition(convert_definition(def)?)),
         TopLevelForm6::Expression(expr) => {
             let new_expr = convert_expression(expr)?;
             Ok(TopLevelForm::Expression(new_expr))
@@ -35,16 +32,12 @@ fn convert_definition(def: &Definition6) -> Result<Definition> {
 
 fn convert_expression(expr: &Expression6) -> Result<Expression> {
     match expr {
-        Expression6::Atom(atom, span) => {
-            Ok(Expression::Atom(atom.clone(), span.clone()))
-        }
+        Expression6::Atom(atom, span) => Ok(Expression::Atom(atom.clone(), span.clone())),
 
         Expression6::List(elements, span) => {
             // Check if this is an if form
             if !elements.is_empty() {
-                if let Expression6::Atom(Atom::Identifier(keyword), _) =
-                    &elements[0]
-                {
+                if let Expression6::Atom(Atom::Identifier(keyword), _) = &elements[0] {
                     if keyword == "if" {
                         if elements.len() < 3 || elements.len() > 4 {
                             bail!("if expression must have 2 or 3 parts");
@@ -72,10 +65,8 @@ fn convert_expression(expr: &Expression6) -> Result<Expression> {
 
                         return Ok(Expression::Begin(exprs, span.clone()));
                     } else if keyword == "set!" && elements.len() == 3 {
-                        if let Expression6::Atom(
-                            Atom::Identifier(var_name),
-                            var_span,
-                        ) = &elements[1]
+                        if let Expression6::Atom(Atom::Identifier(var_name), var_span) =
+                            &elements[1]
                         {
                             let value_expr = convert_expression(&elements[2])?;
                             return Ok(Expression::SetBang(
@@ -84,9 +75,7 @@ fn convert_expression(expr: &Expression6) -> Result<Expression> {
                                 span.clone(),
                             ));
                         } else {
-                            bail!(
-                                "set! requires variable name as first argument"
-                            );
+                            bail!("set! requires variable name as first argument");
                         }
                     }
                 }
@@ -125,12 +114,10 @@ fn convert_expression(expr: &Expression6) -> Result<Expression> {
             span.clone(),
         )),
 
-        Expression6::UnquoteSplicing(inner, span) => {
-            Ok(Expression::UnquoteSplicing(
-                Box::new(convert_expression(inner)?),
-                span.clone(),
-            ))
-        }
+        Expression6::UnquoteSplicing(inner, span) => Ok(Expression::UnquoteSplicing(
+            Box::new(convert_expression(inner)?),
+            span.clone(),
+        )),
 
         Expression6::SymbolLiteral(name, span) => {
             Ok(Expression::SymbolLiteral(name.clone(), span.clone()))

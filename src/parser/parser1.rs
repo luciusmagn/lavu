@@ -10,10 +10,8 @@ use crate::lexer::Token;
 
 type TokenWithSpan<'a> = (Token, &'a str, Span);
 
-pub fn atom() -> FilterMap<
-    impl Fn(Range<usize>, Token) -> Result<SExp, Simple<Token>>,
-    Simple<Token>,
-> {
+pub fn atom()
+-> FilterMap<impl Fn(Range<usize>, Token) -> Result<SExp, Simple<Token>>, Simple<Token>> {
     filter_map(|span: Range<usize>, token: Token| match token {
         Token::Identifier(name) => Ok(SExp::Atom(Atom::Identifier(name), span)),
         Token::Integer(n) => Ok(SExp::Atom(Atom::Integer(n), span)),
@@ -24,9 +22,9 @@ pub fn atom() -> FilterMap<
         Token::Character(c) => Ok(SExp::Atom(Atom::Character(c), span)),
         Token::True => Ok(SExp::Atom(Atom::Boolean(true), span)),
         Token::False => Ok(SExp::Atom(Atom::Boolean(false), span)),
-        Token::Binary(integer)
-        | Token::Octal(integer)
-        | Token::Hex(integer) => Ok(SExp::Atom(Atom::Integer(integer), span)),
+        Token::Binary(integer) | Token::Octal(integer) | Token::Hex(integer) => {
+            Ok(SExp::Atom(Atom::Integer(integer), span))
+        }
         _ => Err(Simple::custom(
             span,
             format!("Expected atom, got {:?}", token),
@@ -34,15 +32,11 @@ pub fn atom() -> FilterMap<
     })
 }
 
-pub fn parse(
-    tokens: &[TokenWithSpan],
-) -> Result<Vec<SExp>, Vec<Simple<Token>>> {
+pub fn parse(tokens: &[TokenWithSpan]) -> Result<Vec<SExp>, Vec<Simple<Token>>> {
     // Filter out whitespace and comments
     let filtered_tokens: Vec<_> = tokens
         .iter()
-        .filter(|(token, _, _)| {
-            !matches!(token, Token::Whitespace(_) | Token::LineComment)
-        })
+        .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_) | Token::LineComment))
         .cloned()
         .collect();
 
@@ -71,21 +65,15 @@ pub fn parse(
 
         let quasiquote = just(Token::Backquote)
             .ignore_then(expr.clone())
-            .map_with_span(|quoted, span| {
-                SExp::Quasiquote(Box::new(quoted), span)
-            });
+            .map_with_span(|quoted, span| SExp::Quasiquote(Box::new(quoted), span));
 
         let unquote = just(Token::Unquote)
             .ignore_then(expr.clone())
-            .map_with_span(|quoted, span| {
-                SExp::Unquote(Box::new(quoted), span)
-            });
+            .map_with_span(|quoted, span| SExp::Unquote(Box::new(quoted), span));
 
         let unquote_splicing = just(Token::UnquoteSplicing)
             .ignore_then(expr.clone())
-            .map_with_span(|quoted, span| {
-                SExp::UnquoteSplicing(Box::new(quoted), span)
-            });
+            .map_with_span(|quoted, span| SExp::UnquoteSplicing(Box::new(quoted), span));
 
         choice((
             atom(),
@@ -127,11 +115,7 @@ pub fn find_unclosed_sexp(tokens: &[TokenWithSpan]) -> Option<usize> {
     paren_stack.first().copied()
 }
 
-pub fn create_diagnostic(
-    input: &str,
-    tokens: &[TokenWithSpan],
-    error_index: usize,
-) -> Result<()> {
+pub fn create_diagnostic(input: &str, tokens: &[TokenWithSpan], error_index: usize) -> Result<()> {
     use ariadne::{Color, Label, Report, ReportKind, Source};
 
     if error_index >= tokens.len() {

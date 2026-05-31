@@ -1,21 +1,18 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use logos::Span as LogosSpan;
 
 use std::ops::Range;
 
 use crate::ast::ast1::Atom;
 use crate::ast::ast13::{
-    Definition as Definition13, Expression as Expression13,
-    TopLevelForm as TopLevelForm13,
+    Definition as Definition13, Expression as Expression13, TopLevelForm as TopLevelForm13,
 };
 use crate::ast::ast14::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
 
 fn convert_top_level_form(form: &TopLevelForm13) -> Result<TopLevelForm> {
     match form {
-        TopLevelForm13::Definition(def) => {
-            Ok(TopLevelForm::Definition(convert_definition(def)?))
-        }
+        TopLevelForm13::Definition(def) => Ok(TopLevelForm::Definition(convert_definition(def)?)),
         TopLevelForm13::Expression(expr) => {
             let new_expr = convert_expression(expr)?;
             Ok(TopLevelForm::Expression(new_expr))
@@ -42,16 +39,9 @@ fn parse_bindings(
     for binding_expr in bindings_exprs {
         match binding_expr {
             Expression13::List(pair, _) if pair.len() == 2 => {
-                if let Expression13::Atom(
-                    Atom::Identifier(var_name),
-                    var_span,
-                ) = &pair[0]
-                {
+                if let Expression13::Atom(Atom::Identifier(var_name), var_span) = &pair[0] {
                     let init_expr = convert_expression(&pair[1])?;
-                    bindings.push((
-                        (var_name.clone(), var_span.clone()),
-                        init_expr,
-                    ));
+                    bindings.push(((var_name.clone(), var_span.clone()), init_expr));
                 } else {
                     bail!("First element of binding must be a variable name");
                 }
@@ -64,16 +54,12 @@ fn parse_bindings(
 
 fn convert_expression(expr: &Expression13) -> Result<Expression> {
     match expr {
-        Expression13::Atom(atom, span) => {
-            Ok(Expression::Atom(atom.clone(), span.clone()))
-        }
+        Expression13::Atom(atom, span) => Ok(Expression::Atom(atom.clone(), span.clone())),
 
         Expression13::List(elements, span) => {
             // Check for special forms
             if !elements.is_empty() {
-                if let Expression13::Atom(Atom::Identifier(keyword), _) =
-                    &elements[0]
-                {
+                if let Expression13::Atom(Atom::Identifier(keyword), _) = &elements[0] {
                     match keyword.as_str() {
                         "and" => {
                             // (and expr1 expr2 ...)
@@ -116,12 +102,14 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                             (name.clone(), name_span.clone()),
                                             bindings,
                                             body,
-                                            span.clone()
+                                            span.clone(),
                                         ));
                                     } else {
-                                        bail!("Third element of named let must be a list of bindings");
+                                        bail!(
+                                            "Third element of named let must be a list of bindings"
+                                        );
                                     }
-                                },
+                                }
 
                                 // Regular let: (let ((var val) ...) body ...)
                                 Expression13::List(bindings_exprs, _) => {
@@ -133,9 +121,11 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                         .collect::<Result<Vec<_>>>()?;
 
                                     return Ok(Expression::Let(bindings, body, span.clone()));
-                                },
+                                }
 
-                                _ => bail!("Second element of let must be either an identifier (for named let) or a list of bindings"),
+                                _ => bail!(
+                                    "Second element of let must be either an identifier (for named let) or a list of bindings"
+                                ),
                             }
                         }
                         // [... other keyword cases from previous ast13 ...]
@@ -146,18 +136,14 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
 
                             // Process each clause
                             for clause_expr in &elements[1..] {
-                                if let Expression13::List(clause_elements, _) =
-                                    clause_expr
-                                {
+                                if let Expression13::List(clause_elements, _) = clause_expr {
                                     if clause_elements.is_empty() {
                                         bail!("Cond clause cannot be empty");
                                     }
 
                                     // Check for else clause
-                                    if let Expression13::Atom(
-                                        Atom::Identifier(clause_key),
-                                        _,
-                                    ) = &clause_elements[0]
+                                    if let Expression13::Atom(Atom::Identifier(clause_key), _) =
+                                        &clause_elements[0]
                                     {
                                         if clause_key == "else" {
                                             if else_clause.is_some() {
@@ -165,17 +151,16 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                             }
 
                                             if clause_elements.len() < 2 {
-                                                bail!("Else clause must have at least one result expression");
+                                                bail!(
+                                                    "Else clause must have at least one result expression"
+                                                );
                                             }
 
                                             else_clause = Some(
                                                 clause_elements[1..]
                                                     .iter()
-                                                    .map(|e| {
-                                                        convert_expression(e)
-                                                    })
-                                                    .collect::<Result<Vec<_>>>(
-                                                    )?,
+                                                    .map(|e| convert_expression(e))
+                                                    .collect::<Result<Vec<_>>>()?,
                                             );
 
                                             continue; // Skip to next clause
@@ -183,9 +168,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                     }
 
                                     // Regular clause
-                                    let test_expr = convert_expression(
-                                        &clause_elements[0],
-                                    )?;
+                                    let test_expr = convert_expression(&clause_elements[0])?;
                                     let result_exprs = clause_elements[1..]
                                         .iter()
                                         .map(|e| convert_expression(e))
@@ -197,11 +180,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                 }
                             }
 
-                            return Ok(Expression::Cond(
-                                clauses,
-                                else_clause,
-                                span.clone(),
-                            ));
+                            return Ok(Expression::Cond(clauses, else_clause, span.clone()));
                         }
                         "case" if elements.len() >= 3 => {
                             // Parse case form
@@ -211,18 +190,14 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
 
                             // Process each clause
                             for clause_expr in &elements[2..] {
-                                if let Expression13::List(clause_elements, _) =
-                                    clause_expr
-                                {
+                                if let Expression13::List(clause_elements, _) = clause_expr {
                                     if clause_elements.is_empty() {
                                         bail!("Case clause cannot be empty");
                                     }
 
                                     // Check for else clause
-                                    if let Expression13::Atom(
-                                        Atom::Identifier(clause_key),
-                                        _,
-                                    ) = &clause_elements[0]
+                                    if let Expression13::Atom(Atom::Identifier(clause_key), _) =
+                                        &clause_elements[0]
                                     {
                                         if clause_key == "else" {
                                             if else_clause.is_some() {
@@ -230,17 +205,16 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                             }
 
                                             if clause_elements.len() < 2 {
-                                                bail!("Else clause must have at least one result expression");
+                                                bail!(
+                                                    "Else clause must have at least one result expression"
+                                                );
                                             }
 
                                             else_clause = Some(
                                                 clause_elements[1..]
                                                     .iter()
-                                                    .map(|e| {
-                                                        convert_expression(e)
-                                                    })
-                                                    .collect::<Result<Vec<_>>>(
-                                                    )?,
+                                                    .map(|e| convert_expression(e))
+                                                    .collect::<Result<Vec<_>>>()?,
                                             );
 
                                             continue; // Skip to next clause
@@ -248,9 +222,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                     }
 
                                     // Regular clause with datums
-                                    if let Expression13::List(datums, _) =
-                                        &clause_elements[0]
-                                    {
+                                    if let Expression13::List(datums, _) = &clause_elements[0] {
                                         let datum_exprs = datums
                                             .iter()
                                             .map(|e| convert_expression(e))
@@ -261,12 +233,9 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                             .map(|e| convert_expression(e))
                                             .collect::<Result<Vec<_>>>()?;
 
-                                        clauses
-                                            .push((datum_exprs, result_exprs));
+                                        clauses.push((datum_exprs, result_exprs));
                                     } else {
-                                        bail!(
-                                            "Case clause datums must be a list"
-                                        );
+                                        bail!("Case clause datums must be a list");
                                     }
                                 } else {
                                     bail!("Each case clause must be a list");
@@ -282,9 +251,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                         }
                         "letrec" if elements.len() >= 3 => {
                             // Parse letrec form
-                            if let Expression13::List(bindings_exprs, _) =
-                                &elements[1]
-                            {
+                            if let Expression13::List(bindings_exprs, _) = &elements[1] {
                                 let bindings = parse_bindings(bindings_exprs)?;
 
                                 let body = elements[2..]
@@ -292,20 +259,14 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                     .map(|e| convert_expression(e))
                                     .collect::<Result<Vec<_>>>()?;
 
-                                return Ok(Expression::LetRec(
-                                    bindings,
-                                    body,
-                                    span.clone(),
-                                ));
+                                return Ok(Expression::LetRec(bindings, body, span.clone()));
                             } else {
                                 bail!("Second element of letrec must be a list of bindings");
                             }
                         }
                         "let*" if elements.len() >= 3 => {
                             // Parse let* form
-                            if let Expression13::List(bindings_exprs, _) =
-                                &elements[1]
-                            {
+                            if let Expression13::List(bindings_exprs, _) = &elements[1] {
                                 let bindings = parse_bindings(bindings_exprs)?;
 
                                 let body = elements[2..]
@@ -313,11 +274,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                                     .map(|e| convert_expression(e))
                                     .collect::<Result<Vec<_>>>()?;
 
-                                return Ok(Expression::LetStar(
-                                    bindings,
-                                    body,
-                                    span.clone(),
-                                ));
+                                return Ok(Expression::LetStar(bindings, body, span.clone()));
                             } else {
                                 bail!("Second element of let* must be a list of bindings");
                             }
@@ -330,9 +287,7 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                             let condition = convert_expression(&elements[1])?;
                             let then_expr = convert_expression(&elements[2])?;
                             let else_expr = if elements.len() == 4 {
-                                Some(Box::new(convert_expression(
-                                    &elements[3],
-                                )?))
+                                Some(Box::new(convert_expression(&elements[3])?))
                             } else {
                                 None
                             };
@@ -353,13 +308,10 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
                             return Ok(Expression::Begin(exprs, span.clone()));
                         }
                         "set!" if elements.len() == 3 => {
-                            if let Expression13::Atom(
-                                Atom::Identifier(var_name),
-                                var_span,
-                            ) = &elements[1]
+                            if let Expression13::Atom(Atom::Identifier(var_name), var_span) =
+                                &elements[1]
                             {
-                                let value_expr =
-                                    convert_expression(&elements[2])?;
+                                let value_expr = convert_expression(&elements[2])?;
                                 return Ok(Expression::SetBang(
                                     (var_name.clone(), var_span.clone()),
                                     Box::new(value_expr),
@@ -408,12 +360,10 @@ fn convert_expression(expr: &Expression13) -> Result<Expression> {
             span.clone(),
         )),
 
-        Expression13::UnquoteSplicing(inner, span) => {
-            Ok(Expression::UnquoteSplicing(
-                Box::new(convert_expression(inner)?),
-                span.clone(),
-            ))
-        }
+        Expression13::UnquoteSplicing(inner, span) => Ok(Expression::UnquoteSplicing(
+            Box::new(convert_expression(inner)?),
+            span.clone(),
+        )),
 
         Expression13::SymbolLiteral(name, span) => {
             Ok(Expression::SymbolLiteral(name.clone(), span.clone()))

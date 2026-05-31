@@ -1,19 +1,16 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use logos::Span as LogosSpan;
 
 use crate::ast::ast1::Atom;
 use crate::ast::ast7::{
-    Definition as Definition7, Expression as Expression7,
-    TopLevelForm as TopLevelForm7,
+    Definition as Definition7, Expression as Expression7, TopLevelForm as TopLevelForm7,
 };
 use crate::ast::ast8::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
 
 fn convert_top_level_form(form: &TopLevelForm7) -> Result<TopLevelForm> {
     match form {
-        TopLevelForm7::Definition(def) => {
-            Ok(TopLevelForm::Definition(convert_definition(def)?))
-        }
+        TopLevelForm7::Definition(def) => Ok(TopLevelForm::Definition(convert_definition(def)?)),
         TopLevelForm7::Expression(expr) => {
             let new_expr = convert_expression(expr)?;
             Ok(TopLevelForm::Expression(new_expr))
@@ -35,34 +32,39 @@ fn convert_definition(def: &Definition7) -> Result<Definition> {
 
 fn convert_expression(expr: &Expression7) -> Result<Expression> {
     match expr {
-        Expression7::Atom(atom, span) => {
-            Ok(Expression::Atom(atom.clone(), span.clone()))
-        }
+        Expression7::Atom(atom, span) => Ok(Expression::Atom(atom.clone(), span.clone())),
 
         Expression7::List(elements, span) => {
             // Check if this is a let form
             if !elements.is_empty() {
-                if let Expression7::Atom(Atom::Identifier(keyword), _) =
-                    &elements[0]
-                {
+                if let Expression7::Atom(Atom::Identifier(keyword), _) = &elements[0] {
                     if keyword == "let" && elements.len() >= 3 {
                         // We expect the second element to be a list of bindings
-                        if let Expression7::List(bindings_exprs, _) =
-                            &elements[1]
-                        {
+                        if let Expression7::List(bindings_exprs, _) = &elements[1] {
                             // Parse bindings
                             let mut bindings = Vec::new();
                             for binding_expr in bindings_exprs {
                                 match binding_expr {
                                     Expression7::List(pair, _) if pair.len() == 2 => {
-                                        if let Expression7::Atom(Atom::Identifier(var_name), var_span) = &pair[0] {
+                                        if let Expression7::Atom(
+                                            Atom::Identifier(var_name),
+                                            var_span,
+                                        ) = &pair[0]
+                                        {
                                             let init_expr = convert_expression(&pair[1])?;
-                                            bindings.push(((var_name.clone(), var_span.clone()), init_expr));
+                                            bindings.push((
+                                                (var_name.clone(), var_span.clone()),
+                                                init_expr,
+                                            ));
                                         } else {
-                                            bail!("First element of binding must be a variable name");
+                                            bail!(
+                                                "First element of binding must be a variable name"
+                                            );
                                         }
-                                    },
-                                    _ => bail!("Each binding must be a list of form (var init-expr)"),
+                                    }
+                                    _ => {
+                                        bail!("Each binding must be a list of form (var init-expr)")
+                                    }
                                 }
                             }
 
@@ -72,11 +74,7 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
                                 .map(|e| convert_expression(e))
                                 .collect::<Result<Vec<_>>>()?;
 
-                            return Ok(Expression::Let(
-                                bindings,
-                                body,
-                                span.clone(),
-                            ));
+                            return Ok(Expression::Let(bindings, body, span.clone()));
                         } else {
                             // TODO: this would be handled by the named let pass
                             let new_elements = elements
@@ -84,10 +82,7 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
                                 .map(|e| convert_expression(e))
                                 .collect::<Result<Vec<_>>>()?;
 
-                            return Ok(Expression::List(
-                                new_elements,
-                                span.clone(),
-                            ));
+                            return Ok(Expression::List(new_elements, span.clone()));
                         }
                     }
                     // Handle other special forms
@@ -118,10 +113,8 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
 
                         return Ok(Expression::Begin(exprs, span.clone()));
                     } else if keyword == "set!" && elements.len() == 3 {
-                        if let Expression7::Atom(
-                            Atom::Identifier(var_name),
-                            var_span,
-                        ) = &elements[1]
+                        if let Expression7::Atom(Atom::Identifier(var_name), var_span) =
+                            &elements[1]
                         {
                             let value_expr = convert_expression(&elements[2])?;
                             return Ok(Expression::SetBang(
@@ -130,9 +123,7 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
                                 span.clone(),
                             ));
                         } else {
-                            bail!(
-                                "set! requires variable name as first argument"
-                            );
+                            bail!("set! requires variable name as first argument");
                         }
                     }
                 }
@@ -171,12 +162,10 @@ fn convert_expression(expr: &Expression7) -> Result<Expression> {
             span.clone(),
         )),
 
-        Expression7::UnquoteSplicing(inner, span) => {
-            Ok(Expression::UnquoteSplicing(
-                Box::new(convert_expression(inner)?),
-                span.clone(),
-            ))
-        }
+        Expression7::UnquoteSplicing(inner, span) => Ok(Expression::UnquoteSplicing(
+            Box::new(convert_expression(inner)?),
+            span.clone(),
+        )),
 
         Expression7::SymbolLiteral(name, span) => {
             Ok(Expression::SymbolLiteral(name.clone(), span.clone()))

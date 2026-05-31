@@ -1,10 +1,9 @@
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use logos::Span as LogosSpan;
 
 use crate::ast::ast1::Atom;
 use crate::ast::ast3::{
-    Definition as Definition3, Expression as Expression3,
-    TopLevelForm as TopLevelForm3,
+    Definition as Definition3, Expression as Expression3, TopLevelForm as TopLevelForm3,
 };
 use crate::ast::ast4::{Definition, Expression, Program, TopLevelForm};
 use crate::lexer::Token;
@@ -73,16 +72,12 @@ fn standardize_definition(def: &Definition3) -> Result<Definition> {
 
 fn convert_expression(expr: &Expression3) -> Result<Expression> {
     match expr {
-        Expression3::Atom(atom, span) => {
-            Ok(Expression::Atom(atom.clone(), span.clone()))
-        }
+        Expression3::Atom(atom, span) => Ok(Expression::Atom(atom.clone(), span.clone())),
 
         Expression3::List(elements, span) => {
             // Check if this is a lambda form
             if elements.len() >= 3 {
-                if let Expression3::Atom(Atom::Identifier(keyword), _) =
-                    &elements[0]
-                {
+                if let Expression3::Atom(Atom::Identifier(keyword), _) = &elements[0] {
                     if keyword == "lambda" {
                         return parse_lambda(&elements[1..], span);
                     }
@@ -122,12 +117,10 @@ fn convert_expression(expr: &Expression3) -> Result<Expression> {
             span.clone(),
         )),
 
-        Expression3::UnquoteSplicing(inner, span) => {
-            Ok(Expression::UnquoteSplicing(
-                Box::new(convert_expression(inner)?),
-                span.clone(),
-            ))
-        }
+        Expression3::UnquoteSplicing(inner, span) => Ok(Expression::UnquoteSplicing(
+            Box::new(convert_expression(inner)?),
+            span.clone(),
+        )),
 
         Expression3::SymbolLiteral(name, span) => {
             Ok(Expression::SymbolLiteral(name.clone(), span.clone()))

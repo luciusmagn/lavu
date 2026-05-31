@@ -76,10 +76,7 @@ impl Expression {
         }
     }
 
-    pub fn convert_span(
-        &self,
-        tokens: &[(Token, &str, LogosSpan)],
-    ) -> Range<usize> {
+    pub fn convert_span(&self, tokens: &[(Token, &str, LogosSpan)]) -> Range<usize> {
         let og_span = self.span();
 
         // Filter out whitespace and comments
@@ -164,21 +161,17 @@ pub fn report_let_forms(
                 let form_name = expr.get_form_name();
                 let expr_span = expr.convert_span(tokens);
 
-                let mut report = Report::build(
-                    ReportKind::Advice,
-                    (filename, 0..input.len()),
-                )
-                .with_message(format!("Found {} expression", form_name))
-                .with_label(
-                    Label::new((filename, expr_span))
-                        .with_message(format!("This is a {} form", form_name))
-                        .with_color(Color::Blue),
-                );
+                let mut report = Report::build(ReportKind::Advice, (filename, 0..input.len()))
+                    .with_message(format!("Found {} expression", form_name))
+                    .with_label(
+                        Label::new((filename, expr_span))
+                            .with_message(format!("This is a {} form", form_name))
+                            .with_color(Color::Blue),
+                    );
 
                 // Highlight each variable binding
                 for ((var_name, var_span), init_expr) in bindings {
-                    let var_source_span =
-                        Expression::convert_binding_span(var_span, tokens);
+                    let var_source_span = Expression::convert_binding_span(var_span, tokens);
 
                     report = report.with_label(
                         Label::new((filename, var_source_span))

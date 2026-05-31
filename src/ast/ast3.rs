@@ -34,21 +34,14 @@ impl Expression {
 
     pub fn from_sexp(sexp: &SExp) -> Expression {
         match sexp {
-            SExp::Atom(atom, span) => {
-                Expression::Atom(atom.clone(), span.clone())
-            }
+            SExp::Atom(atom, span) => Expression::Atom(atom.clone(), span.clone()),
             SExp::List(elements, span) => {
                 // Check for (quote symbol) form
                 if elements.len() == 2 {
                     if let SExp::Atom(Atom::Identifier(sym), _) = &elements[0] {
                         if sym == "quote" {
-                            if let SExp::Atom(Atom::Identifier(name), _) =
-                                &elements[1]
-                            {
-                                return Expression::SymbolLiteral(
-                                    name.clone(),
-                                    span.clone(),
-                                );
+                            if let SExp::Atom(Atom::Identifier(name), _) = &elements[1] {
+                                return Expression::SymbolLiteral(name.clone(), span.clone());
                             }
                         }
                     }
@@ -68,24 +61,18 @@ impl Expression {
                 if let SExp::Atom(Atom::Identifier(name), _) = inner.as_ref() {
                     Expression::SymbolLiteral(name.clone(), span.clone())
                 } else {
-                    Expression::Quote(
-                        Box::new(Expression::from_sexp(inner)),
-                        span.clone(),
-                    )
+                    Expression::Quote(Box::new(Expression::from_sexp(inner)), span.clone())
                 }
             }
-            SExp::Quasiquote(inner, span) => Expression::Quasiquote(
-                Box::new(Expression::from_sexp(inner)),
-                span.clone(),
-            ),
-            SExp::Unquote(inner, span) => Expression::Unquote(
-                Box::new(Expression::from_sexp(inner)),
-                span.clone(),
-            ),
-            SExp::UnquoteSplicing(inner, span) => Expression::UnquoteSplicing(
-                Box::new(Expression::from_sexp(inner)),
-                span.clone(),
-            ),
+            SExp::Quasiquote(inner, span) => {
+                Expression::Quasiquote(Box::new(Expression::from_sexp(inner)), span.clone())
+            }
+            SExp::Unquote(inner, span) => {
+                Expression::Unquote(Box::new(Expression::from_sexp(inner)), span.clone())
+            }
+            SExp::UnquoteSplicing(inner, span) => {
+                Expression::UnquoteSplicing(Box::new(Expression::from_sexp(inner)), span.clone())
+            }
         }
     }
 }
@@ -117,27 +104,21 @@ impl Definition {
         }
     }
 
-    pub fn from_ast2_definition(
-        def: &crate::ast::ast2::Definition,
-    ) -> Definition {
+    pub fn from_ast2_definition(def: &crate::ast::ast2::Definition) -> Definition {
         match def {
-            crate::ast::ast2::Definition::Variable((name, span), expr) => {
-                Definition::Variable(
+            crate::ast::ast2::Definition::Variable((name, span), expr) => Definition::Variable(
+                (name.clone(), span.clone()),
+                Box::new(Expression::from_sexp(expr)),
+            ),
+            crate::ast::ast2::Definition::Procedure((name, span), args, body) => {
+                Definition::Procedure(
                     (name.clone(), span.clone()),
-                    Box::new(Expression::from_sexp(expr)),
+                    args.clone(),
+                    body.iter()
+                        .map(|expr| Expression::from_sexp(expr))
+                        .collect(),
                 )
             }
-            crate::ast::ast2::Definition::Procedure(
-                (name, span),
-                args,
-                body,
-            ) => Definition::Procedure(
-                (name.clone(), span.clone()),
-                args.clone(),
-                body.iter()
-                    .map(|expr| Expression::from_sexp(expr))
-                    .collect(),
-            ),
         }
     }
 }

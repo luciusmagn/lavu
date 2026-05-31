@@ -53,8 +53,8 @@ pub enum Expression {
     Case(
         Box<Expression>,                         // key expression
         Vec<(Vec<Expression>, Vec<Expression>)>, // normal clauses: (datums, results)
-        Option<Vec<Expression>>, // else clause: results (if present)
-        Range<usize>,            // span
+        Option<Vec<Expression>>,                 // else clause: results (if present)
+        Range<usize>,                            // span
     ),
     Cond(
         Vec<(Expression, Vec<Expression>)>, // normal clauses: (test, results)
@@ -62,10 +62,10 @@ pub enum Expression {
         Range<usize>,                       // span
     ),
     NamedLet(
-        (String, Range<usize>), // procedure name
+        (String, Range<usize>),                    // procedure name
         Vec<((String, Range<usize>), Expression)>, // bindings: (var expr) pairs
-        Vec<Expression>,        // body expressions
-        Range<usize>,           // span
+        Vec<Expression>,                           // body expressions
+        Range<usize>,                              // span
     ),
     // New logical operators
     And(

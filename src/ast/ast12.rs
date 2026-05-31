@@ -53,8 +53,8 @@ pub enum Expression {
     Case(
         Box<Expression>,                         // key expression
         Vec<(Vec<Expression>, Vec<Expression>)>, // normal clauses: (datums, results)
-        Option<Vec<Expression>>, // else clause: results (if present)
-        Range<usize>,            // span
+        Option<Vec<Expression>>,                 // else clause: results (if present)
+        Range<usize>,                            // span
     ),
     // New cond form
     Cond(

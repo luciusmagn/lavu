@@ -2,7 +2,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use bigdecimal::BigDecimal;
 use color_eyre::eyre::Result;
 use logos::Span as LogosSpan;
-use num::{complex, BigInt};
+use num::{BigInt, complex};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -45,10 +45,7 @@ impl SExp {
         }
     }
 
-    pub fn convert_span(
-        &self,
-        tokens: &[(Token, &str, LogosSpan)],
-    ) -> Range<usize> {
+    pub fn convert_span(&self, tokens: &[(Token, &str, LogosSpan)]) -> Range<usize> {
         let og_span = self.span();
 
         // TODO: This is contigent on the fact that we do keep skipping WS and comment tokens
@@ -103,11 +100,7 @@ impl SExp {
     }
 }
 
-pub fn ariadne_yap(
-    input: &str,
-    tokens: &[(Token, &str, LogosSpan)],
-    sexps: &[SExp],
-) -> Result<()> {
+pub fn ariadne_yap(input: &str, tokens: &[(Token, &str, LogosSpan)], sexps: &[SExp]) -> Result<()> {
     for sexp in sexps {
         sexp.report(input, "input.ss", tokens)
             .eprint(("input.ss", Source::from(input)))?;

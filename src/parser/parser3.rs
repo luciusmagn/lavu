@@ -31,8 +31,6 @@ fn convert_top_level_form(form: &TopLevelForm2) -> TopLevelForm {
         TopLevelForm2::Definition(def) => {
             TopLevelForm::Definition(Definition::from_ast2_definition(def))
         }
-        TopLevelForm2::Expression(sexp) => {
-            TopLevelForm::Expression(Expression::from_sexp(sexp))
-        }
+        TopLevelForm2::Expression(sexp) => TopLevelForm::Expression(Expression::from_sexp(sexp)),
     }
 }

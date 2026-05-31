@@ -251,9 +251,10 @@ impl fmt::Display for Value {
             Value::Rational(r) => write!(f, "{}/{}", r.numer(), r.denom()),
             Value::Real(d) => write!(f, "{}", d),
             Value::Complex(c) => {
-                if c.im.is_zero() {
+                let zero = BigDecimal::from(0);
+                if c.im == zero {
                     write!(f, "{}", c.re)
-                } else if c.im.is_sign_positive() {
+                } else if c.im > zero {
                     write!(f, "{}+{}i", c.re, c.im)
                 } else {
                     write!(f, "{}{}i", c.re, c.im)

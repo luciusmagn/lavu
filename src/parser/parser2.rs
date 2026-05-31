@@ -1,5 +1,5 @@
-use color_eyre::eyre::bail;
 use color_eyre::Result;
+use color_eyre::eyre::bail;
 use logos::Span as LogosSpan;
 
 use crate::ast::ast1::{Atom, SExp};
@@ -52,7 +52,8 @@ fn try_parse_definition(sexp: &SExp) -> Result<Option<Definition>> {
                             let args = params[1..]
                                 .iter()
                                 .map(|param| {
-                                    if let SExp::Atom(Atom::Identifier(arg_name), arg_span) = param {
+                                    if let SExp::Atom(Atom::Identifier(arg_name), arg_span) = param
+                                    {
                                         Ok((arg_name.clone(), arg_span.clone()))
                                     } else {
                                         bail!("Procedure parameters must be identifiers")
@@ -83,11 +84,7 @@ fn try_parse_definition(sexp: &SExp) -> Result<Option<Definition>> {
     }
 }
 
-pub fn parse(
-    input: &str,
-    tokens: &[(Token, &str, LogosSpan)],
-    sexps: &[SExp],
-) -> Result<Program> {
+pub fn parse(input: &str, tokens: &[(Token, &str, LogosSpan)], sexps: &[SExp]) -> Result<Program> {
     let forms = sexps
         .iter()
         .map(parse_top_level_form)
