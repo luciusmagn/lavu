@@ -459,6 +459,11 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_define_procedure_shorthand() {
+        assert_eq!(eval_one("(define (add1 x) (+ x 1)) (add1 4)"), "5");
+    }
+
+    #[test]
     fn evaluates_if_with_scheme_truthiness() {
         assert_eq!(eval_one("(if #f 1 2)"), "2");
         assert_eq!(eval_one("(if '() 1 2)"), "1");

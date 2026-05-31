@@ -148,17 +148,59 @@ fn parse_define(
         return Ok(None);
     }
 
-    if rest.len() != 2 {
+    if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
             form: "define",
-            expected: "a name and a value",
+            expected: "a name and value, or procedure shorthand and body",
             span: datum.span.clone(),
         });
     }
 
-    let name = expect_identifier(&rest[0], "define")?;
-    let value = classify_expr(&rest[1])?;
-    Ok(Some((name, value)))
+    match &rest[0].node {
+        Datum::Atom(Atom::Identifier(_)) => {
+            if rest.len() != 2 {
+                return Err(SurfaceError::BadArity {
+                    form: "define",
+                    expected: "a name and a value",
+                    span: datum.span.clone(),
+                });
+            }
+
+            let name = expect_identifier(&rest[0], "define")?;
+            let value = classify_expr(&rest[1])?;
+            Ok(Some((name, value)))
+        }
+        Datum::List(formals) => {
+            let Some((name_datum, params)) = formals.split_first() else {
+                return Err(SurfaceError::BadArity {
+                    form: "define",
+                    expected: "a procedure name",
+                    span: rest[0].span.clone(),
+                });
+            };
+
+            let name = expect_identifier(name_datum, "define procedure")?;
+            let params = params
+                .iter()
+                .map(|param| expect_identifier(param, "define procedure formals"))
+                .collect::<Result<Vec<_>, _>>()?;
+            let body = rest[1..]
+                .iter()
+                .map(classify_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = Spanned {
+                node: Expr::Lambda { params, body },
+                span: datum.span.clone(),
+                origin: datum.origin,
+            };
+
+            Ok(Some((name, value)))
+        }
+        _ => Err(SurfaceError::ExpectedIdentifier {
+            context: "define",
+            span: rest[0].span.clone(),
+        }),
+    }
 }
 
 fn parse_quote(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
@@ -600,6 +642,19 @@ mod tests {
         let TopLevel::Define { name, value } = &program.forms[0].node else {
             panic!("expected define");
         };
+        assert_eq!(name.node, "add1");
+        assert!(matches!(value.node, Expr::Lambda { .. }));
+    }
+
+    #[test]
+    fn classifies_define_procedure_shorthand() {
+        let datums = parse("(define (add1 x) (+ x 1))").unwrap();
+        let program = classify_program(&datums).unwrap();
+
+        let TopLevel::Define { name, value } = &program.forms[0].node else {
+            panic!("expected define");
+        };
+
         assert_eq!(name.node, "add1");
         assert!(matches!(value.node, Expr::Lambda { .. }));
     }

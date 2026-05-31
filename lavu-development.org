@@ -270,3 +270,6 @@ Scheme value is valid.
   surface AST.
 ** Let Star Classifier
 - Desugar =let*= into nested single-binding lambda applications.
+** Define Procedure Shorthand
+- Support top-level =(define (name args...) body...)= by lowering it to a
+  lambda definition.
