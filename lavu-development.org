@@ -234,3 +234,6 @@ Scheme value is valid.
 - Remove local lifetime-syntax warnings and update the clipboard
   dependency within existing constraints to clear Cargo's future
   incompatibility warning.
+** Stable Datum Parser
+- Add a library datum parser that uses existing lexer tokens but produces
+  stable =Spanned<Datum>= nodes with byte spans.

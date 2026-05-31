@@ -1,13 +1,13 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Logos, Span};
-use num::{BigInt, Complex, Num, bigint::ParseBigIntError, complex::ParseComplexError};
+use num::{bigint::ParseBigIntError, complex::ParseComplexError, BigInt, Complex, Num};
 use strum::EnumIs;
 use thiserror::Error;
 
 use std::rc::Rc;
 use std::str::FromStr;
 
-use crate::chars::{ParseCharError, parse_char};
+use crate::chars::{parse_char, ParseCharError};
 
 #[derive(Error, PartialEq, Debug, Clone)]
 pub enum LexerError {
@@ -242,8 +242,8 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use color_eyre::Result;
     use color_eyre::eyre::ensure;
+    use color_eyre::Result;
 
     #[track_caller]
     fn test_single(s: &str, pred: impl Fn(&Token) -> bool) -> Result<()> {
