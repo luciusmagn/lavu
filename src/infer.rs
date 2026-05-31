@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use thiserror::Error;
 
@@ -54,7 +54,7 @@ impl TypeEnv {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Inferencer {
     substitutions: BTreeMap<String, Type>,
 }
@@ -116,18 +116,7 @@ impl Inferencer {
                 condition,
                 consequent,
                 alternate,
-            } => {
-                self.infer_expr(condition, env)?;
-                let consequent_ty = self.infer_expr(consequent, env)?;
-                let alternate_ty = match alternate {
-                    Some(expr) => self.infer_expr(expr, env)?,
-                    None => Type::Unknown,
-                };
-                Ok(Type::union(vec![
-                    self.resolve(consequent_ty),
-                    self.resolve(alternate_ty),
-                ]))
-            }
+            } => self.infer_if(condition, consequent, alternate.as_deref(), env),
             Expr::Begin(exprs) => self.infer_sequence(exprs, env),
             Expr::Set { name, value } => {
                 let expected =
@@ -171,6 +160,93 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         Ok(Type::procedure(param_types, self.resolve(result)))
+    }
+
+    fn infer_if(
+        &mut self,
+        condition: &Spanned<Expr>,
+        consequent: &Spanned<Expr>,
+        alternate: Option<&Spanned<Expr>>,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let predicate = predicate_refinement(condition);
+        self.infer_expr(condition, env)?;
+
+        let Some((refined_name, refined_type)) = predicate else {
+            let consequent_ty = self.infer_expr(consequent, env)?;
+            let alternate_ty = match alternate {
+                Some(expr) => self.infer_expr(expr, env)?,
+                None => Type::Unknown,
+            };
+            return Ok(Type::union(vec![
+                self.resolve(consequent_ty),
+                self.resolve(alternate_ty),
+            ]));
+        };
+
+        let base = self.clone();
+
+        let mut then_env = env.clone();
+        then_env.define(refined_name.clone(), refined_type.clone());
+        let mut then_inferencer = base.clone();
+        let consequent_ty = then_inferencer.infer_expr(consequent, &then_env)?;
+
+        let mut else_inferencer = base;
+        let alternate_ty = match alternate {
+            Some(expr) => else_inferencer.infer_expr(expr, env)?,
+            None => Type::Unknown,
+        };
+
+        self.merge_branch_substitutions(
+            &refined_name,
+            refined_type,
+            &then_inferencer,
+            &else_inferencer,
+        );
+
+        Ok(Type::union(vec![
+            then_inferencer.resolve(consequent_ty),
+            else_inferencer.resolve(alternate_ty),
+        ]))
+    }
+
+    fn merge_branch_substitutions(
+        &mut self,
+        refined_name: &str,
+        refined_type: Type,
+        then_inferencer: &Inferencer,
+        else_inferencer: &Inferencer,
+    ) {
+        let mut names = BTreeSet::new();
+        names.insert(refined_name.to_string());
+        names.extend(then_inferencer.substitutions.keys().cloned());
+        names.extend(else_inferencer.substitutions.keys().cloned());
+
+        for name in names {
+            let then_ty = if name == refined_name {
+                Some(refined_type.clone())
+            } else {
+                then_inferencer
+                    .substitutions
+                    .get(&name)
+                    .cloned()
+                    .map(|ty| then_inferencer.resolve(ty))
+            };
+            let else_ty = else_inferencer
+                .substitutions
+                .get(&name)
+                .cloned()
+                .map(|ty| else_inferencer.resolve(ty));
+
+            let merged = match (then_ty, else_ty) {
+                (Some(then_ty), Some(else_ty)) => Type::union(vec![then_ty, else_ty]),
+                (Some(then_ty), None) => then_ty,
+                (None, Some(else_ty)) => else_ty,
+                (None, None) => continue,
+            };
+
+            self.substitutions.insert(name, self.resolve(merged));
+        }
     }
 
     fn infer_sequence(
@@ -352,6 +428,29 @@ fn span_for_operands(operands: &[Spanned<Expr>]) -> SourceSpan {
     }
 }
 
+fn predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
+    let Expr::Apply { operator, operands } = &condition.node else {
+        return None;
+    };
+    if operands.len() != 1 {
+        return None;
+    }
+
+    let Expr::Variable(predicate_name) = &operator.node else {
+        return None;
+    };
+    let Expr::Variable(variable_name) = &operands[0].node else {
+        return None;
+    };
+
+    primitive(predicate_name).and_then(|primitive| {
+        primitive
+            .predicate
+            .filter(|predicate| predicate.argument == 0)
+            .map(|predicate| (variable_name.clone(), predicate.positive))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
@@ -384,6 +483,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (c) (char=? c #\\a))"),
             "(-> char? boolean?)"
+        );
+    }
+
+    #[test]
+    fn infers_union_parameters_from_predicate_branches() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (string? x) (string-length x) (+ x 1)))"),
+            "(-> (U number? string?) number?)"
         );
     }
 }

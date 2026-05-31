@@ -246,3 +246,6 @@ Scheme value is valid.
 ** Initial Type Inference
 - Add a first constraint-based inference pass for literals, variables,
   primitive applications, lambdas, definitions, begin, set!, and if.
+** First Occurrence Typing
+- Add branch-local predicate refinement for simple variable predicates
+  such as =(string? x)= and merge branch constraints into union types.
