@@ -294,3 +294,7 @@ Scheme value is valid.
 ** Dotted List Data
 - Extend the stable datum parser and runtime quote conversion to support
   dotted list data without classifying dotted data as expression syntax.
+** Numeric Runtime Values
+- Represent integer, rational, decimal, and complex literals as native
+  numeric values and add exact rational arithmetic for core numeric
+  primitives while inference continues to display them as =number?=.

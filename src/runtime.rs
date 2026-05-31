@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use num::BigInt;
+use bigdecimal::BigDecimal;
+use num::{BigInt, BigRational, Complex};
 use thiserror::Error;
 
 use crate::surface::{Expr, Program, TopLevel};
@@ -12,6 +13,9 @@ use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Integer(BigInt),
+    Rational(BigRational),
+    Decimal(BigDecimal),
+    Complex(Complex<BigDecimal>),
     Boolean(bool),
     Character(char),
     String(String),
@@ -114,6 +118,7 @@ impl Env {
             "+",
             "-",
             "*",
+            "/",
             "=",
             "<",
             ">",
@@ -292,13 +297,19 @@ fn apply_primitive(
         "+" => add(args, span),
         "-" => subtract(args, span),
         "*" => multiply(args, span),
+        "/" => divide(args, span),
         "=" => numeric_compare(args, span, |a, b| a == b),
         "<" => numeric_compare(args, span, |a, b| a < b),
         ">" => numeric_compare(args, span, |a, b| a > b),
         "<=" => numeric_compare(args, span, |a, b| a <= b),
         ">=" => numeric_compare(args, span, |a, b| a >= b),
         "boolean?" => predicate(args, span, |value| matches!(value, Value::Boolean(_))),
-        "number?" => predicate(args, span, |value| matches!(value, Value::Integer(_))),
+        "number?" => predicate(args, span, |value| {
+            matches!(
+                value,
+                Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_)
+            )
+        }),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "string?" => predicate(args, span, |value| matches!(value, Value::String(_))),
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
@@ -350,13 +361,15 @@ fn apply_primitive(
 }
 
 fn add(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    Ok(Value::Integer(
-        numeric_args(args, span)?.into_iter().sum::<BigInt>(),
+    Ok(exact_number(
+        exact_numeric_args(args, span)?
+            .into_iter()
+            .sum::<BigRational>(),
     ))
 }
 
 fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    let mut numbers = numeric_args(args, span.clone())?.into_iter();
+    let mut numbers = exact_numeric_args(args, span.clone())?.into_iter();
     let Some(first) = numbers.next() else {
         return Err(EvalError::ArityMismatch {
             expected: 1,
@@ -371,23 +384,44 @@ fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         numbers.fold(first, |difference, n| difference - n)
     };
 
-    Ok(Value::Integer(result))
+    Ok(exact_number(result))
 }
 
 fn multiply(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    Ok(Value::Integer(
-        numeric_args(args, span)?
+    Ok(exact_number(
+        exact_numeric_args(args, span)?
             .into_iter()
-            .fold(BigInt::from(1), |product, n| product * n),
+            .fold(BigRational::from_integer(BigInt::from(1)), |product, n| {
+                product * n
+            }),
     ))
+}
+
+fn divide(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let mut numbers = exact_numeric_args(args, span.clone())?.into_iter();
+    let Some(first) = numbers.next() else {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual: 0,
+            span,
+        });
+    };
+
+    let result = if numbers.len() == 0 {
+        BigRational::from_integer(BigInt::from(1)) / first
+    } else {
+        numbers.fold(first, |quotient, n| quotient / n)
+    };
+
+    Ok(exact_number(result))
 }
 
 fn numeric_compare(
     args: Vec<Value>,
     span: SourceSpan,
-    pred: impl Fn(&BigInt, &BigInt) -> bool,
+    pred: impl Fn(&BigRational, &BigRational) -> bool,
 ) -> Result<Value, EvalError> {
-    let numbers = numeric_args(args, span.clone())?;
+    let numbers = exact_numeric_args(args, span.clone())?;
     if numbers.len() < 2 {
         return Err(EvalError::ArityMismatch {
             expected: 2,
@@ -401,10 +435,11 @@ fn numeric_compare(
     ))
 }
 
-fn numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<BigInt>, EvalError> {
+fn exact_numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<BigRational>, EvalError> {
     args.into_iter()
         .map(|value| match value {
-            Value::Integer(n) => Ok(n),
+            Value::Integer(n) => Ok(BigRational::from_integer(n)),
+            Value::Rational(n) => Ok(n),
             _ => Err(EvalError::TypeError {
                 expected: "number?",
                 span: span.clone(),
@@ -453,6 +488,13 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Boolean(left), Value::Boolean(right)) => left == right,
         (Value::Integer(left), Value::Integer(right)) => left == right,
+        (Value::Rational(left), Value::Rational(right)) => left == right,
+        (Value::Integer(left), Value::Rational(right))
+        | (Value::Rational(right), Value::Integer(left)) => {
+            &BigRational::from_integer(left.clone()) == right
+        }
+        (Value::Decimal(left), Value::Decimal(right)) => left == right,
+        (Value::Complex(left), Value::Complex(right)) => left == right,
         (Value::Character(left), Value::Character(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
@@ -571,9 +613,9 @@ fn atom_to_value(atom: &Atom) -> Value {
     match atom {
         Atom::Identifier(name) => Value::Symbol(name.clone()),
         Atom::Integer(n) => Value::Integer(n.clone()),
-        Atom::Decimal(n) => Value::String(n.to_string()),
-        Atom::Real(n, d) => Value::String(format!("{n}/{d}")),
-        Atom::Complex(n) => Value::String(format!("{}+{}i", n.re, n.im)),
+        Atom::Decimal(n) => Value::Decimal(n.clone()),
+        Atom::Real(n, d) => Value::Rational(BigRational::new(n.clone(), d.clone())),
+        Atom::Complex(n) => Value::Complex(n.clone()),
         Atom::String(text) => Value::String(text.clone()),
         Atom::Boolean(value) => Value::Boolean(*value),
         Atom::Character(value) => Value::Character(*value),
@@ -582,6 +624,14 @@ fn atom_to_value(atom: &Atom) -> Value {
 
 fn truthy(value: &Value) -> bool {
     !matches!(value, Value::Boolean(false))
+}
+
+fn exact_number(number: BigRational) -> Value {
+    if number.denom() == &BigInt::from(1) {
+        Value::Integer(number.numer().clone())
+    } else {
+        Value::Rational(number)
+    }
 }
 
 fn cons_value(head: Value, tail: Value) -> Value {
@@ -598,6 +648,16 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Integer(n) => write!(f, "{n}"),
+            Value::Rational(n) => write!(f, "{}/{}", n.numer(), n.denom()),
+            Value::Decimal(n) => write!(f, "{n}"),
+            Value::Complex(n) => {
+                let imaginary = n.im.to_string();
+                if imaginary.starts_with('-') {
+                    write!(f, "{}{}i", n.re, imaginary)
+                } else {
+                    write!(f, "{}+{}i", n.re, imaginary)
+                }
+            }
             Value::Boolean(value) => write!(f, "{}", if *value { "#t" } else { "#f" }),
             Value::Character(' ') => write!(f, "#\\space"),
             Value::Character('\n') => write!(f, "#\\newline"),
@@ -654,8 +714,19 @@ mod tests {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
         assert_eq!(eval_one("(- 10 3 2)"), "5");
         assert_eq!(eval_one("(* 2 3 4)"), "24");
+        assert_eq!(eval_one("(/ 1 2)"), "1/2");
+        assert_eq!(eval_one("(+ 1/2 1/2)"), "1");
         assert_eq!(eval_one("(= 2 2 2)"), "#t");
+        assert_eq!(eval_one("(= 1/2 (/ 1 2))"), "#t");
         assert_eq!(eval_one("(< 1 2 3)"), "#t");
+    }
+
+    #[test]
+    fn treats_numeric_tower_literals_as_numbers() {
+        assert_eq!(eval_one("(number? 1/2)"), "#t");
+        assert_eq!(eval_one("(number? 1.5)"), "#t");
+        assert_eq!(eval_one("1/2"), "1/2");
+        assert_eq!(eval_one("1.5"), "1.5");
     }
 
     #[test]
