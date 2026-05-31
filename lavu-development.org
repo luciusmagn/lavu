@@ -259,3 +259,6 @@ Scheme value is valid.
 ** Derived Form Classifier
 - Desugar regular =let=, =and=, and =or= into existing surface core
   forms so type inference and runtime evaluation can share the result.
+** Native REPL Evaluation
+- Switch the active REPL evaluation path from Gerbil to the native stable
+  parser, classifier, and runtime evaluator.

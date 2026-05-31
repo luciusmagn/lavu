@@ -3,6 +3,7 @@ pub mod datum_parser;
 pub mod infer;
 pub mod lexer;
 pub mod query;
+pub mod repl;
 pub mod runtime;
 pub mod stdlib;
 pub mod surface;
