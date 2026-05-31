@@ -54,6 +54,7 @@ pub enum Atom {
 pub enum Datum {
     Atom(Atom),
     List(Vec<Spanned<Datum>>),
+    DottedList(Vec<Spanned<Datum>>, Box<Spanned<Datum>>),
     Vector(Vec<Spanned<Datum>>),
     Quote(Box<Spanned<Datum>>),
     Quasiquote(Box<Spanned<Datum>>),

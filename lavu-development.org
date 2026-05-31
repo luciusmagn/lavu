@@ -291,3 +291,6 @@ Scheme value is valid.
 ** Pair And List Primitives
 - Add native runtime support for =cons=, =car=, =cdr=, and =append= so
   the evaluator matches the existing standard-library type metadata.
+** Dotted List Data
+- Extend the stable datum parser and runtime quote conversion to support
+  dotted list data without classifying dotted data as expression syntax.

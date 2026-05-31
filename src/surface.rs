@@ -100,7 +100,11 @@ pub fn classify_expr(datum: &Spanned<Datum>) -> Result<Spanned<Expr>, SurfaceErr
         Datum::Atom(atom) => Expr::Literal(atom.clone()),
         Datum::Quote(inner) => Expr::Quote(inner.clone()),
         Datum::List(items) => classify_list(datum.span.clone(), datum.origin, items)?,
-        Datum::Vector(_) | Datum::Quasiquote(_) | Datum::Unquote(_) | Datum::UnquoteSplicing(_) => {
+        Datum::DottedList(_, _)
+        | Datum::Vector(_)
+        | Datum::Quasiquote(_)
+        | Datum::Unquote(_)
+        | Datum::UnquoteSplicing(_) => {
             return Err(SurfaceError::UnsupportedDatum {
                 span: datum.span.clone(),
             });

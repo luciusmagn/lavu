@@ -469,13 +469,7 @@ fn cons(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         span,
     })?;
 
-    Ok(match tail {
-        Value::List(mut items) => {
-            items.insert(0, head);
-            Value::List(items)
-        }
-        tail => Value::Pair(Box::new(head), Box::new(tail)),
-    })
+    Ok(cons_value(head, tail))
 }
 
 fn car(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
@@ -550,6 +544,14 @@ fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
             .map(datum_to_value)
             .collect::<Result<Vec<_>, _>>()
             .map(Value::List),
+        Datum::DottedList(items, tail) => {
+            let tail = datum_to_value(tail)?;
+            items
+                .iter()
+                .rev()
+                .map(datum_to_value)
+                .try_fold(tail, |tail, head| head.map(|head| cons_value(head, tail)))
+        }
         Datum::Vector(items) => items
             .iter()
             .map(datum_to_value)
@@ -580,6 +582,16 @@ fn atom_to_value(atom: &Atom) -> Value {
 
 fn truthy(value: &Value) -> bool {
     !matches!(value, Value::Boolean(false))
+}
+
+fn cons_value(head: Value, tail: Value) -> Value {
+    match tail {
+        Value::List(mut items) => {
+            items.insert(0, head);
+            Value::List(items)
+        }
+        tail => Value::Pair(Box::new(head), Box::new(tail)),
+    }
 }
 
 impl fmt::Display for Value {
@@ -700,6 +712,12 @@ mod tests {
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
+    }
+
+    #[test]
+    fn evaluates_quoted_dotted_lists() {
+        assert_eq!(eval_one("'(1 . 2)"), "(1 . 2)");
+        assert_eq!(eval_one("'(1 2 . ())"), "(1 2)");
     }
 
     #[test]

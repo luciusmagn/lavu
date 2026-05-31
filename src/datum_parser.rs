@@ -89,11 +89,47 @@ impl Parser {
     }
 
     fn parse_list(&mut self, open_span: SourceSpan) -> Result<Spanned<Datum>, DatumParseError> {
-        let (items, close_span) = self.parse_until_close(open_span.clone(), "list")?;
-        Ok(Spanned::new(
-            Datum::List(items),
-            open_span.start..close_span.end,
-        ))
+        let mut items = Vec::new();
+
+        loop {
+            let Some(lexeme) = self.peek() else {
+                return Err(DatumParseError::UnclosedDelimiter { span: open_span });
+            };
+
+            match lexeme.token {
+                Token::RParen => {
+                    let close_span = self.bump("list")?.span;
+                    return Ok(Spanned::new(
+                        Datum::List(items),
+                        open_span.start..close_span.end,
+                    ));
+                }
+                Token::Dot => {
+                    let dot_span = self.bump("dotted list")?.span;
+                    if items.is_empty() {
+                        return Err(DatumParseError::UnexpectedToken {
+                            context: "dotted list",
+                            span: dot_span,
+                        });
+                    }
+
+                    let tail = self.parse_datum()?;
+                    let close = self.bump("dotted list close")?;
+                    if !matches!(close.token, Token::RParen) {
+                        return Err(DatumParseError::UnexpectedToken {
+                            context: "dotted list close",
+                            span: close.span,
+                        });
+                    }
+
+                    return Ok(Spanned::new(
+                        Datum::DottedList(items, Box::new(tail)),
+                        open_span.start..close.span.end,
+                    ));
+                }
+                _ => items.push(self.parse_datum()?),
+            }
+        }
     }
 
     fn parse_vector(&mut self, open_span: SourceSpan) -> Result<Spanned<Datum>, DatumParseError> {
@@ -249,6 +285,21 @@ mod tests {
             Datum::Atom(Atom::Identifier("and".to_string()))
         );
         assert!(matches!(items[1].node, Datum::Vector(_)));
+    }
+
+    #[test]
+    fn parses_dotted_lists_as_data() {
+        let datums = parse("'(1 2 . tail)").unwrap();
+
+        let Datum::Quote(inner) = &datums[0].node else {
+            panic!("expected quote");
+        };
+        let Datum::DottedList(items, tail) = &inner.node else {
+            panic!("expected dotted list");
+        };
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(tail.node, Datum::Atom(Atom::Identifier("tail".to_string())));
     }
 
     #[test]
