@@ -262,3 +262,6 @@ Scheme value is valid.
 ** Native REPL Evaluation
 - Switch the active REPL evaluation path from Gerbil to the native stable
   parser, classifier, and runtime evaluator.
+** Gerbil Removal
+- Remove the unused Gerbil process wrapper after switching the REPL to
+  native evaluation.
