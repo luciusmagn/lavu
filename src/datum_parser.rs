@@ -1,7 +1,7 @@
 use logos::Span as LogosSpan;
 use thiserror::Error;
 
-use crate::lexer::{tokenize, Token};
+use crate::lexer::{Token, tokenize};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -212,7 +212,7 @@ fn unescape_string_token(token: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, DatumParseError};
+    use super::{DatumParseError, parse};
     use crate::syntax::{Atom, Datum};
 
     #[test]

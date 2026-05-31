@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::env;
 
 use crate::lexer::{
-    is_conversion, is_keywordy, is_mutator, is_operator, is_predicate, is_special_form, Token,
+    Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate, is_special_form,
 };
 
 pub fn history() -> Result<Box<dyn History>> {

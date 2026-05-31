@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-use crate::datum_parser::{parse, DatumParseError};
+use crate::datum_parser::{DatumParseError, parse};
 use crate::infer::{Inferencer, TypeEnv, TypeError};
-use crate::surface::{classify_program, SurfaceError};
+use crate::surface::{SurfaceError, classify_program};
 use crate::types::Type;
 
 #[derive(Debug, Error)]

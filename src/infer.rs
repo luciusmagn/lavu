@@ -57,6 +57,7 @@ impl TypeEnv {
 #[derive(Debug, Clone, Default)]
 pub struct Inferencer {
     substitutions: BTreeMap<String, Type>,
+    next_var: usize,
 }
 
 impl Inferencer {
@@ -130,6 +131,7 @@ impl Inferencer {
                 self.unify(actual, expected, value.span.clone())?;
                 Ok(Type::Unknown)
             }
+            Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
                 let operator_ty = self.infer_expr(operator, env)?;
                 let operand_tys = operands
@@ -160,6 +162,34 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         Ok(Type::procedure(param_types, self.resolve(result)))
+    }
+
+    fn infer_letrec(
+        &mut self,
+        bindings: &[(Spanned<String>, Spanned<Expr>)],
+        body: &[Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let mut local = env.clone();
+        for (name, _) in bindings {
+            local.define(name.node.clone(), self.fresh_type_var());
+        }
+
+        for (name, value) in bindings {
+            let expected =
+                local
+                    .get(&name.node)
+                    .cloned()
+                    .ok_or_else(|| TypeError::UnboundVariable {
+                        name: name.node.clone(),
+                        span: name.span.clone(),
+                    })?;
+            let actual = self.infer_expr(value, &local)?;
+            let inferred = self.unify(actual, expected, value.span.clone())?;
+            local.define(name.node.clone(), self.resolve(inferred));
+        }
+
+        self.infer_sequence(body, &local)
     }
 
     fn infer_if(
@@ -270,6 +300,21 @@ impl Inferencer {
     ) -> Result<Type, TypeError> {
         match self.resolve(operator_ty) {
             Type::Procedure(procedure) => self.apply_procedure(procedure, operands, operand_tys),
+            Type::Var(name) => {
+                let result = self.fresh_type_var();
+                self.substitutions.insert(
+                    name,
+                    Type::procedure(
+                        operand_tys
+                            .iter()
+                            .cloned()
+                            .map(|ty| self.resolve(ty))
+                            .collect::<Vec<_>>(),
+                        result.clone(),
+                    ),
+                );
+                Ok(self.resolve(result))
+            }
             actual => Err(TypeError::ExpectedProcedure { actual, span }),
         }
     }
@@ -345,15 +390,15 @@ impl Inferencer {
 
         match (actual, expected) {
             (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => Ok(ty),
-            (Type::Var(name), ty) | (ty, Type::Var(name)) => {
-                self.substitutions.insert(name, ty.clone());
-                Ok(ty)
-            }
+            (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
             (Type::Pair(actual_car, actual_cdr), Type::Pair(expected_car, expected_cdr)) => {
                 let car = self.unify(*actual_car, *expected_car, span.clone())?;
                 let cdr = self.unify(*actual_cdr, *expected_cdr, span)?;
                 Ok(Type::Pair(Box::new(car), Box::new(cdr)))
+            }
+            (Type::Procedure(actual), Type::Procedure(expected)) => {
+                self.unify_procedure(actual, expected, span)
             }
             (actual, expected) if actual == expected => Ok(actual),
             (actual, expected) => Err(TypeError::Mismatch {
@@ -362,6 +407,108 @@ impl Inferencer {
                 span,
             }),
         }
+    }
+
+    fn unify_procedure(
+        &mut self,
+        actual: ProcedureType,
+        expected: ProcedureType,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        match (actual, expected) {
+            (
+                ProcedureType::Fixed {
+                    params: actual_params,
+                    result: actual_result,
+                },
+                ProcedureType::Fixed {
+                    params: expected_params,
+                    result: expected_result,
+                },
+            ) => {
+                if actual_params.len() != expected_params.len() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: expected_params.len().to_string(),
+                        actual: actual_params.len(),
+                        span,
+                    });
+                }
+
+                let params = actual_params
+                    .into_iter()
+                    .zip(expected_params)
+                    .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+
+                Ok(Type::procedure(params, result))
+            }
+            (
+                ProcedureType::UniformVariadic {
+                    param: actual_param,
+                    result: actual_result,
+                },
+                ProcedureType::UniformVariadic {
+                    param: expected_param,
+                    result: expected_result,
+                },
+            ) => {
+                let param = self.unify(*actual_param, *expected_param, span.clone())?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+                Ok(Type::uniform_variadic(param, result))
+            }
+            (
+                ProcedureType::Rest {
+                    required: actual_required,
+                    rest: actual_rest,
+                    result: actual_result,
+                },
+                ProcedureType::Rest {
+                    required: expected_required,
+                    rest: expected_rest,
+                    result: expected_result,
+                },
+            ) => {
+                if actual_required.len() != expected_required.len() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: expected_required.len().to_string(),
+                        actual: actual_required.len(),
+                        span,
+                    });
+                }
+
+                let required = actual_required
+                    .into_iter()
+                    .zip(expected_required)
+                    .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let rest = self.unify(*actual_rest, *expected_rest, span.clone())?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+
+                Ok(Type::rest_procedure(required, rest, result))
+            }
+            (actual, expected) => Err(TypeError::Mismatch {
+                expected: Type::Procedure(expected),
+                actual: Type::Procedure(actual),
+                span,
+            }),
+        }
+    }
+
+    fn bind_var(&mut self, name: String, ty: Type) -> Result<Type, TypeError> {
+        if ty == Type::Var(name.clone()) {
+            return Ok(ty);
+        }
+
+        let ty = strip_recursive_var(ty, &name);
+        self.substitutions.insert(name, ty.clone());
+        Ok(ty)
+    }
+
+    fn fresh_type_var(&mut self) -> Type {
+        let name = format!("t{}", self.next_var);
+        self.next_var += 1;
+        Type::Var(name)
     }
 
     fn resolve(&self, ty: Type) -> Type {
@@ -406,6 +553,49 @@ impl Inferencer {
             ),
             ty => ty,
         }
+    }
+}
+
+fn strip_recursive_var(ty: Type, name: &str) -> Type {
+    match ty {
+        Type::Union(types) => {
+            let finite = types
+                .into_iter()
+                .filter(|ty| !matches!(ty, Type::Var(var) if var == name))
+                .collect::<Vec<_>>();
+
+            match finite.as_slice() {
+                [] => Type::Unknown,
+                _ => Type::union(finite),
+            }
+        }
+        ty if contains_var(&ty, name) => Type::Unknown,
+        ty => ty,
+    }
+}
+
+fn contains_var(ty: &Type, name: &str) -> bool {
+    match ty {
+        Type::Var(var) => var == name,
+        Type::Pair(car, cdr) => contains_var(car, name) || contains_var(cdr, name),
+        Type::ListOf(element) => contains_var(element, name),
+        Type::Procedure(ProcedureType::Fixed { params, result }) => {
+            params.iter().any(|ty| contains_var(ty, name)) || contains_var(result, name)
+        }
+        Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+            contains_var(param, name) || contains_var(result, name)
+        }
+        Type::Procedure(ProcedureType::Rest {
+            required,
+            rest,
+            result,
+        }) => {
+            required.iter().any(|ty| contains_var(ty, name))
+                || contains_var(rest, name)
+                || contains_var(result, name)
+        }
+        Type::Union(types) => types.iter().any(|ty| contains_var(ty, name)),
+        _ => false,
     }
 }
 
@@ -491,6 +681,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) (+ x 1)))"),
             "(-> (U number? string?) number?)"
+        );
+    }
+
+    #[test]
+    fn infers_named_let_result_type() {
+        assert_eq!(
+            infer_one("(let loop ((n 5) (acc 1)) (if (= n 0) acc (loop (- n 1) (* acc n))))"),
+            "number?"
         );
     }
 }

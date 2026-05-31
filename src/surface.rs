@@ -35,6 +35,10 @@ pub enum Expr {
         name: Spanned<String>,
         value: Box<Spanned<Expr>>,
     },
+    LetRec {
+        bindings: Vec<(Spanned<String>, Spanned<Expr>)>,
+        body: Vec<Spanned<Expr>>,
+    },
     Apply {
         operator: Box<Spanned<Expr>>,
         operands: Vec<Spanned<Expr>>,
@@ -128,6 +132,7 @@ fn classify_list(
         Some("set!") => parse_set(rest),
         Some("let") => parse_let(span, origin, rest),
         Some("let*") => parse_let_star(span, origin, rest),
+        Some("letrec") => parse_letrec(span, rest),
         Some("and") => parse_and(span, origin, rest),
         Some("or") => parse_or(span, origin, rest),
         Some("cond") => parse_cond(span, origin, rest),
@@ -283,40 +288,17 @@ fn parse_let(
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
             form: "let",
-            expected: "bindings and at least one body expression",
+            expected: "bindings and at least one body expression, or a name, bindings, and body",
             span,
         });
     }
 
-    let Datum::List(binding_datums) = &rest[0].node else {
-        return Err(SurfaceError::ExpectedList {
-            context: "let bindings",
-            span: rest[0].span.clone(),
-        });
-    };
-
-    let mut params = Vec::new();
-    let mut operands = Vec::new();
-
-    for binding in binding_datums {
-        let Datum::List(pair) = &binding.node else {
-            return Err(SurfaceError::ExpectedList {
-                context: "let binding",
-                span: binding.span.clone(),
-            });
-        };
-        if pair.len() != 2 {
-            return Err(SurfaceError::BadArity {
-                form: "let binding",
-                expected: "a name and a value",
-                span: binding.span.clone(),
-            });
-        }
-
-        params.push(expect_identifier(&pair[0], "let binding")?);
-        operands.push(classify_expr(&pair[1])?);
+    if identifier_name(&rest[0]).is_some() {
+        return parse_named_let(span, origin, rest);
     }
 
+    let bindings = parse_bindings(&rest[0], "let bindings")?;
+    let (params, operands): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
     let body = rest[1..]
         .iter()
         .map(classify_expr)
@@ -329,6 +311,61 @@ fn parse_let(
             origin,
         }),
         operands,
+    })
+}
+
+fn parse_named_let(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    if rest.len() < 3 {
+        return Err(SurfaceError::BadArity {
+            form: "named let",
+            expected: "a name, bindings, and at least one body expression",
+            span,
+        });
+    }
+
+    let name = expect_identifier(&rest[0], "named let")?;
+    let bindings = parse_bindings(&rest[1], "named let bindings")?;
+    let mut params = Vec::new();
+    let mut operands = Vec::new();
+    for (param, operand) in bindings {
+        params.push(param);
+        operands.push(operand);
+    }
+
+    let lambda_body = rest[2..]
+        .iter()
+        .map(classify_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+    let call = Spanned {
+        node: Expr::Apply {
+            operator: Box::new(Spanned {
+                node: Expr::Variable(name.node.clone()),
+                span: name.span.clone(),
+                origin: name.origin,
+            }),
+            operands,
+        },
+        span: span.clone(),
+        origin,
+    };
+
+    Ok(Expr::LetRec {
+        bindings: vec![(
+            name,
+            Spanned {
+                node: Expr::Lambda {
+                    params,
+                    body: lambda_body,
+                },
+                span: span.clone(),
+                origin,
+            },
+        )],
+        body: vec![call],
     })
 }
 
@@ -407,6 +444,24 @@ fn parse_bindings(
             ))
         })
         .collect()
+}
+
+fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+    if rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "letrec",
+            expected: "bindings and at least one body expression",
+            span,
+        });
+    }
+
+    Ok(Expr::LetRec {
+        bindings: parse_bindings(&rest[0], "letrec bindings")?,
+        body: rest[1..]
+            .iter()
+            .map(classify_expr)
+            .collect::<Result<Vec<_>, _>>()?,
+    })
 }
 
 fn parse_and(
@@ -632,7 +687,7 @@ fn identifier_name(datum: &Spanned<Datum>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
-    use crate::surface::{classify_program, classify_top_level, Expr, TopLevel};
+    use crate::surface::{Expr, TopLevel, classify_program, classify_top_level};
 
     #[test]
     fn classifies_define_and_lambda() {
@@ -704,6 +759,22 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
+    }
+
+    #[test]
+    fn classifies_letrec_as_recursive_binding_form() {
+        let datums = parse("(letrec ((f (lambda (x) x))) (f 1))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
+    }
+
+    #[test]
+    fn lowers_named_let_to_recursive_binding_form() {
+        let datums = parse("(let loop ((n 1)) (loop n))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
     }
 
     #[test]

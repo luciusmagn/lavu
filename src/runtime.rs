@@ -21,6 +21,7 @@ pub enum Value {
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Unspecified,
+    Uninitialized,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +35,9 @@ pub struct Procedure {
 pub enum EvalError {
     #[error("unbound variable: {name}")]
     UnboundVariable { name: String, span: SourceSpan },
+
+    #[error("variable used before initialization: {name}")]
+    UninitializedVariable { name: String, span: SourceSpan },
 
     #[error("cannot apply non-procedure")]
     NotProcedure { span: SourceSpan },
@@ -170,10 +174,17 @@ pub fn eval_top_level(form: &Spanned<TopLevel>, env: &Env) -> Result<Value, Eval
 pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
     match &expr.node {
         Expr::Literal(atom) => Ok(atom_to_value(atom)),
-        Expr::Variable(name) => env.lookup(name).ok_or_else(|| EvalError::UnboundVariable {
-            name: name.clone(),
-            span: expr.span.clone(),
-        }),
+        Expr::Variable(name) => match env.lookup(name) {
+            Some(Value::Uninitialized) => Err(EvalError::UninitializedVariable {
+                name: name.clone(),
+                span: expr.span.clone(),
+            }),
+            Some(value) => Ok(value),
+            None => Err(EvalError::UnboundVariable {
+                name: name.clone(),
+                span: expr.span.clone(),
+            }),
+        },
         Expr::Quote(datum) => datum_to_value(datum),
         Expr::Lambda { params, body } => Ok(Value::Procedure(Rc::new(Procedure {
             params: params.iter().map(|param| param.node.clone()).collect(),
@@ -205,6 +216,7 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
                 })
             }
         }
+        Expr::LetRec { bindings, body } => eval_letrec(bindings, body, env),
         Expr::Apply { operator, operands } => {
             let procedure = eval_expr(operator, env)?;
             let args = operands
@@ -222,6 +234,24 @@ fn eval_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError>
         result = eval_expr(expr, env)?;
     }
     Ok(result)
+}
+
+fn eval_letrec(
+    bindings: &[(Spanned<String>, Spanned<Expr>)],
+    body: &[Spanned<Expr>],
+    env: &Env,
+) -> Result<Value, EvalError> {
+    let local = Env::child(env.clone());
+    for (name, _) in bindings {
+        local.define(name.node.clone(), Value::Uninitialized);
+    }
+
+    for (name, value_expr) in bindings {
+        let value = eval_expr(value_expr, &local)?;
+        local.set(&name.node, value);
+    }
+
+    eval_sequence(body, &local)
 }
 
 fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -493,6 +523,7 @@ impl fmt::Display for Value {
             }
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
+            Value::Uninitialized => write!(f, "#<uninitialized>"),
         }
     }
 }
@@ -500,7 +531,7 @@ impl fmt::Display for Value {
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
-    use crate::runtime::{eval_program, Env};
+    use crate::runtime::{Env, eval_program};
     use crate::surface::classify_program;
 
     fn eval_one(input: &str) -> String {
@@ -537,6 +568,22 @@ mod tests {
     fn evaluates_recursive_top_level_definitions() {
         assert_eq!(
             eval_one("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)"),
+            "120"
+        );
+    }
+
+    #[test]
+    fn evaluates_local_recursive_bindings() {
+        assert_eq!(
+            eval_one("(letrec ((fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))) (fact 5))"),
+            "120"
+        );
+    }
+
+    #[test]
+    fn evaluates_named_let_loops() {
+        assert_eq!(
+            eval_one("(let loop ((n 5) (acc 1)) (if (= n 0) acc (loop (- n 1) (* acc n))))"),
             "120"
         );
     }

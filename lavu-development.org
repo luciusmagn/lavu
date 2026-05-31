@@ -279,3 +279,9 @@ Scheme value is valid.
 ** Recursive Native Definitions
 - Cover recursive top-level procedure definitions through the native
   evaluator.
+** Letrec And Named Let
+- Classify =letrec= and named =let= on the stable surface path.
+- Evaluate local recursive bindings natively with placeholder detection
+  for premature variable use.
+- Teach inference to seed recursive bindings and infer application of
+  locally unknown procedures.

@@ -2,7 +2,7 @@ use color_eyre::eyre::Result;
 use lavu::datum_parser::parse;
 use lavu::query::infer_query;
 use lavu::repl::{line_editor, print_logo};
-use lavu::runtime::{eval_program, Env, Value};
+use lavu::runtime::{Env, Value, eval_program};
 use lavu::surface::classify_program;
 use reedline::Signal;
 
