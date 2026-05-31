@@ -298,11 +298,11 @@ fn apply_primitive(
         "-" => subtract(args, span),
         "*" => multiply(args, span),
         "/" => divide(args, span),
-        "=" => numeric_compare(args, span, |a, b| a == b),
-        "<" => numeric_compare(args, span, |a, b| a < b),
-        ">" => numeric_compare(args, span, |a, b| a > b),
-        "<=" => numeric_compare(args, span, |a, b| a <= b),
-        ">=" => numeric_compare(args, span, |a, b| a >= b),
+        "=" => numeric_compare(args, span, |a, b| a == b, |a, b| a == b),
+        "<" => numeric_compare(args, span, |a, b| a < b, |a, b| a < b),
+        ">" => numeric_compare(args, span, |a, b| a > b, |a, b| a > b),
+        "<=" => numeric_compare(args, span, |a, b| a <= b, |a, b| a <= b),
+        ">=" => numeric_compare(args, span, |a, b| a >= b, |a, b| a >= b),
         "boolean?" => predicate(args, span, |value| matches!(value, Value::Boolean(_))),
         "number?" => predicate(args, span, |value| {
             matches!(
@@ -360,37 +360,94 @@ fn apply_primitive(
     }
 }
 
+#[derive(Debug, Clone)]
+enum NumberValue {
+    Exact(BigRational),
+    Decimal(BigDecimal),
+    Complex(Complex<BigDecimal>),
+}
+
 fn add(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let numbers = numeric_args(args, span)?;
+
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Ok(Value::Complex(
+            numbers
+                .iter()
+                .map(NumberValue::to_complex)
+                .fold(complex_zero(), |sum, number| sum + number),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_decimal) {
+        return Ok(Value::Decimal(
+            numbers
+                .iter()
+                .map(NumberValue::to_decimal)
+                .fold(decimal_zero(), |sum, number| sum + number),
+        ));
+    }
+
     Ok(exact_number(
-        exact_numeric_args(args, span)?
+        numbers
             .into_iter()
+            .map(NumberValue::into_exact)
             .sum::<BigRational>(),
     ))
 }
 
 fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    let mut numbers = exact_numeric_args(args, span.clone())?.into_iter();
-    let Some(first) = numbers.next() else {
+    let numbers = numeric_args(args, span.clone())?;
+    if numbers.is_empty() {
         return Err(EvalError::ArityMismatch {
             expected: 1,
             actual: 0,
             span,
         });
-    };
+    }
 
-    let result = if numbers.len() == 0 {
-        -first
-    } else {
-        numbers.fold(first, |difference, n| difference - n)
-    };
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Ok(Value::Complex(fold_subtract(
+            numbers.iter().map(NumberValue::to_complex).collect(),
+        )));
+    }
 
-    Ok(exact_number(result))
+    if numbers.iter().any(NumberValue::is_decimal) {
+        return Ok(Value::Decimal(fold_subtract(
+            numbers.iter().map(NumberValue::to_decimal).collect(),
+        )));
+    }
+
+    Ok(exact_number(fold_subtract(
+        numbers.into_iter().map(NumberValue::into_exact).collect(),
+    )))
 }
 
 fn multiply(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let numbers = numeric_args(args, span)?;
+
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Ok(Value::Complex(
+            numbers
+                .iter()
+                .map(NumberValue::to_complex)
+                .fold(complex_one(), |product, number| product * number),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_decimal) {
+        return Ok(Value::Decimal(
+            numbers
+                .iter()
+                .map(NumberValue::to_decimal)
+                .fold(decimal_one(), |product, number| product * number),
+        ));
+    }
+
     Ok(exact_number(
-        exact_numeric_args(args, span)?
+        numbers
             .into_iter()
+            .map(NumberValue::into_exact)
             .fold(BigRational::from_integer(BigInt::from(1)), |product, n| {
                 product * n
             }),
@@ -398,30 +455,42 @@ fn multiply(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 }
 
 fn divide(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    let mut numbers = exact_numeric_args(args, span.clone())?.into_iter();
-    let Some(first) = numbers.next() else {
+    let numbers = numeric_args(args, span.clone())?;
+    if numbers.is_empty() {
         return Err(EvalError::ArityMismatch {
             expected: 1,
             actual: 0,
             span,
         });
-    };
+    }
 
-    let result = if numbers.len() == 0 {
-        BigRational::from_integer(BigInt::from(1)) / first
-    } else {
-        numbers.fold(first, |quotient, n| quotient / n)
-    };
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Ok(Value::Complex(fold_divide(
+            numbers.iter().map(NumberValue::to_complex).collect(),
+            complex_one(),
+        )));
+    }
 
-    Ok(exact_number(result))
+    if numbers.iter().any(NumberValue::is_decimal) {
+        return Ok(Value::Decimal(fold_divide(
+            numbers.iter().map(NumberValue::to_decimal).collect(),
+            decimal_one(),
+        )));
+    }
+
+    Ok(exact_number(fold_divide(
+        numbers.into_iter().map(NumberValue::into_exact).collect(),
+        BigRational::from_integer(BigInt::from(1)),
+    )))
 }
 
 fn numeric_compare(
     args: Vec<Value>,
     span: SourceSpan,
-    pred: impl Fn(&BigRational, &BigRational) -> bool,
+    exact_pred: impl Fn(&BigRational, &BigRational) -> bool,
+    decimal_pred: impl Fn(&BigDecimal, &BigDecimal) -> bool,
 ) -> Result<Value, EvalError> {
-    let numbers = exact_numeric_args(args, span.clone())?;
+    let numbers = numeric_args(args, span.clone())?;
     if numbers.len() < 2 {
         return Err(EvalError::ArityMismatch {
             expected: 2,
@@ -430,22 +499,134 @@ fn numeric_compare(
         });
     }
 
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        });
+    }
+
+    if numbers.iter().any(NumberValue::is_decimal) {
+        let numbers = numbers
+            .iter()
+            .map(NumberValue::to_decimal)
+            .collect::<Vec<_>>();
+        return Ok(Value::Boolean(
+            numbers
+                .windows(2)
+                .all(|pair| decimal_pred(&pair[0], &pair[1])),
+        ));
+    }
+
+    let numbers = numbers
+        .into_iter()
+        .map(NumberValue::into_exact)
+        .collect::<Vec<_>>();
     Ok(Value::Boolean(
-        numbers.windows(2).all(|pair| pred(&pair[0], &pair[1])),
+        numbers
+            .windows(2)
+            .all(|pair| exact_pred(&pair[0], &pair[1])),
     ))
 }
 
-fn exact_numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<BigRational>, EvalError> {
+fn numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<NumberValue>, EvalError> {
     args.into_iter()
         .map(|value| match value {
-            Value::Integer(n) => Ok(BigRational::from_integer(n)),
-            Value::Rational(n) => Ok(n),
+            Value::Integer(n) => Ok(NumberValue::Exact(BigRational::from_integer(n))),
+            Value::Rational(n) => Ok(NumberValue::Exact(n)),
+            Value::Decimal(n) => Ok(NumberValue::Decimal(n)),
+            Value::Complex(n) => Ok(NumberValue::Complex(n)),
             _ => Err(EvalError::TypeError {
                 expected: "number?",
                 span: span.clone(),
             }),
         })
         .collect()
+}
+
+impl NumberValue {
+    fn is_decimal(&self) -> bool {
+        matches!(self, Self::Decimal(_))
+    }
+
+    fn is_complex(&self) -> bool {
+        matches!(self, Self::Complex(_))
+    }
+
+    fn into_exact(self) -> BigRational {
+        match self {
+            Self::Exact(n) => n,
+            Self::Decimal(_) | Self::Complex(_) => {
+                unreachable!("numeric promotion should handle inexact numbers first")
+            }
+        }
+    }
+
+    fn to_decimal(&self) -> BigDecimal {
+        match self {
+            Self::Exact(n) => rational_to_decimal(n),
+            Self::Decimal(n) => n.clone(),
+            Self::Complex(_) => unreachable!("complex numbers should promote above decimals"),
+        }
+    }
+
+    fn to_complex(&self) -> Complex<BigDecimal> {
+        match self {
+            Self::Exact(n) => Complex::new(rational_to_decimal(n), decimal_zero()),
+            Self::Decimal(n) => Complex::new(n.clone(), decimal_zero()),
+            Self::Complex(n) => n.clone(),
+        }
+    }
+}
+
+fn fold_subtract<T>(numbers: Vec<T>) -> T
+where
+    T: std::ops::Neg<Output = T> + std::ops::Sub<Output = T>,
+{
+    let mut numbers = numbers.into_iter();
+    let first = numbers
+        .next()
+        .expect("fold_subtract requires at least one number");
+    if numbers.len() == 0 {
+        -first
+    } else {
+        numbers.fold(first, |difference, n| difference - n)
+    }
+}
+
+fn fold_divide<T>(numbers: Vec<T>, one: T) -> T
+where
+    T: std::ops::Div<Output = T>,
+{
+    let mut numbers = numbers.into_iter();
+    let first = numbers
+        .next()
+        .expect("fold_divide requires at least one number");
+    if numbers.len() == 0 {
+        one / first
+    } else {
+        numbers.fold(first, |quotient, n| quotient / n)
+    }
+}
+
+fn rational_to_decimal(number: &BigRational) -> BigDecimal {
+    BigDecimal::from(number.numer().clone()) / BigDecimal::from(number.denom().clone())
+}
+
+fn decimal_zero() -> BigDecimal {
+    BigDecimal::from(0)
+}
+
+fn decimal_one() -> BigDecimal {
+    BigDecimal::from(1)
+}
+
+fn complex_zero() -> Complex<BigDecimal> {
+    Complex::new(decimal_zero(), decimal_zero())
+}
+
+fn complex_one() -> Complex<BigDecimal> {
+    Complex::new(decimal_one(), decimal_zero())
 }
 
 fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -716,8 +897,11 @@ mod tests {
         assert_eq!(eval_one("(* 2 3 4)"), "24");
         assert_eq!(eval_one("(/ 1 2)"), "1/2");
         assert_eq!(eval_one("(+ 1/2 1/2)"), "1");
+        assert_eq!(eval_one("(+ 1.5 2.25)"), "3.75");
+        assert_eq!(eval_one("(+ 1+2i 3+4i)"), "4+6i");
         assert_eq!(eval_one("(= 2 2 2)"), "#t");
         assert_eq!(eval_one("(= 1/2 (/ 1 2))"), "#t");
+        assert_eq!(eval_one("(< 1.5 2.5)"), "#t");
         assert_eq!(eval_one("(< 1 2 3)"), "#t");
     }
 

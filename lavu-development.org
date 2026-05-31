@@ -298,3 +298,6 @@ Scheme value is valid.
 - Represent integer, rational, decimal, and complex literals as native
   numeric values and add exact rational arithmetic for core numeric
   primitives while inference continues to display them as =number?=.
+** Numeric Promotion
+- Promote mixed numeric primitive calls across exact rationals, decimals,
+  and complex values while keeping comparisons on real numbers only.
