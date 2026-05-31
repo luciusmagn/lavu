@@ -301,3 +301,6 @@ Scheme value is valid.
 ** Numeric Promotion
 - Promote mixed numeric primitive calls across exact rationals, decimals,
   and complex values while keeping comparisons on real numbers only.
+** Do Classifier
+- Lower R5RS =do= loops to generated recursive bindings on the stable
+  surface path so runtime evaluation and inference reuse =letrec=.

@@ -696,4 +696,12 @@ mod tests {
     fn infers_case_result_type() {
         assert_eq!(infer_one("(case 'b ((a c) 10) (else 30))"), "number?");
     }
+
+    #[test]
+    fn infers_do_result_type() {
+        assert_eq!(
+            infer_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
+            "number?"
+        );
+    }
 }

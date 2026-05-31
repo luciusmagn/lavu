@@ -141,6 +141,7 @@ fn classify_list(
         Some("or") => parse_or(span, origin, rest),
         Some("cond") => parse_cond(span, origin, rest),
         Some("case") => parse_case(span, origin, rest),
+        Some("do") => parse_do(span, origin, rest),
         _ => parse_apply(origin, head, rest),
     }
 }
@@ -764,6 +765,145 @@ fn case_datum_tests(
     )
 }
 
+fn parse_do(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    if rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "do",
+            expected: "bindings, test clause, and optional body expressions",
+            span,
+        });
+    }
+
+    let bindings = parse_do_bindings(&rest[0])?;
+    let Datum::List(test_clause) = &rest[1].node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "do test clause",
+            span: rest[1].span.clone(),
+        });
+    };
+    let Some((test, result_datums)) = test_clause.split_first() else {
+        return Err(SurfaceError::BadArity {
+            form: "do test clause",
+            expected: "a test expression and optional result expressions",
+            span: rest[1].span.clone(),
+        });
+    };
+
+    let loop_name = Spanned {
+        node: format!("__lavu_do_loop_{}", span.start),
+        span: span.clone(),
+        origin,
+    };
+    let params = bindings
+        .iter()
+        .map(|binding| binding.name.clone())
+        .collect::<Vec<_>>();
+    let inits = bindings
+        .iter()
+        .map(|binding| binding.init.clone())
+        .collect::<Vec<_>>();
+    let steps = bindings
+        .iter()
+        .map(|binding| {
+            binding
+                .step
+                .clone()
+                .unwrap_or_else(|| variable_expr(&binding.name))
+        })
+        .collect::<Vec<_>>();
+
+    let recursive_call = Spanned {
+        node: Expr::Apply {
+            operator: Box::new(variable_expr(&loop_name)),
+            operands: steps,
+        },
+        span: span.clone(),
+        origin,
+    };
+    let alternate = Spanned {
+        node: sequence_with_tail(&rest[2..], recursive_call)?,
+        span: span.clone(),
+        origin,
+    };
+    let loop_body = Spanned {
+        node: Expr::If {
+            condition: Box::new(classify_expr(test)?),
+            consequent: Box::new(sequence_expr(result_datums, rest[1].span.clone(), origin)?),
+            alternate: Some(Box::new(alternate)),
+        },
+        span: span.clone(),
+        origin,
+    };
+    let initial_call = Spanned {
+        node: Expr::Apply {
+            operator: Box::new(variable_expr(&loop_name)),
+            operands: inits,
+        },
+        span: span.clone(),
+        origin,
+    };
+
+    Ok(Expr::LetRec {
+        bindings: vec![(
+            loop_name,
+            Spanned {
+                node: Expr::Lambda {
+                    params,
+                    body: vec![loop_body],
+                },
+                span: span.clone(),
+                origin,
+            },
+        )],
+        body: vec![initial_call],
+    })
+}
+
+#[derive(Debug, Clone)]
+struct DoBinding {
+    name: Spanned<String>,
+    init: Spanned<Expr>,
+    step: Option<Spanned<Expr>>,
+}
+
+fn parse_do_bindings(bindings: &Spanned<Datum>) -> Result<Vec<DoBinding>, SurfaceError> {
+    let Datum::List(binding_datums) = &bindings.node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "do bindings",
+            span: bindings.span.clone(),
+        });
+    };
+
+    binding_datums
+        .iter()
+        .map(|binding| {
+            let Datum::List(spec) = &binding.node else {
+                return Err(SurfaceError::ExpectedList {
+                    context: "do binding",
+                    span: binding.span.clone(),
+                });
+            };
+            if !(2..=3).contains(&spec.len()) {
+                return Err(SurfaceError::BadArity {
+                    form: "do binding",
+                    expected: "a name, init expression, and optional step expression",
+                    span: binding.span.clone(),
+                });
+            }
+
+            Ok(DoBinding {
+                name: expect_identifier(&spec[0], "do binding")?,
+                init: classify_expr(&spec[1])?,
+                step: spec.get(2).map(classify_expr).transpose()?,
+            })
+        })
+        .collect()
+}
+
 fn body_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
@@ -786,6 +926,45 @@ fn body_expr(
         }]),
         expr => expr,
     })
+}
+
+fn sequence_expr(
+    body: &[Spanned<Datum>],
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Result<Spanned<Expr>, SurfaceError> {
+    let node = match body {
+        [] => Expr::Begin(Vec::new()),
+        [single] => classify_expr(single)?.node,
+        many => Expr::Begin(
+            many.iter()
+                .map(classify_expr)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    };
+
+    Ok(Spanned { node, span, origin })
+}
+
+fn sequence_with_tail(body: &[Spanned<Datum>], tail: Spanned<Expr>) -> Result<Expr, SurfaceError> {
+    if body.is_empty() {
+        return Ok(tail.node);
+    }
+
+    let mut exprs = body
+        .iter()
+        .map(classify_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+    exprs.push(tail);
+    Ok(Expr::Begin(exprs))
+}
+
+fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {
+    Spanned {
+        node: Expr::Variable(name.node.clone()),
+        span: name.span.clone(),
+        origin: name.origin,
+    }
 }
 
 fn boolean_literal(value: bool) -> Expr {
@@ -962,5 +1141,13 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
+    }
+
+    #[test]
+    fn lowers_do_to_recursive_binding_form() {
+        let datums = parse("(do ((i 0 (+ i 1))) ((= i 3) i))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
     }
 }

@@ -948,6 +948,14 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_do_loops() {
+        assert_eq!(
+            eval_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
+            "10"
+        );
+    }
+
+    #[test]
     fn evaluates_if_with_scheme_truthiness() {
         assert_eq!(eval_one("(if #f 1 2)"), "2");
         assert_eq!(eval_one("(if '() 1 2)"), "1");
