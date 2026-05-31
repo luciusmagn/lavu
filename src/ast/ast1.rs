@@ -88,7 +88,7 @@ impl SExp {
         input: &str,
         filename: &'a str,
         tokens: &[(Token, &str, LogosSpan)],
-    ) -> Report<(&'a str, Range<usize>)> {
+    ) -> Report<'_, (&'a str, Range<usize>)> {
         Report::build(ReportKind::Advice, (filename, 0..input.len()))
             .with_message(format!("Parsed {}", self.name()))
             .with_label(

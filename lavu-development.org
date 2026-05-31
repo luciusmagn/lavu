@@ -230,3 +230,7 @@ Scheme value is valid.
 ** Stable Datum Model
 - Add initial stable syntax data structures with source spans and origin
   metadata for the future parser/AST refactor.
+** Warning Cleanup
+- Remove local lifetime-syntax warnings and update the clipboard
+  dependency within existing constraints to clear Cargo's future
+  incompatibility warning.

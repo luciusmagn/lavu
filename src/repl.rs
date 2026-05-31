@@ -120,21 +120,21 @@ pub fn prompt() -> Result<Box<dyn Prompt>> {
     struct SchemePrompt;
 
     impl Prompt for SchemePrompt {
-        fn render_prompt_left(&self) -> Cow<str> {
+        fn render_prompt_left(&self) -> Cow<'_, str> {
             let now = Local::now();
             let stamp = now.format("%H:%M").to_string();
 
             Cow::Owned(format!("{stamp} "))
         }
 
-        fn render_prompt_right(&self) -> std::borrow::Cow<str> {
+        fn render_prompt_right(&self) -> std::borrow::Cow<'_, str> {
             Cow::Borrowed("")
         }
 
         fn render_prompt_indicator(
             &self,
             prompt_mode: reedline::PromptEditMode,
-        ) -> std::borrow::Cow<str> {
+        ) -> std::borrow::Cow<'_, str> {
             match prompt_mode {
                 PromptEditMode::Default => Cow::Borrowed("( ) λ "),
                 PromptEditMode::Vi(PromptViMode::Insert) => Cow::Borrowed("[I] λ "),
@@ -144,14 +144,14 @@ pub fn prompt() -> Result<Box<dyn Prompt>> {
             }
         }
 
-        fn render_prompt_multiline_indicator(&self) -> std::borrow::Cow<str> {
+        fn render_prompt_multiline_indicator(&self) -> std::borrow::Cow<'_, str> {
             Cow::Owned(format!("{}| ", " ".repeat(10)))
         }
 
         fn render_prompt_history_search_indicator(
             &self,
             _history_search: reedline::PromptHistorySearch,
-        ) -> std::borrow::Cow<str> {
+        ) -> std::borrow::Cow<'_, str> {
             Cow::Borrowed("search: ")
         }
     }
