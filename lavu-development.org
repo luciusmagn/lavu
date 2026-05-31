@@ -240,3 +240,6 @@ Scheme value is valid.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.
+** Typed Standard Library Metadata
+- Add initial R5RS primitive type metadata and predicate refinements for
+  future occurrence typing.
