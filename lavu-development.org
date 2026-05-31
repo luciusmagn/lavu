@@ -237,3 +237,6 @@ Scheme value is valid.
 ** Stable Datum Parser
 - Add a library datum parser that uses existing lexer tokens but produces
   stable =Spanned<Datum>= nodes with byte spans.
+** Surface Classifier
+- Add the first stable surface AST classifier for literals, variables,
+  quote, lambda, if, begin, set!, define, and application.
