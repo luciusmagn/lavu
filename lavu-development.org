@@ -304,3 +304,7 @@ Scheme value is valid.
 ** Do Classifier
 - Lower R5RS =do= loops to generated recursive bindings on the stable
   surface path so runtime evaluation and inference reuse =letrec=.
+** Delay And Force
+- Add =delay= as a surface special form and =force= as a native
+  memoizing primitive, with conservative =any?= inference until promise
+  display syntax is chosen.

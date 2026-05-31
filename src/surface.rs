@@ -35,6 +35,7 @@ pub enum Expr {
         name: Spanned<String>,
         value: Box<Spanned<Expr>>,
     },
+    Delay(Box<Spanned<Expr>>),
     LetRec {
         bindings: Vec<(Spanned<String>, Spanned<Expr>)>,
         body: Vec<Spanned<Expr>>,
@@ -134,6 +135,7 @@ fn classify_list(
         Some("if") => parse_if(rest),
         Some("begin") => parse_begin(rest),
         Some("set!") => parse_set(rest),
+        Some("delay") => parse_delay(span, rest),
         Some("let") => parse_let(span, origin, rest),
         Some("let*") => parse_let_star(span, origin, rest),
         Some("letrec") => parse_letrec(span, rest),
@@ -284,6 +286,18 @@ fn parse_set(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
         name: expect_identifier(&rest[0], "set!")?,
         value: Box::new(classify_expr(&rest[1])?),
     })
+}
+
+fn parse_delay(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+    if rest.len() != 1 {
+        return Err(SurfaceError::BadArity {
+            form: "delay",
+            expected: "one expression",
+            span,
+        });
+    }
+
+    Ok(Expr::Delay(Box::new(classify_expr(&rest[0])?)))
 }
 
 fn parse_let(
@@ -1149,5 +1163,13 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
+    }
+
+    #[test]
+    fn classifies_delay_as_special_form() {
+        let datums = parse("(delay (+ 1 2))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::Delay(_))));
     }
 }

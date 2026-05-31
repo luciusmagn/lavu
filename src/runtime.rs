@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::surface::{Expr, Program, TopLevel};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Integer(BigInt),
     Rational(BigRational),
@@ -25,8 +25,35 @@ pub enum Value {
     Vector(Vec<Value>),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
+    Promise(Rc<Promise>),
     Unspecified,
     Uninitialized,
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Integer(left), Value::Integer(right)) => left == right,
+            (Value::Rational(left), Value::Rational(right)) => left == right,
+            (Value::Decimal(left), Value::Decimal(right)) => left == right,
+            (Value::Complex(left), Value::Complex(right)) => left == right,
+            (Value::Boolean(left), Value::Boolean(right)) => left == right,
+            (Value::Character(left), Value::Character(right)) => left == right,
+            (Value::String(left), Value::String(right)) => left == right,
+            (Value::Symbol(left), Value::Symbol(right)) => left == right,
+            (Value::List(left), Value::List(right)) => left == right,
+            (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
+                left_car == right_car && left_cdr == right_cdr
+            }
+            (Value::Vector(left), Value::Vector(right)) => left == right,
+            (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
+            (Value::Primitive(left), Value::Primitive(right)) => left == right,
+            (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
+            (Value::Unspecified, Value::Unspecified)
+            | (Value::Uninitialized, Value::Uninitialized) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +61,33 @@ pub struct Procedure {
     params: Vec<String>,
     body: Vec<Spanned<Expr>>,
     env: Env,
+}
+
+#[derive(Debug)]
+pub struct Promise {
+    expr: Spanned<Expr>,
+    env: Env,
+    value: RefCell<Option<Value>>,
+}
+
+impl Promise {
+    fn new(expr: Spanned<Expr>, env: Env) -> Self {
+        Self {
+            expr,
+            env,
+            value: RefCell::new(None),
+        }
+    }
+
+    fn force(&self) -> Result<Value, EvalError> {
+        if let Some(value) = self.value.borrow().clone() {
+            return Ok(value);
+        }
+
+        let value = eval_expr(&self.expr, &self.env)?;
+        *self.value.borrow_mut() = Some(value.clone());
+        Ok(value)
+    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -136,6 +190,7 @@ impl Env {
             "procedure?",
             "not",
             "eqv?",
+            "force",
             "cons",
             "car",
             "cdr",
@@ -227,6 +282,10 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
                 })
             }
         }
+        Expr::Delay(expr) => Ok(Value::Promise(Rc::new(Promise::new(
+            expr.as_ref().clone(),
+            env.clone(),
+        )))),
         Expr::LetRec { bindings, body } => eval_letrec(bindings, body, env),
         Expr::Apply { operator, operands } => {
             let procedure = eval_expr(operator, env)?;
@@ -330,6 +389,7 @@ fn apply_primitive(
         }),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
+        "force" => force(args, span),
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
@@ -665,6 +725,16 @@ fn eqv(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::Boolean(eqv_value(&left, &right)))
 }
 
+fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Promise(promise) => promise.force(),
+        _ => Err(EvalError::TypeError {
+            expected: "promise?",
+            span,
+        }),
+    })
+}
+
 fn eqv_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Boolean(left), Value::Boolean(right)) => left == right,
@@ -866,6 +936,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
+            Value::Promise(_) => write!(f, "#<promise>"),
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
@@ -952,6 +1023,17 @@ mod tests {
         assert_eq!(
             eval_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
             "10"
+        );
+    }
+
+    #[test]
+    fn evaluates_delay_and_force() {
+        assert_eq!(eval_one("(force (delay (+ 1 2)))"), "3");
+        assert_eq!(
+            eval_one(
+                "(define x 0) (define p (delay (begin (set! x (+ x 1)) x))) (force p) (force p)"
+            ),
+            "1"
         );
     }
 

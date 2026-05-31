@@ -68,6 +68,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "eqv?",
             Type::procedure(vec![Type::Any, Type::Any], Type::Boolean),
         ),
+        Primitive::new("force", Type::procedure(vec![Type::Any], Type::Any)),
         Primitive::new("+", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new("*", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new(
@@ -210,6 +211,10 @@ mod tests {
         assert_eq!(
             primitive("eqv?").unwrap().signature.to_string(),
             "(-> any? any? boolean?)"
+        );
+        assert_eq!(
+            primitive("force").unwrap().signature.to_string(),
+            "(-> any? any?)"
         );
         assert_eq!(
             primitive("char=?").unwrap().signature.to_string(),

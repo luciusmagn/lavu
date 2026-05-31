@@ -131,6 +131,7 @@ impl Inferencer {
                 self.unify(actual, expected, value.span.clone())?;
                 Ok(Type::Unknown)
             }
+            Expr::Delay(_) => Ok(Type::Any),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
                 let operator_ty = self.infer_expr(operator, env)?;
@@ -703,5 +704,10 @@ mod tests {
             infer_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
             "number?"
         );
+    }
+
+    #[test]
+    fn infers_delay_conservatively() {
+        assert_eq!(infer_one("(delay (+ 1 2))"), "any?");
     }
 }
