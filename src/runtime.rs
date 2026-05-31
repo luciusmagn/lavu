@@ -469,4 +469,11 @@ mod tests {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
     }
+
+    #[test]
+    fn evaluates_desugared_let_and_boolean_forms() {
+        assert_eq!(eval_one("(let ((x 2)) (+ x 3))"), "5");
+        assert_eq!(eval_one("(and #t 1)"), "1");
+        assert_eq!(eval_one("(or #f 7)"), "7");
+    }
 }

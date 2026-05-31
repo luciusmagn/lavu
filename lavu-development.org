@@ -256,3 +256,6 @@ Scheme value is valid.
 - Add a native evaluator on the stable surface AST for literals, quote,
   variables, lambdas, if, begin, set!, define, and a first Rust primitive
   set.
+** Derived Form Classifier
+- Desugar regular =let=, =and=, and =or= into existing surface core
+  forms so type inference and runtime evaluation can share the result.

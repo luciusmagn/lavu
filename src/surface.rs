@@ -126,6 +126,9 @@ fn classify_list(
         Some("if") => parse_if(rest),
         Some("begin") => parse_begin(rest),
         Some("set!") => parse_set(rest),
+        Some("let") => parse_let(span, origin, rest),
+        Some("and") => parse_and(span, origin, rest),
+        Some("or") => parse_or(span, origin, rest),
         _ => parse_apply(origin, head, rest),
     }
 }
@@ -228,6 +231,147 @@ fn parse_set(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
     })
 }
 
+fn parse_let(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    if rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "let",
+            expected: "bindings and at least one body expression",
+            span,
+        });
+    }
+
+    let Datum::List(binding_datums) = &rest[0].node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "let bindings",
+            span: rest[0].span.clone(),
+        });
+    };
+
+    let mut params = Vec::new();
+    let mut operands = Vec::new();
+
+    for binding in binding_datums {
+        let Datum::List(pair) = &binding.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "let binding",
+                span: binding.span.clone(),
+            });
+        };
+        if pair.len() != 2 {
+            return Err(SurfaceError::BadArity {
+                form: "let binding",
+                expected: "a name and a value",
+                span: binding.span.clone(),
+            });
+        }
+
+        params.push(expect_identifier(&pair[0], "let binding")?);
+        operands.push(classify_expr(&pair[1])?);
+    }
+
+    let body = rest[1..]
+        .iter()
+        .map(classify_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Expr::Apply {
+        operator: Box::new(Spanned {
+            node: Expr::Lambda { params, body },
+            span: span.clone(),
+            origin,
+        }),
+        operands,
+    })
+}
+
+fn parse_and(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    match rest {
+        [] => Ok(boolean_literal(true)),
+        [single] => Ok(classify_expr(single)?.node),
+        [first, remaining @ ..] => {
+            let condition = classify_expr(first)?;
+            let consequent = Spanned {
+                node: parse_and(span.clone(), origin, remaining)?,
+                span: span.clone(),
+                origin,
+            };
+            Ok(Expr::If {
+                condition: Box::new(condition),
+                consequent: Box::new(consequent),
+                alternate: Some(Box::new(Spanned {
+                    node: boolean_literal(false),
+                    span,
+                    origin,
+                })),
+            })
+        }
+    }
+}
+
+fn parse_or(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    match rest {
+        [] => Ok(boolean_literal(false)),
+        [single] => Ok(classify_expr(single)?.node),
+        [first, remaining @ ..] => {
+            let temp = Spanned {
+                node: "__lavu_or_value".to_string(),
+                span: first.span.clone(),
+                origin,
+            };
+            let condition = Spanned {
+                node: Expr::Variable(temp.node.clone()),
+                span: first.span.clone(),
+                origin,
+            };
+            let alternate = Spanned {
+                node: parse_or(span.clone(), origin, remaining)?,
+                span: span.clone(),
+                origin,
+            };
+
+            Ok(Expr::Apply {
+                operator: Box::new(Spanned {
+                    node: Expr::Lambda {
+                        params: vec![temp.clone()],
+                        body: vec![Spanned {
+                            node: Expr::If {
+                                condition: Box::new(condition),
+                                consequent: Box::new(Spanned {
+                                    node: Expr::Variable(temp.node),
+                                    span: temp.span,
+                                    origin,
+                                }),
+                                alternate: Some(Box::new(alternate)),
+                            },
+                            span: span.clone(),
+                            origin,
+                        }],
+                    },
+                    span: span.clone(),
+                    origin,
+                }),
+                operands: vec![classify_expr(first)?],
+            })
+        }
+    }
+}
+
+fn boolean_literal(value: bool) -> Expr {
+    Expr::Literal(Atom::Boolean(value))
+}
+
 fn parse_apply(
     _origin: Option<crate::syntax::NodeId>,
     head: &Spanned<Datum>,
@@ -326,5 +470,24 @@ mod tests {
         };
 
         assert_eq!(payload.span, 1..10);
+    }
+
+    #[test]
+    fn desugars_regular_let_to_lambda_application() {
+        let datums = parse("(let ((x 1)) (+ x 1))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
+    }
+
+    #[test]
+    fn desugars_and_or_to_conditionals() {
+        let and_datums = parse("(and (string? x) (string-length x))").unwrap();
+        let and_form = classify_top_level(&and_datums[0]).unwrap();
+        assert!(matches!(and_form.node, TopLevel::Expr(Expr::If { .. })));
+
+        let or_datums = parse("(or #f 1)").unwrap();
+        let or_form = classify_top_level(&or_datums[0]).unwrap();
+        assert!(matches!(or_form.node, TopLevel::Expr(Expr::Apply { .. })));
     }
 }
