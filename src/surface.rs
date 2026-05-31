@@ -127,6 +127,7 @@ fn classify_list(
         Some("begin") => parse_begin(rest),
         Some("set!") => parse_set(rest),
         Some("let") => parse_let(span, origin, rest),
+        Some("let*") => parse_let_star(span, origin, rest),
         Some("and") => parse_and(span, origin, rest),
         Some("or") => parse_or(span, origin, rest),
         Some("cond") => parse_cond(span, origin, rest),
@@ -287,6 +288,83 @@ fn parse_let(
         }),
         operands,
     })
+}
+
+fn parse_let_star(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
+    if rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "let*",
+            expected: "bindings and at least one body expression",
+            span,
+        });
+    }
+
+    let bindings = parse_bindings(&rest[0], "let* bindings")?;
+    let mut current = Spanned {
+        node: body_expr(&rest[1..], span.clone(), origin)?,
+        span: span.clone(),
+        origin,
+    };
+
+    for (name, value) in bindings.into_iter().rev() {
+        current = Spanned {
+            node: Expr::Apply {
+                operator: Box::new(Spanned {
+                    node: Expr::Lambda {
+                        params: vec![name],
+                        body: vec![current],
+                    },
+                    span: span.clone(),
+                    origin,
+                }),
+                operands: vec![value],
+            },
+            span: span.clone(),
+            origin,
+        };
+    }
+
+    Ok(current.node)
+}
+
+fn parse_bindings(
+    bindings: &Spanned<Datum>,
+    context: &'static str,
+) -> Result<Vec<(Spanned<String>, Spanned<Expr>)>, SurfaceError> {
+    let Datum::List(binding_datums) = &bindings.node else {
+        return Err(SurfaceError::ExpectedList {
+            context,
+            span: bindings.span.clone(),
+        });
+    };
+
+    binding_datums
+        .iter()
+        .map(|binding| {
+            let Datum::List(pair) = &binding.node else {
+                return Err(SurfaceError::ExpectedList {
+                    context: "binding",
+                    span: binding.span.clone(),
+                });
+            };
+            if pair.len() != 2 {
+                return Err(SurfaceError::BadArity {
+                    form: "binding",
+                    expected: "a name and a value",
+                    span: binding.span.clone(),
+                });
+            }
+
+            Ok((
+                expect_identifier(&pair[0], "binding")?,
+                classify_expr(&pair[1])?,
+            ))
+        })
+        .collect()
 }
 
 fn parse_and(
@@ -560,6 +638,14 @@ mod tests {
     #[test]
     fn desugars_regular_let_to_lambda_application() {
         let datums = parse("(let ((x 1)) (+ x 1))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
+    }
+
+    #[test]
+    fn desugars_let_star_to_nested_lambda_applications() {
+        let datums = parse("(let* ((x 1) (y (+ x 1))) y)").unwrap();
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));

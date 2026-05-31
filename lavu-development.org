@@ -268,3 +268,5 @@ Scheme value is valid.
 ** Cond Classifier
 - Desugar =cond= clauses into nested =if= expressions on the stable
   surface AST.
+** Let Star Classifier
+- Desugar =let*= into nested single-binding lambda applications.
