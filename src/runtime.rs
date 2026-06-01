@@ -4979,7 +4979,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluates_unimplemented_resource_predicates_conservatively() {
+    fn evaluates_resource_predicates() {
         assert_eq!(eval_one("(port? 1)"), "#f");
         assert_eq!(eval_one("(input-port? 1)"), "#f");
         assert_eq!(eval_one("(output-port? 1)"), "#f");
