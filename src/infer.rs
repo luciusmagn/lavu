@@ -2184,47 +2184,45 @@ fn visible_indexed_list_type(
     result: ListAccessResult,
     env: &TypeEnv,
 ) -> Option<Type> {
-    let items = visible_list_item_types(expr, env)?;
-    match result {
-        ListAccessResult::Element => items.get(index).cloned(),
-        ListAccessResult::Tail if index <= items.len() => Some(type_of_list_types(&items[index..])),
-        ListAccessResult::Tail => None,
-    }
-}
-
-fn visible_list_item_types(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Vec<Type>> {
     match &expr.node {
         Expr::Quote(datum) => match &datum.node {
-            Datum::List(items) => Some(items.iter().map(type_of_datum).collect()),
+            Datum::List(items) => match result {
+                ListAccessResult::Element => items.get(index).map(type_of_datum),
+                ListAccessResult::Tail if index <= items.len() => {
+                    Some(type_of_list_datums(&items[index..]))
+                }
+                ListAccessResult::Tail => None,
+            },
             _ => None,
         },
         Expr::Apply { operator, operands }
             if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
         {
-            operands.iter().map(static_expr_type).collect()
+            match result {
+                ListAccessResult::Element => operands.get(index).and_then(static_expr_type),
+                ListAccessResult::Tail if index <= operands.len() => {
+                    visible_expr_list_type(&operands[index..])
+                }
+                ListAccessResult::Tail => None,
+            }
         }
         _ => None,
     }
 }
 
 fn visible_vector_item_type(expr: &Spanned<Expr>, index: usize, env: &TypeEnv) -> Option<Type> {
-    let items = match &expr.node {
+    match &expr.node {
         Expr::Quote(datum) => match &datum.node {
-            Datum::Vector(items) => items.iter().map(type_of_datum).collect::<Vec<_>>(),
-            _ => return None,
+            Datum::Vector(items) => items.get(index).map(type_of_datum),
+            _ => None,
         },
         Expr::Apply { operator, operands }
             if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
         {
-            operands
-                .iter()
-                .map(static_expr_type)
-                .collect::<Option<Vec<_>>>()?
+            operands.get(index).and_then(static_expr_type)
         }
-        _ => return None,
-    };
-
-    items.get(index).cloned()
+        _ => None,
+    }
 }
 
 fn static_expr_type(expr: &Spanned<Expr>) -> Option<Type> {
@@ -2233,6 +2231,19 @@ fn static_expr_type(expr: &Spanned<Expr>) -> Option<Type> {
         Expr::Quote(datum) => Some(type_of_datum(datum)),
         _ => None,
     }
+}
+
+fn visible_expr_list_type(items: &[Spanned<Expr>]) -> Option<Type> {
+    if items.is_empty() {
+        return Some(Type::Null);
+    }
+
+    Some(Type::ListOf(Box::new(Type::union(
+        items
+            .iter()
+            .map(static_expr_type)
+            .collect::<Option<Vec<_>>>()?,
+    ))))
 }
 
 fn type_of_datum(datum: &Spanned<Datum>) -> Type {
@@ -2291,14 +2302,6 @@ fn type_of_list_datums(items: &[Spanned<Datum>]) -> Type {
     Type::ListOf(Box::new(Type::union(
         items.iter().map(type_of_datum).collect::<Vec<_>>(),
     )))
-}
-
-fn type_of_list_types(items: &[Type]) -> Type {
-    if items.is_empty() {
-        return Type::Null;
-    }
-
-    Type::ListOf(Box::new(Type::union(items.to_vec())))
 }
 
 fn abbreviation_datum_type(_name: &'static str, datum: &Spanned<Datum>) -> Type {
@@ -2852,6 +2855,10 @@ mod tests {
         assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "number?");
         assert_eq!(infer_one("(vector-ref (vector 1 \"x\") 0)"), "number?");
         assert_eq!(infer_one("(vector-ref '#(1 \"x\") 1)"), "string?");
+        assert_eq!(
+            infer_one("(lambda (x) (vector-ref (vector x \"x\") 1))"),
+            "(-> x string?)"
+        );
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
         assert_eq!(infer_one("(make-vector 3)"), "(vectorof any?)");
         assert_eq!(infer_one("(make-vector 3 #\\a)"), "(vectorof char?)");
@@ -2941,6 +2948,14 @@ mod tests {
         assert_eq!(infer_one("(list-tail '(1 \"x\") 1)"), "(listof string?)");
         assert_eq!(infer_one("(list-tail '(1 \"x\") 2)"), "null?");
         assert_eq!(infer_one("(list-ref (list 1 \"x\") 0)"), "number?");
+        assert_eq!(
+            infer_one("(lambda (x) (list-ref (list x \"x\") 1))"),
+            "(-> x string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (list-tail (list x \"x\") 1))"),
+            "(-> x (listof string?))"
+        );
         assert_eq!(
             infer_one("(lambda (xs) (string-length (list-ref xs 0)))"),
             "(-> (listof string?) number?)"

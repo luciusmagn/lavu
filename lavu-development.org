@@ -715,6 +715,9 @@ Scheme value is valid.
 - Infer visible =car= and =cdr= calls over quoted proper lists and
   visible =list= constructors with the same position-sensitive element
   flow.
+- Keep that visible constructor access precise when unrelated elements
+  are dynamic, so =(vector-ref (vector x "s") 1)= still infers
+  =string?=.
 ** Membership Primitives
 - Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
   =assoc= using the corresponding equality predicate semantics.
