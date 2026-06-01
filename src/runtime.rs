@@ -4809,6 +4809,8 @@ mod tests {
         assert_eq!(eval_one("1-i"), "1-1i");
         assert_eq!(eval_one("1/2+3/4i"), "1/2+3/4i");
         assert_eq!(eval_one("(exact? 1+2i)"), "#t");
+        assert_eq!(eval_one("(exact? #e1+2i)"), "#t");
+        assert_eq!(eval_one("#e1/2+3/4i"), "1/2+3/4i");
         assert_eq!(eval_one("(exact? #i1+2i)"), "#f");
         assert_eq!(eval_one(".5+.5i"), "0.5+0.5i");
         assert_eq!(eval_one("1@0"), "1+0i");

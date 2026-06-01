@@ -172,9 +172,19 @@ pub enum Token {
         callback = |lex| parse_exact_rectangular_complex(lex.slice())
     )]
     #[regex(
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?)[+-]([0-9]+(/[0-9]+)?)i",
+        priority = 11,
+        callback = |lex| parse_exact_rectangular_complex(&lex.slice()[2..])
+    )]
+    #[regex(
         r"[+-]i",
         priority = 7,
         callback = |lex| parse_exact_imaginary_unit(lex.slice())
+    )]
+    #[regex(
+        r"#[eE][+-]i",
+        priority = 9,
+        callback = |lex| parse_exact_imaginary_unit(&lex.slice()[2..])
     )]
     #[regex(
         r"[+-]?([0-9]+(/[0-9]+)?)i",
@@ -182,9 +192,19 @@ pub enum Token {
         callback = |lex| parse_exact_pure_imaginary(lex.slice())
     )]
     #[regex(
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?)i",
+        priority = 9,
+        callback = |lex| parse_exact_pure_imaginary(&lex.slice()[2..])
+    )]
+    #[regex(
         r"[+-]?([0-9]+(/[0-9]+)?)[+-]i",
         priority = 7,
         callback = |lex| parse_exact_unit_imaginary_complex(lex.slice())
+    )]
+    #[regex(
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?)[+-]i",
+        priority = 9,
+        callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[2..])
     )]
     ExactComplex(Complex<BigRational>),
 
@@ -1246,12 +1266,26 @@ mod tests {
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
         );
 
-        let exact_rectangular = tokenize("1/2+3/4i");
+        let exact_rectangular = tokenize("1/2+3/4i #e1/2+3/4i #e+i");
         assert_eq!(
             exact_rectangular[0].0,
             Token::ExactComplex(Complex::new(
                 BigRational::new(BigInt::from(1), BigInt::from(2)),
                 BigRational::new(BigInt::from(3), BigInt::from(4))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[2].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(1), BigInt::from(2)),
+                BigRational::new(BigInt::from(3), BigInt::from(4))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[4].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(1))
             ))
         );
 
