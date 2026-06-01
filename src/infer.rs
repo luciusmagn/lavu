@@ -1006,6 +1006,21 @@ impl Inferencer {
             .expect("arity check ensures a final list operand");
 
         match self.resolve(procedure_ty) {
+            Type::Procedure(
+                procedure @ (ProcedureType::Fixed { .. } | ProcedureType::Optional { .. }),
+            ) => {
+                let Some(final_arguments) = quoted_proper_list_types(final_operand) else {
+                    return Ok(Type::Any);
+                };
+                self.unify(final_list, Type::List, final_operand.span.clone())?;
+
+                let mut combined_tys = arguments;
+                combined_tys.extend(final_arguments.iter().cloned());
+                let mut combined_operands = fixed_operands.to_vec();
+                combined_operands.extend(final_arguments.iter().map(|_| final_operand.clone()));
+
+                self.apply_procedure(procedure, &combined_operands, combined_tys)
+            }
             Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
                 for (actual, operand) in arguments.into_iter().zip(fixed_operands) {
                     self.unify(actual, (*param).clone(), operand.span.clone())?;
@@ -1567,6 +1582,17 @@ fn type_of_atom(atom: &Atom) -> Type {
     }
 }
 
+fn quoted_proper_list_types(expr: &Spanned<Expr>) -> Option<Vec<Type>> {
+    let Expr::Quote(datum) = &expr.node else {
+        return None;
+    };
+    let Datum::List(items) = &datum.node else {
+        return None;
+    };
+
+    Some(items.iter().map(type_of_datum).collect())
+}
+
 fn type_of_datum(datum: &Spanned<Datum>) -> Type {
     match &datum.node {
         Datum::Atom(Atom::Identifier(_)) => Type::Symbol,
@@ -2104,6 +2130,18 @@ mod tests {
     fn infers_simple_apply_calls() {
         assert_eq!(infer_one("(apply + '(1 2 3))"), "number?");
         assert_eq!(infer_one("(apply string-append '(\"a\" \"b\"))"), "string?");
+        assert_eq!(
+            infer_one("(apply (lambda (x y) (+ x y)) '(1 2))"),
+            "number?"
+        );
+        assert_eq!(
+            infer_error("(apply (lambda (x y) (+ x y)) '(1 2 3))").to_string(),
+            "wrong number of arguments: expected 2, got 3"
+        );
+        assert_eq!(
+            infer_one("(apply (lambda (x radix) (number->string x radix)) '(10 16))"),
+            "string?"
+        );
     }
 
     #[test]

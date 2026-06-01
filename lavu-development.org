@@ -541,6 +541,8 @@ Scheme value is valid.
 - Infer direct =append= calls as proper =listof= results when every
   visible argument is a proper list, while preserving =any?= for
   improper final tails.
+- Infer fixed and optional procedure applications through quoted final
+  proper lists, preserving visible arity and result types for =apply=.
 ** Vector Primitives
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill
