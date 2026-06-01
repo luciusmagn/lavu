@@ -709,6 +709,9 @@ Scheme value is valid.
   checked exact non-negative indexes.
 - Infer =list-ref= and =list-tail= through =listof= element types so
   indexed list access can constrain upstream parameters.
+- Infer visible literal-index =list-ref=, =list-tail=, and =vector-ref=
+  calls from quoted data or visible constructors without collapsing
+  heterogeneous elements into unions.
 ** Membership Primitives
 - Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
   =assoc= using the corresponding equality predicate semantics.

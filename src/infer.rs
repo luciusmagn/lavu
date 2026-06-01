@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use num::ToPrimitive;
 use thiserror::Error;
 
 use crate::stdlib::primitive;
@@ -163,6 +164,7 @@ enum PrimitiveApplication {
     List,
     MakeVector,
     Vector,
+    VectorRef,
     ListRef,
     ListTail,
     Car,
@@ -198,6 +200,7 @@ impl PrimitiveApplication {
             "list" => Some(Self::List),
             "make-vector" => Some(Self::MakeVector),
             "vector" => Some(Self::Vector),
+            "vector-ref" => Some(Self::VectorRef),
             "list-ref" => Some(Self::ListRef),
             "list-tail" => Some(Self::ListTail),
             "car" => Some(Self::Car),
@@ -435,11 +438,14 @@ impl Inferencer {
             PrimitiveApplication::List => Ok(self.infer_list_constructor(operand_tys)),
             PrimitiveApplication::MakeVector => self.infer_make_vector(operands, operand_tys, span),
             PrimitiveApplication::Vector => Ok(self.infer_vector_constructor(operand_tys)),
+            PrimitiveApplication::VectorRef => {
+                self.infer_vector_ref(operands, operand_tys, span, env)
+            }
             PrimitiveApplication::ListRef => {
-                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Element)
+                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Element, env)
             }
             PrimitiveApplication::ListTail => {
-                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Tail)
+                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Tail, env)
             }
             PrimitiveApplication::Car => {
                 self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Element)
@@ -1279,6 +1285,7 @@ impl Inferencer {
         operand_tys: Vec<Type>,
         span: SourceSpan,
         result: ListAccessResult,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         let [list_ty, index_ty]: [Type; 2] =
             operand_tys
@@ -1290,11 +1297,55 @@ impl Inferencer {
                 })?;
 
         self.unify(index_ty, Type::Number, operands[1].span.clone())?;
+        if let Some(index) = literal_index(&operands[1])
+            && let Some(ty) = visible_indexed_list_type(&operands[0], index, result, env)
+        {
+            return Ok(ty);
+        }
         let element = self.infer_list_element_type(list_ty, &operands[0])?;
 
         match result {
             ListAccessResult::Element => Ok(self.resolve(element)),
             ListAccessResult::Tail => Ok(Type::ListOf(Box::new(self.resolve(element)))),
+        }
+    }
+
+    fn infer_vector_ref(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let [vector_ty, index_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        self.unify(index_ty, Type::Number, operands[1].span.clone())?;
+        if let Some(index) = literal_index(&operands[1])
+            && let Some(ty) = visible_vector_item_type(&operands[0], index, env)
+        {
+            return Ok(ty);
+        }
+
+        match self.resolve(vector_ty) {
+            Type::VectorOf(element) => Ok(self.resolve(*element)),
+            Type::Vector | Type::Any | Type::Unknown => Ok(Type::Any),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::VectorOf(Box::new(element.clone())));
+                Ok(element)
+            }
+            actual => {
+                self.unify(actual, Type::Vector, operands[0].span.clone())?;
+                Ok(Type::Any)
+            }
         }
     }
 
@@ -2107,6 +2158,70 @@ fn quoted_proper_list_types(expr: &Spanned<Expr>) -> Option<Vec<Type>> {
     Some(items.iter().map(type_of_datum).collect())
 }
 
+fn literal_index(expr: &Spanned<Expr>) -> Option<usize> {
+    match &expr.node {
+        Expr::Literal(Atom::Integer(index)) => index.to_usize(),
+        _ => None,
+    }
+}
+
+fn visible_indexed_list_type(
+    expr: &Spanned<Expr>,
+    index: usize,
+    result: ListAccessResult,
+    env: &TypeEnv,
+) -> Option<Type> {
+    let items = visible_list_item_types(expr, env)?;
+    match result {
+        ListAccessResult::Element => items.get(index).cloned(),
+        ListAccessResult::Tail if index <= items.len() => Some(type_of_list_types(&items[index..])),
+        ListAccessResult::Tail => None,
+    }
+}
+
+fn visible_list_item_types(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Vec<Type>> {
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::List(items) => Some(items.iter().map(type_of_datum).collect()),
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
+        {
+            operands.iter().map(static_expr_type).collect()
+        }
+        _ => None,
+    }
+}
+
+fn visible_vector_item_type(expr: &Spanned<Expr>, index: usize, env: &TypeEnv) -> Option<Type> {
+    let items = match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::Vector(items) => items.iter().map(type_of_datum).collect::<Vec<_>>(),
+            _ => return None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
+        {
+            operands
+                .iter()
+                .map(static_expr_type)
+                .collect::<Option<Vec<_>>>()?
+        }
+        _ => return None,
+    };
+
+    items.get(index).cloned()
+}
+
+fn static_expr_type(expr: &Spanned<Expr>) -> Option<Type> {
+    match &expr.node {
+        Expr::Literal(atom) => Some(type_of_atom(atom)),
+        Expr::Quote(datum) => Some(type_of_datum(datum)),
+        _ => None,
+    }
+}
+
 fn type_of_datum(datum: &Spanned<Datum>) -> Type {
     match &datum.node {
         Datum::Atom(Atom::Identifier(_)) => Type::Symbol,
@@ -2163,6 +2278,14 @@ fn type_of_list_datums(items: &[Spanned<Datum>]) -> Type {
     Type::ListOf(Box::new(Type::union(
         items.iter().map(type_of_datum).collect::<Vec<_>>(),
     )))
+}
+
+fn type_of_list_types(items: &[Type]) -> Type {
+    if items.is_empty() {
+        return Type::Null;
+    }
+
+    Type::ListOf(Box::new(Type::union(items.to_vec())))
 }
 
 fn abbreviation_datum_type(_name: &'static str, datum: &Spanned<Datum>) -> Type {
@@ -2709,10 +2832,8 @@ mod tests {
             "(vectorof (U number? string?))"
         );
         assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "number?");
-        assert_eq!(
-            infer_one("(vector-ref (vector 1 \"x\") 0)"),
-            "(U number? string?)"
-        );
+        assert_eq!(infer_one("(vector-ref (vector 1 \"x\") 0)"), "number?");
+        assert_eq!(infer_one("(vector-ref '#(1 \"x\") 1)"), "string?");
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
         assert_eq!(infer_one("(make-vector 3)"), "(vectorof any?)");
         assert_eq!(infer_one("(make-vector 3 #\\a)"), "(vectorof char?)");
@@ -2797,6 +2918,11 @@ mod tests {
         assert_eq!(infer_one("(caddr '(a b c))"), "symbol?");
         assert_eq!(infer_one("(list-ref '(a b c) 1)"), "symbol?");
         assert_eq!(infer_one("(list-tail '(a b c) 1)"), "(listof symbol?)");
+        assert_eq!(infer_one("(list-ref '(1 \"x\") 0)"), "number?");
+        assert_eq!(infer_one("(list-ref '(1 \"x\") 1)"), "string?");
+        assert_eq!(infer_one("(list-tail '(1 \"x\") 1)"), "(listof string?)");
+        assert_eq!(infer_one("(list-tail '(1 \"x\") 2)"), "null?");
+        assert_eq!(infer_one("(list-ref (list 1 \"x\") 0)"), "number?");
         assert_eq!(
             infer_one("(lambda (xs) (string-length (list-ref xs 0)))"),
             "(-> (listof string?) number?)"
