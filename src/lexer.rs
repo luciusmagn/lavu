@@ -50,7 +50,7 @@ pub enum LexerError {
 pub enum Token {
     // Identifiers
     #[regex(
-        r"([a-zA-Z!$%&*/:<=>?^_~+@-][a-zA-Z0-9!$%&*/:<>=?^_~+@.\-]*)|(\.\.\.)",
+        r"([a-zA-Z!$%&*/:<=>?^_~][a-zA-Z0-9!$%&*/:<>=?^_~+@.\-]*)|(\+)|(-)|(\.\.\.)",
         |lex| lex.slice().to_ascii_lowercase()
     )]
     Identifier(String),
@@ -868,7 +868,6 @@ mod tests {
         test_single("=", Token::is_identifier)?;
         test_single(">", Token::is_identifier)?;
         test_single("?", Token::is_identifier)?;
-        test_single("@", Token::is_identifier)?;
         test_single("^", Token::is_identifier)?;
         test_single("_", Token::is_identifier)?;
         test_single("~", Token::is_identifier)?;
@@ -887,6 +886,29 @@ mod tests {
         test_single("...", Token::is_identifier)?;
 
         Ok(())
+    }
+
+    #[test]
+    fn rejects_non_r5rs_identifier_initials() {
+        assert!(matches!(
+            tokenize_checked("@"),
+            Err(SpannedLexerError {
+                error: LexerError::DefaultError,
+                ..
+            })
+        ));
+        for input in ["+abc", "-abc"] {
+            assert!(
+                matches!(
+                    tokenize_checked(input),
+                    Err(SpannedLexerError {
+                        error: LexerError::MissingDelimiter,
+                        ..
+                    })
+                ),
+                "{input} should not start a general identifier"
+            );
+        }
     }
 
     #[test]

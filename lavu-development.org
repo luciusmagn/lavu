@@ -411,6 +411,9 @@ Scheme value is valid.
   names alone.
 - Accept dot as an R5RS subsequent identifier character, while keeping
   bare dot reserved for dotted-list syntax.
+- Restrict identifier initials to R5RS initials plus the peculiar
+  identifiers =+=, =-=, and =...=, rejecting extension starts such as
+  bare =@= or =+name=.
 - Add checked tokenization for parser entry points so lexer failures
   such as unclosed block comments and invalid named characters become
   spanned parse diagnostics instead of disappearing from best-effort
