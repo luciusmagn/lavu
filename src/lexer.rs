@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use crate::chars::{ParseCharError, parse_char};
 
-#[derive(Error, PartialEq, Debug, Clone)]
+#[derive(Error, PartialEq, Debug, Clone, Default)]
 pub enum LexerError {
     #[error("decimal parse error: {0}")]
     DecimalParseError(#[from] ParseBigDecimalError),
@@ -24,13 +24,8 @@ pub enum LexerError {
     ComplexNumParseError(#[from] Rc<ParseComplexError<ParseBigDecimalError>>),
 
     #[error("other error")]
+    #[default]
     DefaultError,
-}
-
-impl Default for LexerError {
-    fn default() -> Self {
-        Self::DefaultError
-    }
 }
 
 #[derive(Logos, Debug, PartialEq, EnumIs, Hash, Eq, Clone)]
@@ -66,7 +61,7 @@ pub enum Token {
     #[regex(
         r"[+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
         |lex| Complex::from_str(lex.slice())
-            .map_err(|e| Rc::new(e))
+            .map_err(Rc::new)
     )]
     Complex(Complex<BigDecimal>),
 
@@ -249,7 +244,7 @@ mod tests {
     fn test_single(s: &str, pred: impl Fn(&Token) -> bool) -> Result<()> {
         let tokens = tokenize(s);
 
-        ensure!(tokens.len() > 0, "no tokens parsed: {}", s);
+        ensure!(!tokens.is_empty(), "no tokens parsed: {}", s);
         ensure!(pred(&tokens[0].0), "test failed: {}", s);
 
         Ok(())
@@ -392,6 +387,6 @@ mod tests {
         let input = "(define (fact n) (if (< n 2) 1 (* n (fact (- n 1)))))";
         let tokens = tokenize(input);
         // This just checks if lexing completes without error
-        assert!(tokens.len() > 0);
+        assert!(!tokens.is_empty());
     }
 }

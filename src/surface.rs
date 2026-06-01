@@ -7,6 +7,9 @@ pub struct Program {
     pub forms: Vec<Spanned<TopLevel>>,
 }
 
+pub type Binding = (Spanned<String>, Spanned<Expr>);
+type DefineBinding = (Spanned<String>, Spanned<Expr>);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopLevel {
     Define {
@@ -38,7 +41,7 @@ pub enum Expr {
     },
     Delay(Box<Spanned<Expr>>),
     LetRec {
-        bindings: Vec<(Spanned<String>, Spanned<Expr>)>,
+        bindings: Vec<Binding>,
         body: Vec<Spanned<Expr>>,
     },
     Apply {
@@ -150,9 +153,7 @@ fn classify_list(
     }
 }
 
-fn parse_define(
-    datum: &Spanned<Datum>,
-) -> Result<Option<(Spanned<String>, Spanned<Expr>)>, SurfaceError> {
+fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, SurfaceError> {
     let Datum::List(items) = &datum.node else {
         return Ok(None);
     };
@@ -447,7 +448,7 @@ fn parse_let_star(
 fn parse_bindings(
     bindings: &Spanned<Datum>,
     context: &'static str,
-) -> Result<Vec<(Spanned<String>, Spanned<Expr>)>, SurfaceError> {
+) -> Result<Vec<Binding>, SurfaceError> {
     let Datum::List(binding_datums) = &bindings.node else {
         return Err(SurfaceError::ExpectedList {
             context,

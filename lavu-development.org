@@ -332,3 +332,6 @@ Scheme value is valid.
 ** Resource Predicates
 - Bind conservative runtime predicates for port and EOF object metadata
   so typed names are available even before resource values exist.
+** Clippy Warning Cleanup
+- Fix Clippy-denied warnings in lexer defaults, redundant closures,
+  test length checks, and repeated surface binding tuple types.
