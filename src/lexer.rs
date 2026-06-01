@@ -1,7 +1,8 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Lexer as LogosLexer, Logos, Span};
 use num::{
-    BigInt, Complex, Num, ToPrimitive, Zero, bigint::ParseBigIntError, complex::ParseComplexError,
+    BigInt, Complex, FromPrimitive, Num, ToPrimitive, Zero, bigint::ParseBigIntError,
+    complex::ParseComplexError,
 };
 use strum::EnumIs;
 use thiserror::Error;
@@ -210,6 +211,16 @@ pub enum Token {
         r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-]i",
         priority = 8,
         callback = |lex| parse_unit_imaginary_complex(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))@[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))",
+        priority = 7,
+        callback = |lex| parse_polar_complex(lex.slice())
+    )]
+    #[regex(
+        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))@[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))",
+        priority = 9,
+        callback = |lex| parse_polar_complex(&lex.slice()[2..])
     )]
     Complex(Complex<BigDecimal>),
 
@@ -670,6 +681,27 @@ fn parse_unit_imaginary_complex(slice: &str) -> Result<Complex<BigDecimal>, Lexe
     Ok(Complex::new(real, BigDecimal::from(imaginary)))
 }
 
+fn parse_polar_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
+    let (magnitude, angle) = slice
+        .split_once('@')
+        .expect("polar complex token regex guarantees an at sign");
+    let magnitude = BigDecimal::from_str(magnitude)?;
+    let angle = BigDecimal::from_str(angle)?;
+    let magnitude = magnitude.to_f64().ok_or(LexerError::DefaultError)?;
+    let angle = angle.to_f64().ok_or(LexerError::DefaultError)?;
+
+    Ok(Complex::new(
+        decimal_from_f64(magnitude * angle.cos())?,
+        decimal_from_f64(magnitude * angle.sin())?,
+    ))
+}
+
+fn decimal_from_f64(number: f64) -> Result<BigDecimal, LexerError> {
+    BigDecimal::from_f64(number)
+        .map(|number| number.normalized())
+        .ok_or(LexerError::DefaultError)
+}
+
 fn normalize_decimal_exponent(slice: &str) -> String {
     slice
         .chars()
@@ -1094,6 +1126,16 @@ mod tests {
         assert_eq!(
             imaginary[12].0,
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+        );
+
+        let polar = tokenize("1@0 #i2@0");
+        assert_eq!(
+            polar[0].0,
+            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(0)))
+        );
+        assert_eq!(
+            polar[2].0,
+            Token::Complex(Complex::new(BigDecimal::from(2), BigDecimal::from(0)))
         );
 
         assert!(matches!(
