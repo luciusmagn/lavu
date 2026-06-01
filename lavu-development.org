@@ -310,6 +310,8 @@ Scheme value is valid.
 - Reject duplicate =syntax-rules= pattern variables at macro definition
   time, while leaving literals, the rule keyword, and ellipses out of the
   variable set.
+- Reject =cond= forms whose =else= clause is not last, matching the
+  existing =case= clause validation.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.

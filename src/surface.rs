@@ -2177,7 +2177,7 @@ fn parse_cond(
         origin,
     };
 
-    for clause in clauses.iter().rev() {
+    for (index, clause) in clauses.iter().enumerate().rev() {
         let Datum::List(items) = &clause.node else {
             return Err(SurfaceError::ExpectedList {
                 context: "cond clause",
@@ -2193,6 +2193,14 @@ fn parse_cond(
         };
 
         if identifier_name(test).as_deref() == Some("else") {
+            if index != clauses.len() - 1 {
+                return Err(SurfaceError::BadArity {
+                    form: "cond",
+                    expected: "else clause last",
+                    span: clause.span.clone(),
+                });
+            }
+
             result = Spanned {
                 node: body_expr(body, clause.span.clone(), origin)?,
                 span: clause.span.clone(),
@@ -3002,6 +3010,16 @@ mod tests {
                 Err(SurfaceError::DuplicateIdentifier { .. })
             ));
         }
+    }
+
+    #[test]
+    fn rejects_non_final_cond_else_clause() {
+        let datums = parse("(cond (else 1) (#t 2))").unwrap();
+
+        assert!(matches!(
+            classify_top_level(&datums[0]),
+            Err(SurfaceError::BadArity { form: "cond", .. })
+        ));
     }
 
     #[test]
