@@ -297,6 +297,8 @@ Scheme value is valid.
   =syntax-rules= transformers before surface AST classification.
 - Support literal identifiers and simple list ellipses in macro patterns
   and templates. Full R5RS hygiene remains future work.
+- Treat =_= as an ordinary R5RS pattern variable rather than a
+  non-standard wildcard.
 - Process top-level =begin= forms in macro-expansion order so syntax
   definitions can affect later forms in the same top-level sequence.
 - Expand =let-syntax= and =letrec-syntax= with scoped local

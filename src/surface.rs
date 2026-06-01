@@ -875,7 +875,6 @@ fn match_pattern(
     captures: &mut BTreeMap<String, Capture>,
 ) -> Result<bool, SurfaceError> {
     match &pattern.node {
-        Datum::Atom(Atom::Identifier(name)) if name == "_" => Ok(true),
         Datum::Atom(Atom::Identifier(name)) if name == "..." => {
             Err(SurfaceError::UnsupportedMacroPattern {
                 span: pattern.span.clone(),
@@ -1033,7 +1032,7 @@ fn collect_pattern_variables(
 ) {
     match &pattern.node {
         Datum::Atom(Atom::Identifier(name))
-            if name != "_" && name != "..." && name != keyword && !literals.contains(name) =>
+            if name != "..." && name != keyword && !literals.contains(name) =>
         {
             variables.insert(name.clone());
         }

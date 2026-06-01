@@ -4295,6 +4295,15 @@ mod tests {
             ),
             "9"
         );
+        assert_eq!(
+            eval_one(
+                "(define-syntax keep
+                   (syntax-rules ()
+                     ((keep _) _)))
+                 (keep 11)"
+            ),
+            "11"
+        );
     }
 
     #[test]
