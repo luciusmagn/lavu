@@ -173,10 +173,40 @@ pub enum Token {
             .map_err(Rc::new)
     )]
     #[regex(
+        r"[+-]i",
+        priority = 6,
+        callback = |lex| parse_imaginary_unit(lex.slice())
+    )]
+    #[regex(
+        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
+        priority = 6,
+        callback = |lex| parse_pure_imaginary(lex.slice())
+    )]
+    #[regex(
+        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-]i",
+        priority = 6,
+        callback = |lex| parse_unit_imaginary_complex(lex.slice())
+    )]
+    #[regex(
         r"#[iI][+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
         priority = 6,
         callback = |lex| Complex::from_str(&lex.slice()[2..])
             .map_err(Rc::new)
+    )]
+    #[regex(
+        r"#[iI][+-]i",
+        priority = 8,
+        callback = |lex| parse_imaginary_unit(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
+        priority = 8,
+        callback = |lex| parse_pure_imaginary(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-]i",
+        priority = 8,
+        callback = |lex| parse_unit_imaginary_complex(&lex.slice()[2..])
     )]
     Complex(Complex<BigDecimal>),
 
@@ -603,6 +633,33 @@ fn parse_decimal_literal(slice: &str) -> Result<BigDecimal, ParseBigDecimalError
     BigDecimal::from_str(&normalize_decimal_exponent(slice))
 }
 
+fn parse_imaginary_unit(slice: &str) -> Complex<BigDecimal> {
+    let imaginary = if slice.starts_with('-') { -1 } else { 1 };
+    Complex::new(BigDecimal::from(0), BigDecimal::from(imaginary))
+}
+
+fn parse_pure_imaginary(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
+    let imaginary = BigDecimal::from_str(&slice[..slice.len() - 1])?;
+    Ok(Complex::new(BigDecimal::from(0), imaginary))
+}
+
+fn parse_unit_imaginary_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
+    let sign_index = slice
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = BigDecimal::from_str(&slice[..sign_index])?;
+    let imaginary = if slice[sign_index..].starts_with('-') {
+        -1
+    } else {
+        1
+    };
+
+    Ok(Complex::new(real, BigDecimal::from(imaginary)))
+}
+
 fn normalize_decimal_exponent(slice: &str) -> String {
     slice
         .chars()
@@ -899,6 +956,39 @@ mod tests {
         assert_eq!(
             radix_rationals[10].0,
             Token::Decimal(BigDecimal::from_str("2.5").unwrap())
+        );
+
+        let imaginary = tokenize("+i -i 2i -2.5i 1+i 1-i #i+i");
+        assert_eq!(
+            imaginary[0].0,
+            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+        );
+        assert_eq!(
+            imaginary[2].0,
+            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(-1)))
+        );
+        assert_eq!(
+            imaginary[4].0,
+            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(2)))
+        );
+        assert_eq!(
+            imaginary[6].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from(0),
+                BigDecimal::from_str("-2.5").unwrap()
+            ))
+        );
+        assert_eq!(
+            imaginary[8].0,
+            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(1)))
+        );
+        assert_eq!(
+            imaginary[10].0,
+            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(-1)))
+        );
+        assert_eq!(
+            imaginary[12].0,
+            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
         );
 
         assert!(matches!(
