@@ -273,6 +273,8 @@ impl Env {
             "cons",
             "car",
             "cdr",
+            "set-car!",
+            "set-cdr!",
             "caar",
             "cadr",
             "cdar",
@@ -688,6 +690,8 @@ fn apply_primitive(
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
+        "set-car!" => set_car(args, span),
+        "set-cdr!" => set_cdr(args, span),
         name if composed_accessor_ops(name).is_some() => composed_accessor(name, args, span),
         "list" => Ok(Value::List(args)),
         "length" => unary(args, span.clone(), |value| match value {
@@ -1984,6 +1988,44 @@ fn cdr(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
+fn set_car(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [pair, value]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    match pair {
+        Value::Pair(pair) => {
+            pair.borrow_mut().car = value;
+            Ok(Value::Unspecified)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "mutable pair?",
+            span,
+        }),
+    }
+}
+
+fn set_cdr(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [pair, value]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    match pair {
+        Value::Pair(pair) => {
+            pair.borrow_mut().cdr = value;
+            Ok(Value::Unspecified)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "mutable pair?",
+            span,
+        }),
+    }
+}
+
 fn composed_accessor(
     name: &'static str,
     args: Vec<Value>,
@@ -2839,6 +2881,14 @@ mod tests {
     fn evaluates_pair_and_list_primitives() {
         assert_eq!(eval_one("(cons 1 (list 2 3))"), "(1 2 3)");
         assert_eq!(eval_one("(cons 1 2)"), "(1 . 2)");
+        assert_eq!(
+            eval_one("(define p (cons 1 2)) (set-car! p 9) p"),
+            "(9 . 2)"
+        );
+        assert_eq!(
+            eval_one("(define p (cons 1 2)) (set-cdr! p 9) p"),
+            "(1 . 9)"
+        );
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(length (list 1 2 3))"), "3");

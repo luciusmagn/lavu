@@ -929,6 +929,12 @@ mod tests {
     }
 
     #[test]
+    fn infers_pair_mutators() {
+        assert_eq!(infer_one("(set-car! (cons 1 2) 9)"), "unknown?");
+        assert_eq!(infer_one("(set-cdr! (cons 1 2) 9)"), "unknown?");
+    }
+
+    #[test]
     fn infers_character_comparison_lambda() {
         assert_eq!(
             infer_one("(lambda (c) (char=? c #\\a))"),

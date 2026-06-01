@@ -414,6 +414,26 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             ),
         ),
         Primitive::new(
+            "set-car!",
+            Type::procedure(
+                vec![
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                    Type::Any,
+                ],
+                Type::Unknown,
+            ),
+        ),
+        Primitive::new(
+            "set-cdr!",
+            Type::procedure(
+                vec![
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                    Type::Any,
+                ],
+                Type::Unknown,
+            ),
+        ),
+        Primitive::new(
             "list",
             Type::uniform_variadic(a.clone(), Type::ListOf(Box::new(a.clone()))),
         ),
@@ -530,6 +550,10 @@ mod tests {
         assert_eq!(
             primitive("cons").unwrap().signature.to_string(),
             "(-> a b (pair? a b))"
+        );
+        assert_eq!(
+            primitive("set-car!").unwrap().signature.to_string(),
+            "(-> (pair? any? any?) any? unknown?)"
         );
         assert_eq!(
             primitive("length").unwrap().signature.to_string(),
