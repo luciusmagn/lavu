@@ -141,7 +141,7 @@ pub enum Token {
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[2..])
     )]
     #[regex(
-        r"#[eE][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[eE][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 8,
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[2..])
     )]
@@ -151,7 +151,7 @@ pub enum Token {
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
     #[regex(
-        r"#[eE]#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[eE]#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 10,
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
@@ -161,7 +161,7 @@ pub enum Token {
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
     #[regex(
-        r"#[dD]#[eE][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[dD]#[eE][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 10,
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
@@ -186,9 +186,9 @@ pub enum Token {
         callback = |lex| BigDecimal::from_str(lex.slice())
     )]
     #[regex(
-        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 5,
-        callback = |lex| BigDecimal::from_str(lex.slice())
+        callback = |lex| parse_decimal_literal(lex.slice())
     )]
     #[regex(
         r"#[iI][+-]?[0-9]+",
@@ -196,9 +196,9 @@ pub enum Token {
         callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
     )]
     #[regex(
-        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 8,
-        callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
+        callback = |lex| parse_decimal_literal(&lex.slice()[2..])
     )]
     #[regex(
         r"#[iI]#[dD][+-]?[0-9]+",
@@ -206,9 +206,9 @@ pub enum Token {
         callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
     )]
     #[regex(
-        r"#[iI]#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[iI]#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 10,
-        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+        callback = |lex| parse_decimal_literal(&lex.slice()[4..])
     )]
     #[regex(
         r"#[dD]#[iI][+-]?[0-9]+",
@@ -216,9 +216,9 @@ pub enum Token {
         callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
     )]
     #[regex(
-        r"#[dD]#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[dD]#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 10,
-        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+        callback = |lex| parse_decimal_literal(&lex.slice()[4..])
     )]
     #[regex(
         r"#[iI]#[bB][+-]?[01]+",
@@ -306,9 +306,9 @@ pub enum Token {
         callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
     )]
     #[regex(
-        r"#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eE][+-]?[0-9]+",
+        r"#[dD][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[eEsSfFdDlL][+-]?[0-9]+",
         priority = 8,
-        callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
+        callback = |lex| parse_decimal_literal(&lex.slice()[2..])
     )]
     #[regex(
         r"#[iI]#[dD][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
@@ -599,10 +599,27 @@ fn parse_exact_decimal_literal(slice: &str) -> Result<(BigInt, BigInt), LexerErr
     Ok((numerator, denominator))
 }
 
+fn parse_decimal_literal(slice: &str) -> Result<BigDecimal, ParseBigDecimalError> {
+    BigDecimal::from_str(&normalize_decimal_exponent(slice))
+}
+
+fn normalize_decimal_exponent(slice: &str) -> String {
+    slice
+        .chars()
+        .map(|ch| {
+            if is_decimal_exponent_marker(ch) {
+                'e'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
 fn split_decimal_exponent(magnitude: &str) -> Result<(&str, i64), LexerError> {
     let Some((index, _)) = magnitude
         .char_indices()
-        .find(|(_, ch)| matches!(ch, 'e' | 'E'))
+        .find(|(_, ch)| is_decimal_exponent_marker(*ch))
     else {
         return Ok((magnitude, 0));
     };
@@ -611,6 +628,13 @@ fn split_decimal_exponent(magnitude: &str) -> Result<(&str, i64), LexerError> {
         .to_i64()
         .ok_or(LexerError::DefaultError)?;
     Ok((&magnitude[..index], exponent))
+}
+
+fn is_decimal_exponent_marker(ch: char) -> bool {
+    matches!(
+        ch,
+        'e' | 'E' | 's' | 'S' | 'f' | 'F' | 'd' | 'D' | 'l' | 'L'
+    )
 }
 
 fn decimal_scale(power: i64) -> Result<BigInt, LexerError> {
@@ -823,6 +847,32 @@ mod tests {
         assert_eq!(
             exponents[14].0,
             Token::Real((BigInt::from(125), BigInt::from(1000)))
+        );
+
+        let exponent_markers = tokenize("1s2 1f2 1d2 1l2 #e1d2 #d#i1l2");
+        assert_eq!(
+            exponent_markers[0].0,
+            Token::Decimal(BigDecimal::from_str("1e2").unwrap())
+        );
+        assert_eq!(
+            exponent_markers[2].0,
+            Token::Decimal(BigDecimal::from_str("1e2").unwrap())
+        );
+        assert_eq!(
+            exponent_markers[4].0,
+            Token::Decimal(BigDecimal::from_str("1e2").unwrap())
+        );
+        assert_eq!(
+            exponent_markers[6].0,
+            Token::Decimal(BigDecimal::from_str("1e2").unwrap())
+        );
+        assert_eq!(
+            exponent_markers[8].0,
+            Token::Real((BigInt::from(100), BigInt::from(1)))
+        );
+        assert_eq!(
+            exponent_markers[10].0,
+            Token::Decimal(BigDecimal::from_str("1e2").unwrap())
         );
 
         let radix_rationals = tokenize("#d3/2 #d1.5 #b101/10 #o10/4 #x10/4 #i#b101/10");

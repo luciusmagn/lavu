@@ -620,6 +620,8 @@ Scheme value is valid.
   =#d3/2= and =#d1.5=.
 - Parse decimal exponent numeric literals such as =1e2= and exact
   exponent forms such as =#e1.25e1=.
+- Accept the full R5RS decimal exponent marker family
+  =e/s/f/d/l=, normalizing all markers through the same decimal path.
 - Reject rational literals with zero denominators during lexing so datum
   parsing and =string->number= report failure instead of panicking later.
 ** Complete Text Comparisons

@@ -5032,6 +5032,8 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#e1e2\")"), "100");
         assert_eq!(eval_one("(string->number \"#e1.25e1\")"), "25/2");
         assert_eq!(eval_one("(string->number \"#e1.25e-1\")"), "1/8");
+        assert_eq!(eval_one("(= (string->number \"1d2\") 100)"), "#t");
+        assert_eq!(eval_one("(string->number \"#e1d2\")"), "100");
         assert_eq!(eval_one("(string->number \"1/0\")"), "#f");
         assert_eq!(eval_one("(string->number \"#x10/0\")"), "#f");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
