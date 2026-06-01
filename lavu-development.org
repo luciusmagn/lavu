@@ -349,6 +349,8 @@ Scheme value is valid.
 - Add nested =#| ... |#= block comments to the lexer and have the datum
   parser discard them like line comments while preserving source spans
   for surrounding datums.
+- Support signed radix-prefixed integer literals such as =#x-ff= and
+  =#b+1010=, including through =string->number=.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.

@@ -75,25 +75,25 @@ pub enum Token {
     Decimal(BigDecimal),
 
     #[regex(
-        r"#[bB][01]+",
+        r"#[bB][+-]?[01]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 2)
     )]
     Binary(BigInt),
 
     #[regex(
-        r"#[oO][0-7]+",
+        r"#[oO][+-]?[0-7]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 8)
     )]
     Octal(BigInt),
 
     #[regex(
-        r"#[xX][0-9a-fA-F]+",
+        r"#[xX][+-]?[0-9a-fA-F]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 16)
     )]
     Hex(BigInt),
 
     #[regex(
-        r"#[dD][0-9]+",
+        r"#[dD][+-]?[0-9]+",
         |lex| BigInt::from_str(&lex.slice()[2..])
     )]
     DecInteger(BigInt),
@@ -357,6 +357,12 @@ mod tests {
         assert!(tokens[4].0.is_binary());
         assert!(tokens[6].0.is_octal());
         assert!(tokens[8].0.is_hex());
+
+        let signed = tokenize("#b-1010 #o+10 #x-ff #d-12");
+        assert_eq!(signed[0].0, Token::Binary(BigInt::from(-10)));
+        assert_eq!(signed[2].0, Token::Octal(BigInt::from(8)));
+        assert_eq!(signed[4].0, Token::Hex(BigInt::from(-255)));
+        assert_eq!(signed[6].0, Token::DecInteger(BigInt::from(-12)));
     }
 
     #[test]

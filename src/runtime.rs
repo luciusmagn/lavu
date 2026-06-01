@@ -4616,6 +4616,8 @@ mod tests {
         assert_eq!(eval_one("(number->string 16 16)"), "\"10\"");
         assert_eq!(eval_one("(number->string 10 2)"), "\"1010\"");
         assert_eq!(eval_one("(string->number \"#x10\")"), "16");
+        assert_eq!(eval_one("(string->number \"#x-ff\")"), "-255");
+        assert_eq!(eval_one("(string->number \"#b+1010\")"), "10");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
         assert_eq!(eval_one("(string->number \"101\" 2)"), "5");
         assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
