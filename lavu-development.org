@@ -468,6 +468,11 @@ Scheme value is valid.
   classifier, and inference engine.
 - Persist inferred top-level REPL bindings in a session =TypeEnv= so
   later =?= queries can resolve names already evaluated in the REPL.
+- Report inference failures discovered during normal REPL evaluation as
+  Ariadne type diagnostics while keeping the evaluator dynamic.
+- Commit REPL type-environment updates form by form, so successful forms
+  remain queryable but a later failed definition does not leak a bad
+  inferred binding.
 ** Native Runtime Seed
 - Add a native evaluator on the stable surface AST for literals, quote,
   variables, lambdas, if, begin, set!, define, and a first Rust primitive

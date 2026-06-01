@@ -3,8 +3,9 @@ use lavu::datum_parser::DatumParseError;
 use lavu::datum_parser::parse;
 use lavu::diagnostics::{
     report_datum_error, report_eval_error, report_query_error, report_surface_error,
+    report_type_error,
 };
-use lavu::infer::{Inferencer, TypeEnv};
+use lavu::infer::{Inferencer, TypeEnv, TypeError};
 use lavu::query::infer_query_with_context;
 use lavu::repl::{line_editor, print_logo};
 use lavu::runtime::{Env, EvalError, Value, eval_program};
@@ -38,11 +39,14 @@ fn main() -> Result<()> {
                 }
 
                 match eval_input(&buffer, &env, &mut surface, &mut type_env) {
-                    Ok(values) => {
-                        for value in values {
+                    Ok(output) => {
+                        for value in output.values {
                             if value != Value::Unspecified {
                                 println!("{}", value);
                             }
+                        }
+                        if let Some(error) = output.type_error {
+                            report_type_error(&buffer, &error);
                         }
                     }
                     Err(ReplError::Datum(error)) => report_datum_error(&buffer, &error),
@@ -70,22 +74,33 @@ enum ReplError {
     Eval(EvalError),
 }
 
+#[derive(Debug)]
+struct EvalOutput {
+    values: Vec<Value>,
+    type_error: Option<TypeError>,
+}
+
 fn eval_input(
     input: &str,
     env: &Env,
     surface: &mut SurfaceContext,
     type_env: &mut TypeEnv,
-) -> std::result::Result<Vec<Value>, ReplError> {
+) -> std::result::Result<EvalOutput, ReplError> {
     let datums = parse(input)?;
     let program = surface.classify_program(&datums)?;
     let values = eval_program(&program, env).map_err(ReplError::Eval)?;
-    update_type_env(&program, type_env);
-    Ok(values)
+    let type_error = update_type_env(&program, type_env).err();
+    Ok(EvalOutput { values, type_error })
 }
 
-fn update_type_env(program: &Program, type_env: &mut TypeEnv) {
+fn update_type_env(program: &Program, type_env: &mut TypeEnv) -> Result<(), TypeError> {
     let mut inferencer = Inferencer::new();
-    let _ = inferencer.infer_program(program, type_env);
+    for form in &program.forms {
+        let mut next_env = type_env.clone();
+        inferencer.infer_top_level(form, &mut next_env)?;
+        *type_env = next_env;
+    }
+    Ok(())
 }
 
 impl From<DatumParseError> for ReplError {
@@ -97,5 +112,61 @@ impl From<DatumParseError> for ReplError {
 impl From<SurfaceError> for ReplError {
     fn from(error: SurfaceError) -> Self {
         Self::Surface(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eval_input;
+    use lavu::infer::TypeEnv;
+    use lavu::query::{QueryError, infer_query_with_context};
+    use lavu::runtime::{Env, Value};
+    use lavu::surface::SurfaceContext;
+
+    #[test]
+    fn reports_failed_inference_without_updating_repl_type_env() {
+        let env = Env::new();
+        let mut surface = SurfaceContext::new();
+        let mut type_env = TypeEnv::new();
+
+        let output = eval_input(
+            "(define (broken x) (+ x \"hello\"))",
+            &env,
+            &mut surface,
+            &mut type_env,
+        )
+        .unwrap();
+
+        assert_eq!(output.values, vec![Value::Unspecified]);
+        assert_eq!(
+            output.type_error.unwrap().to_string(),
+            "type mismatch: expected number?, got string?"
+        );
+
+        let QueryError::Type(error) =
+            infer_query_with_context("broken", &surface, &type_env).unwrap_err()
+        else {
+            panic!("expected broken to remain absent from the type environment");
+        };
+        assert_eq!(error.to_string(), "unbound variable: broken");
+    }
+
+    #[test]
+    fn keeps_successful_forms_before_a_failed_type_update() {
+        let env = Env::new();
+        let mut surface = SurfaceContext::new();
+        let mut type_env = TypeEnv::new();
+
+        let output = eval_input(
+            "(define x 1) (define (broken y) (+ y \"hello\"))",
+            &env,
+            &mut surface,
+            &mut type_env,
+        )
+        .unwrap();
+
+        assert!(output.type_error.is_some());
+        let types = infer_query_with_context("x", &surface, &type_env).unwrap();
+        assert_eq!(types[0].to_string(), "number?");
     }
 }
