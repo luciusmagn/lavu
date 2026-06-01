@@ -37,6 +37,9 @@ pub enum LexerError {
     #[error("unclosed block comment")]
     UnclosedBlockComment,
 
+    #[error("missing delimiter after token")]
+    MissingDelimiter,
+
     #[error("other error")]
     #[default]
     DefaultError,
@@ -733,17 +736,87 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
 
 pub fn tokenize_checked(input: &str) -> Result<Vec<(Token, &str, Span)>, SpannedLexerError> {
     let mut lexer = Token::lexer(input);
+    let mut delimiters = DelimiterState::default();
     let mut tokens = Vec::new();
 
     while let Some(token) = lexer.next() {
         let span = lexer.span();
         match token {
-            Ok(token) => tokens.push((token, &input[span.clone()], span)),
+            Ok(token) => {
+                delimiters.observe(&token, span.clone())?;
+                tokens.push((token, &input[span.clone()], span));
+            }
             Err(error) => return Err(SpannedLexerError { error, span }),
         }
     }
 
     Ok(tokens)
+}
+
+#[derive(Default)]
+pub(crate) struct DelimiterState {
+    pending: Option<Span>,
+    saw_delimiter: bool,
+}
+
+impl DelimiterState {
+    pub(crate) fn observe(&mut self, token: &Token, span: Span) -> Result<(), SpannedLexerError> {
+        if token_is_delimiter_trivia(token) {
+            self.saw_delimiter = self.pending.is_some();
+            return Ok(());
+        }
+
+        if let Some(pending) = &self.pending
+            && !self.saw_delimiter
+            && !token_starts_delimiter(token)
+        {
+            return Err(SpannedLexerError {
+                error: LexerError::MissingDelimiter,
+                span: pending.start..span.end,
+            });
+        }
+
+        self.pending = token_requires_delimiter(token).then_some(span);
+        self.saw_delimiter = false;
+        Ok(())
+    }
+
+    pub(crate) fn ready_to_end_datum(&self) -> bool {
+        self.pending.is_none() || self.saw_delimiter
+    }
+}
+
+fn token_is_delimiter_trivia(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Whitespace(_) | Token::LineComment | Token::BlockComment
+    )
+}
+
+fn token_starts_delimiter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::LParen | Token::RParen | Token::LBracket | Token::RBracket | Token::String(_)
+    )
+}
+
+fn token_requires_delimiter(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Identifier(_)
+            | Token::Integer(_)
+            | Token::Real(_)
+            | Token::Complex(_)
+            | Token::Decimal(_)
+            | Token::Binary(_)
+            | Token::Octal(_)
+            | Token::Hex(_)
+            | Token::DecInteger(_)
+            | Token::Character(_)
+            | Token::True
+            | Token::False
+            | Token::Dot
+    )
 }
 
 #[cfg(test)]
@@ -1006,6 +1079,26 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn rejects_missing_implicit_delimiters() {
+        for input in ["1abc", "#tfoo", "#\\a1", "foo'bar", ".x"] {
+            assert!(
+                matches!(
+                    tokenize_checked(input),
+                    Err(SpannedLexerError {
+                        error: LexerError::MissingDelimiter,
+                        ..
+                    })
+                ),
+                "{input} should require a delimiter"
+            );
+        }
+
+        assert!(tokenize_checked("1(abc)").is_ok());
+        assert!(tokenize_checked("#t; ok\n#f").is_ok());
+        assert!(tokenize_checked("foo\"bar\"").is_ok());
     }
 
     #[test]

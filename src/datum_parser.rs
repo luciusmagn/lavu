@@ -1,7 +1,7 @@
 use logos::{Logos, Span as LogosSpan};
 use thiserror::Error;
 
-use crate::lexer::{LexerError, Token, tokenize_checked};
+use crate::lexer::{DelimiterState, LexerError, Token, tokenize_checked};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -41,6 +41,7 @@ pub fn parse(input: &str) -> Result<Vec<Spanned<Datum>>, DatumParseError> {
 
 pub fn parse_one(input: &str) -> Result<Option<Spanned<Datum>>, DatumParseError> {
     let mut lexer = Token::lexer(input);
+    let mut delimiters = DelimiterState::default();
     let mut tokens = Vec::new();
 
     while let Some(token) = lexer.next() {
@@ -49,11 +50,18 @@ pub fn parse_one(input: &str) -> Result<Option<Spanned<Datum>>, DatumParseError>
             error,
             span: span.clone(),
         })?;
+        delimiters
+            .observe(&token, span.clone())
+            .map_err(|error| DatumParseError::Lexer {
+                error: error.error,
+                span: error.span,
+            })?;
         tokens.push((token, &input[span.clone()], span));
 
         let mut parser = Parser::new(&tokens);
         match parser.parse_datum() {
-            Ok(datum) => return Ok(Some(datum)),
+            Ok(datum) if delimiters.ready_to_end_datum() => return Ok(Some(datum)),
+            Ok(_) => {}
             Err(error) if is_incomplete_prefix(&error) => {}
             Err(error) => return Err(error),
         }
@@ -370,6 +378,25 @@ mod tests {
         assert_eq!(datum.span, 10..11);
 
         assert!(parse_one(" ; only trivia\n").unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_missing_reader_delimiters() {
+        assert_eq!(
+            parse("1abc").unwrap_err(),
+            DatumParseError::Lexer {
+                error: LexerError::MissingDelimiter,
+                span: 0..4,
+            }
+        );
+
+        assert_eq!(
+            parse_one("1abc").unwrap_err(),
+            DatumParseError::Lexer {
+                error: LexerError::MissingDelimiter,
+                span: 0..4,
+            }
+        );
     }
 
     #[test]
