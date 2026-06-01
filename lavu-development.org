@@ -240,6 +240,9 @@ Scheme value is valid.
   representation.
 - Add decimal-backed polar helpers =make-polar=, =magnitude=, and
   =angle=; trigonometric conversion currently uses host =f64=.
+- Add decimal-backed transcendental functions =exp=, =log=, =sin=,
+  =cos=, =tan=, =asin=, =acos=, and one- or two-argument =atan= using
+  host complex =f64= operations.
 - Add conservative =sqrt= for real inputs, including negative reals as
   decimal complex results; full complex transcendental behavior remains
   future numeric-tower work.

@@ -226,6 +226,14 @@ impl Env {
             "imag-part",
             "magnitude",
             "angle",
+            "exp",
+            "log",
+            "sin",
+            "cos",
+            "tan",
+            "asin",
+            "acos",
+            "atan",
             "sqrt",
             "expt",
             "char?",
@@ -577,6 +585,14 @@ fn apply_primitive(
         "imag-part" => imag_part(args, span),
         "magnitude" => magnitude(args, span),
         "angle" => angle(args, span),
+        "exp" => complex_unary(args, span, |number| number.exp()),
+        "log" => complex_unary(args, span, |number| number.ln()),
+        "sin" => complex_unary(args, span, |number| number.sin()),
+        "cos" => complex_unary(args, span, |number| number.cos()),
+        "tan" => complex_unary(args, span, |number| number.tan()),
+        "asin" => complex_unary(args, span, |number| number.asin()),
+        "acos" => complex_unary(args, span, |number| number.acos()),
+        "atan" => numeric_atan(args, span),
         "sqrt" => numeric_sqrt(args, span),
         "expt" => numeric_expt(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
@@ -1300,6 +1316,39 @@ fn angle(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     })
 }
 
+fn complex_unary(
+    args: Vec<Value>,
+    span: SourceSpan,
+    f: impl FnOnce(Complex<f64>) -> Complex<f64>,
+) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let number = number_to_complex_f64(value, span.clone())?;
+        complex_f64_to_value(f(number), span)
+    })
+}
+
+fn numeric_atan(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    match actual {
+        1 => complex_unary(args, span, |number| number.atan()),
+        2 => {
+            let [y, x]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+                expected: 2,
+                actual,
+                span: span.clone(),
+            })?;
+            let y = decimal_to_f64(&real_to_decimal(y, span.clone())?, span.clone())?;
+            let x = decimal_to_f64(&real_to_decimal(x, span.clone())?, span.clone())?;
+            f64_to_decimal(y.atan2(x), span).map(Value::Decimal)
+        }
+        _ => Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual,
+            span,
+        }),
+    }
+}
+
 fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let decimal = real_to_decimal(value, span.clone())?;
@@ -1412,6 +1461,14 @@ fn number_to_complex_decimal(
     }
 }
 
+fn number_to_complex_f64(value: Value, span: SourceSpan) -> Result<Complex<f64>, EvalError> {
+    let number = number_to_complex_decimal(value, span.clone())?;
+    Ok(Complex::new(
+        decimal_to_f64(&number.re, span.clone())?,
+        decimal_to_f64(&number.im, span)?,
+    ))
+}
+
 fn decimal_to_rational(number: &BigDecimal, span: SourceSpan) -> Result<BigRational, EvalError> {
     let (digits, scale) = number.as_bigint_and_exponent();
     if scale >= 0 {
@@ -1441,6 +1498,20 @@ fn f64_to_decimal(number: f64, span: SourceSpan) -> Result<BigDecimal, EvalError
             expected: "finite decimal?",
             span,
         })
+}
+
+fn complex_f64_to_value(number: Complex<f64>, span: SourceSpan) -> Result<Value, EvalError> {
+    let real = f64_to_decimal(zero_tiny_f64(number.re), span.clone())?;
+    let imaginary = f64_to_decimal(zero_tiny_f64(number.im), span)?;
+    if imaginary == decimal_zero() {
+        Ok(Value::Decimal(real))
+    } else {
+        Ok(Value::Complex(Complex::new(real, imaginary)))
+    }
+}
+
+fn zero_tiny_f64(number: f64) -> f64 {
+    if number.abs() < 1e-12 { 0.0 } else { number }
 }
 
 fn power_of_ten(exponent: i64, span: SourceSpan) -> Result<BigInt, EvalError> {
@@ -2926,6 +2997,14 @@ mod tests {
         assert_eq!(eval_one("(imag-part 5)"), "0");
         assert_eq!(eval_one("(magnitude 3+4i)"), "5");
         assert_eq!(eval_one("(angle 1+0i)"), "0");
+        assert_eq!(eval_one("(exp 0)"), "1");
+        assert_eq!(eval_one("(log 1)"), "0");
+        assert_eq!(eval_one("(sin 0)"), "0");
+        assert_eq!(eval_one("(cos 0)"), "1");
+        assert_eq!(eval_one("(tan 0)"), "0");
+        assert_eq!(eval_one("(asin 0)"), "0");
+        assert_eq!(eval_one("(acos 1)"), "0");
+        assert_eq!(eval_one("(atan 0)"), "0");
         assert_eq!(
             eval_one("(+ (make-rectangular 1 2) (make-rectangular 3 4))"),
             "4+6i"

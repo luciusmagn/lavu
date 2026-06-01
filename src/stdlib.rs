@@ -212,6 +212,17 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::Number], Type::Number),
         ),
         Primitive::new("angle", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("exp", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("log", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("sin", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("cos", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("tan", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("asin", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new("acos", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new(
+            "atan",
+            Type::rest_procedure(vec![Type::Number], Type::Number, Type::Number),
+        ),
         Primitive::new("sqrt", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
             "expt",
@@ -633,6 +644,14 @@ mod tests {
         assert_eq!(
             primitive("angle").unwrap().signature.to_string(),
             "(-> number? number?)"
+        );
+        assert_eq!(
+            primitive("exp").unwrap().signature.to_string(),
+            "(-> number? number?)"
+        );
+        assert_eq!(
+            primitive("atan").unwrap().signature.to_string(),
+            "(-> number? number? * number?)"
         );
         assert_eq!(
             primitive("expt").unwrap().signature.to_string(),
