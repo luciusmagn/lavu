@@ -4898,6 +4898,8 @@ mod tests {
         assert_eq!(eval_one("(exact? #i1+2i)"), "#f");
         assert_eq!(eval_one(".5+.5i"), "0.5+0.5i");
         assert_eq!(eval_one("1@0"), "1+0i");
+        assert_eq!(eval_one("#d3@0"), "3+0i");
+        assert_eq!(eval_one("#i#d1/2@0"), "0.5+0i");
     }
 
     #[test]
@@ -5436,6 +5438,8 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#d1.5\")"), "1.5");
         assert_eq!(eval_one("(string->number \"#x10/4\")"), "4");
         assert_eq!(eval_one("(string->number \"#i#b101/10\")"), "2.5");
+        assert_eq!(eval_one("(string->number \"#d3@0\")"), "3+0i");
+        assert_eq!(eval_one("(string->number \"#i#d1/2@0\")"), "0.5+0i");
         assert_eq!(eval_one("(string->number \".5\")"), "0.5");
         assert_eq!(eval_one("(string->number \"1.\")"), "1");
         assert_eq!(eval_one("(= (string->number \"1e2\") 100)"), "#t");

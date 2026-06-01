@@ -353,6 +353,11 @@ pub enum Token {
         priority = 9,
         callback = |lex| parse_polar_complex(&lex.slice()[2..])
     )]
+    #[regex(
+        r"(#[dD]|#[iI]#[dD]|#[dD]#[iI])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)@[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)",
+        priority = 9,
+        callback = |lex| parse_inexact_decimal_radix_polar_complex(lex.slice())
+    )]
     Complex(Complex<BigDecimal>),
 
     #[regex(
@@ -1125,6 +1130,19 @@ fn parse_inexact_decimal_radix_component(slice: &str) -> Result<BigDecimal, Lexe
     Ok(BigDecimal::from(numerator) / BigDecimal::from(denominator))
 }
 
+fn parse_inexact_decimal_radix_polar_complex(
+    slice: &str,
+) -> Result<Complex<BigDecimal>, LexerError> {
+    let body = strip_decimal_radix_prefixes(slice)?;
+    let (magnitude, angle) = body
+        .split_once('@')
+        .expect("polar complex token regex guarantees an at sign");
+    polar_from_decimal_components(
+        parse_inexact_decimal_radix_component(magnitude)?,
+        parse_inexact_decimal_radix_component(angle)?,
+    )
+}
+
 fn parse_inexact_radix_rectangular_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
     let (radix, body) = strip_inexact_radix_prefix(slice)?;
     let sign_index = body
@@ -1213,6 +1231,13 @@ fn parse_polar_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
         .expect("polar complex token regex guarantees an at sign");
     let magnitude = BigDecimal::from_str(magnitude)?;
     let angle = BigDecimal::from_str(angle)?;
+    polar_from_decimal_components(magnitude, angle)
+}
+
+fn polar_from_decimal_components(
+    magnitude: BigDecimal,
+    angle: BigDecimal,
+) -> Result<Complex<BigDecimal>, LexerError> {
     let magnitude = magnitude.to_f64().ok_or(LexerError::DefaultError)?;
     let angle = angle.to_f64().ok_or(LexerError::DefaultError)?;
 
@@ -1839,7 +1864,7 @@ mod tests {
             ))
         );
 
-        let polar = tokenize("1@0 #i2@0");
+        let polar = tokenize("1@0 #i2@0 #d3@0 #i#d1/2@0 #d#i1.5@0");
         assert_eq!(
             polar[0].0,
             Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(0)))
@@ -1847,6 +1872,24 @@ mod tests {
         assert_eq!(
             polar[2].0,
             Token::Complex(Complex::new(BigDecimal::from(2), BigDecimal::from(0)))
+        );
+        assert_eq!(
+            polar[4].0,
+            Token::Complex(Complex::new(BigDecimal::from(3), BigDecimal::from(0)))
+        );
+        assert_eq!(
+            polar[6].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("0.5").unwrap(),
+                BigDecimal::from(0)
+            ))
+        );
+        assert_eq!(
+            polar[8].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("1.5").unwrap(),
+                BigDecimal::from(0)
+            ))
         );
 
         assert!(matches!(

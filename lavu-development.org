@@ -768,6 +768,8 @@ Scheme value is valid.
   instead of being accepted as loose complex literals.
 - Parse decimal-backed polar complex literals such as =1@0= and =#i2@0=
   through the same approximate representation used by =make-polar=.
+- Parse decimal-radix polar complex literals such as =#d3@0= and
+  =#i#d1/2@0= through that approximate polar path too.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.
