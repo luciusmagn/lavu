@@ -664,6 +664,13 @@ fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, 
     }
 }
 
+fn is_procedure(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Primitive(_) | Value::Continuation(_) | Value::Procedure(_)
+    )
+}
+
 fn apply_primitive(
     name: &'static str,
     args: Vec<Value>,
@@ -3400,6 +3407,10 @@ fn procedure_and_lists(
 
     let mut args = args.into_iter();
     let procedure = args.next().expect("arity check ensures procedure argument");
+    if !is_procedure(&procedure) {
+        return Err(EvalError::NotProcedure { span: span.clone() });
+    }
+
     let lists = args
         .map(|value| expect_list_items(&value, span.clone()))
         .collect::<Result<Vec<_>, _>>()?;
@@ -3958,7 +3969,9 @@ fn write_string_literal(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{OutputMode, OutputPort, Value, newline, output_value, string_value, write_char};
+    use super::{
+        EvalError, OutputMode, OutputPort, Value, newline, output_value, string_value, write_char,
+    };
 
     use crate::datum_parser::parse;
     use crate::runtime::{Env, eval_program};
@@ -3973,6 +3986,13 @@ mod tests {
             .last()
             .unwrap()
             .to_string()
+    }
+
+    fn eval_error(input: &str) -> EvalError {
+        let datums = parse(input).unwrap();
+        let program = classify_program(&datums).unwrap();
+        let env = Env::new();
+        eval_program(&program, &env).unwrap_err()
     }
 
     #[test]
@@ -4766,6 +4786,14 @@ mod tests {
             eval_one("(define x 0) (for-each (lambda (n) (set! x (+ x n))) '(1 2 3)) x"),
             "6"
         );
+        assert!(matches!(
+            eval_error("(map 1 '())"),
+            EvalError::NotProcedure { .. }
+        ));
+        assert!(matches!(
+            eval_error("(for-each 1 '())"),
+            EvalError::NotProcedure { .. }
+        ));
     }
 
     #[test]

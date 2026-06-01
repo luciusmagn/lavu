@@ -510,6 +510,8 @@ Scheme value is valid.
 - Infer =map= result element types from the mapped procedure, and use
   =map=/=for-each= list element flow to constrain procedure and list
   parameters.
+- Require the =map=/=for-each= procedure operand to be applicable even
+  when the input lists are empty.
 ** Multiple Values
 - Add native =values= and =call-with-values= with conservative primitive
   metadata.
