@@ -524,32 +524,54 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "make-vector",
-            Type::rest_procedure(vec![Type::Number], Type::Any, Type::Vector),
+            Type::rest_procedure(
+                vec![Type::Number],
+                a.clone(),
+                Type::VectorOf(Box::new(a.clone())),
+            ),
         ),
-        Primitive::new("vector", Type::uniform_variadic(a.clone(), Type::Vector)),
+        Primitive::new(
+            "vector",
+            Type::uniform_variadic(a.clone(), Type::VectorOf(Box::new(a.clone()))),
+        ),
         Primitive::new(
             "vector-length",
             Type::procedure(vec![Type::Vector], Type::Number),
         ),
         Primitive::new(
             "vector-ref",
-            Type::procedure(vec![Type::Vector, Type::Number], Type::Any),
+            Type::procedure(
+                vec![Type::VectorOf(Box::new(a.clone())), Type::Number],
+                a.clone(),
+            ),
         ),
         Primitive::new(
             "vector-set!",
-            Type::procedure(vec![Type::Vector, Type::Number, Type::Any], Type::Unknown),
+            Type::procedure(
+                vec![Type::VectorOf(Box::new(a.clone())), Type::Number, a.clone()],
+                Type::Unknown,
+            ),
         ),
         Primitive::new(
             "vector->list",
-            Type::procedure(vec![Type::Vector], Type::List),
+            Type::procedure(
+                vec![Type::VectorOf(Box::new(a.clone()))],
+                Type::ListOf(Box::new(a.clone())),
+            ),
         ),
         Primitive::new(
             "list->vector",
-            Type::procedure(vec![Type::List], Type::Vector),
+            Type::procedure(
+                vec![Type::ListOf(Box::new(a.clone()))],
+                Type::VectorOf(Box::new(a.clone())),
+            ),
         ),
         Primitive::new(
             "vector-fill!",
-            Type::procedure(vec![Type::Vector, Type::Any], Type::Unknown),
+            Type::procedure(
+                vec![Type::VectorOf(Box::new(a.clone())), a.clone()],
+                Type::Unknown,
+            ),
         ),
         Primitive::new(
             "cons",
@@ -900,15 +922,23 @@ mod tests {
     fn exposes_vector_primitives() {
         assert_eq!(
             primitive("vector").unwrap().signature.to_string(),
-            "(->* a vector?)"
+            "(->* a (vectorof a))"
         );
         assert_eq!(
             primitive("vector-ref").unwrap().signature.to_string(),
-            "(-> vector? number? any?)"
+            "(-> (vectorof a) number? a)"
         );
         assert_eq!(
             primitive("vector-set!").unwrap().signature.to_string(),
-            "(-> vector? number? any? unknown?)"
+            "(-> (vectorof a) number? a unknown?)"
+        );
+        assert_eq!(
+            primitive("vector->list").unwrap().signature.to_string(),
+            "(-> (vectorof a) (listof a))"
+        );
+        assert_eq!(
+            primitive("list->vector").unwrap().signature.to_string(),
+            "(-> (listof a) (vectorof a))"
         );
     }
 

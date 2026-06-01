@@ -969,6 +969,12 @@ impl Inferencer {
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
+            (Type::VectorOf(_), Type::Vector) | (Type::Vector, Type::VectorOf(_)) => {
+                Ok(Type::Vector)
+            }
+            (Type::VectorOf(actual), Type::VectorOf(expected)) => {
+                self.unify(*actual, *expected, span)
+            }
             (Type::Values(actual), Type::Values(expected)) => {
                 if actual.len() != expected.len() {
                     return Err(TypeError::ArityMismatch {
@@ -1168,6 +1174,7 @@ impl Inferencer {
                 .map(|ty| self.resolve(ty))
                 .unwrap_or(Type::Var(name)),
             Type::ListOf(item) => Type::ListOf(Box::new(self.resolve(*item))),
+            Type::VectorOf(item) => Type::VectorOf(Box::new(self.resolve(*item))),
             Type::Pair(car, cdr) => {
                 Type::Pair(Box::new(self.resolve(*car)), Box::new(self.resolve(*cdr)))
             }
@@ -1233,6 +1240,7 @@ fn contains_var(ty: &Type, name: &str) -> bool {
         Type::Var(var) => var == name,
         Type::Pair(car, cdr) => contains_var(car, name) || contains_var(cdr, name),
         Type::ListOf(element) => contains_var(element, name),
+        Type::VectorOf(element) => contains_var(element, name),
         Type::Values(types) => types.iter().any(|ty| contains_var(ty, name)),
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(|ty| contains_var(ty, name)) || contains_var(result, name)
@@ -1276,12 +1284,22 @@ fn type_of_datum(datum: &Spanned<Datum>) -> Type {
                 Type::Pair(Box::new(type_of_datum(car)), Box::new(cdr))
             })
         }
-        Datum::Vector(_) => Type::Vector,
+        Datum::Vector(items) => type_of_vector_datums(items),
         Datum::Quote(inner) => abbreviation_datum_type("quote", inner),
         Datum::Quasiquote(inner) => abbreviation_datum_type("quasiquote", inner),
         Datum::Unquote(inner) => abbreviation_datum_type("unquote", inner),
         Datum::UnquoteSplicing(inner) => abbreviation_datum_type("unquote-splicing", inner),
     }
+}
+
+fn type_of_vector_datums(items: &[Spanned<Datum>]) -> Type {
+    if items.is_empty() {
+        return Type::Vector;
+    }
+
+    Type::VectorOf(Box::new(Type::union(
+        items.iter().map(type_of_datum).collect::<Vec<_>>(),
+    )))
 }
 
 fn type_of_list_datums(items: &[Spanned<Datum>]) -> Type {
@@ -1657,6 +1675,8 @@ mod tests {
         assert_eq!(infer_one("'()"), "null?");
         assert_eq!(infer_one("'(1 . \"x\")"), "(pair? number? string?)");
         assert_eq!(infer_one("'(1 \"x\")"), "(listof (U number? string?))");
+        assert_eq!(infer_one("'#(1 \"x\")"), "(vectorof (U number? string?))");
+        assert_eq!(infer_one("'#()"), "vector?");
     }
 
     #[test]
@@ -1667,9 +1687,14 @@ mod tests {
 
     #[test]
     fn infers_vector_primitive_types() {
-        assert_eq!(infer_one("(vector 1 2 3)"), "vector?");
-        assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "any?");
+        assert_eq!(infer_one("(vector 1 2 3)"), "(vectorof number?)");
+        assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "number?");
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
+        assert_eq!(
+            infer_one("(vector->list (vector #\\a #\\b))"),
+            "(listof char?)"
+        );
+        assert_eq!(infer_one("(list->vector '(1 2 3))"), "(vectorof number?)");
     }
 
     #[test]

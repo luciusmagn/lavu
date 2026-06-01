@@ -166,6 +166,8 @@ Structured types:
 #+begin_src scheme
 (listof number?)
 (listof any?)
+(vectorof number?)
+(vectorof any?)
 (pair? symbol? number?)
 #+end_src
 
@@ -521,6 +523,8 @@ Scheme value is valid.
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill
   primitives with matching typed metadata.
+- Add =vectorof= element flow for vector construction, access,
+  conversion, mutation, fill metadata, and quoted vector data.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
