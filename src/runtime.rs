@@ -2666,8 +2666,7 @@ fn load(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalErro
             message: error.to_string(),
             span: span.clone(),
         })?;
-        eval_program(&program, env)
-            .map(|values| values.last().cloned().unwrap_or(Value::Unspecified))
+        eval_program(&program, env).map(|_| Value::Unspecified)
     })
 }
 
@@ -5050,7 +5049,7 @@ mod tests {
         std::fs::write(&path, "(define loaded 41) (+ loaded 1)").unwrap();
         assert_eq!(
             eval_one(&format!("(load \"{}\")", path.to_string_lossy())),
-            "42"
+            "#<unspecified>"
         );
         let input = format!("(load \"{}\") loaded", path.to_string_lossy());
 

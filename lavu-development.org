@@ -566,6 +566,8 @@ Scheme value is valid.
 ** Load
 - Add native =load= over the current evaluator environment, so loaded
   top-level definitions are visible to following expressions.
+- Return =#<unspecified>= from =load= itself, matching R5RS while
+  preserving loaded definitions and side effects.
 ** Eval Environments
 - Add conservative environment values with =scheme-report-environment=,
   =null-environment=, =interaction-environment=, and native =eval= over
