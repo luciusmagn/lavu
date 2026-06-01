@@ -463,6 +463,8 @@ Scheme value is valid.
 - Add native R5RS =apply= evaluation with runtime enforcement of the
   final list argument and conservative =any?= type metadata until the
   procedure type model can express final-list rest application.
+- Keep =append= type metadata conservative because R5RS permits an
+  arbitrary final tail, including improper-list results.
 ** Vector Primitives
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill

@@ -586,10 +586,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
                 Type::ListOf(Box::new(a.clone())),
             ),
         ),
-        Primitive::new(
-            "append",
-            Type::uniform_variadic(Type::ListOf(Box::new(a.clone())), Type::ListOf(Box::new(a))),
-        ),
+        Primitive::new("append", Type::uniform_variadic(Type::Any, Type::Any)),
         Primitive::new(
             "list-ref",
             Type::procedure(vec![Type::List, Type::Number], Type::Any),
@@ -699,6 +696,10 @@ mod tests {
         assert_eq!(
             primitive("length").unwrap().signature.to_string(),
             "(-> list? number?)"
+        );
+        assert_eq!(
+            primitive("append").unwrap().signature.to_string(),
+            "(->* any? any?)"
         );
         assert_eq!(
             primitive("cadddr").unwrap().signature.to_string(),
