@@ -87,21 +87,27 @@ fn eval_input(
     type_env: &mut TypeEnv,
 ) -> std::result::Result<EvalOutput, ReplError> {
     let datums = parse(input)?;
-    let program = surface.classify_program(&datums)?;
     let mut inferencer = Inferencer::new();
     let mut values = Vec::new();
 
-    for form in &program.forms {
-        let mut next_env = type_env.clone();
-        if let Err(error) = inferencer.infer_top_level(form, &mut next_env) {
-            return Ok(EvalOutput {
-                values,
-                type_error: Some(error),
-            });
+    for datum in &datums {
+        let mut next_surface = surface.clone();
+        let program = next_surface.classify_program(std::slice::from_ref(datum))?;
+
+        for form in &program.forms {
+            let mut next_env = type_env.clone();
+            if let Err(error) = inferencer.infer_top_level(form, &mut next_env) {
+                return Ok(EvalOutput {
+                    values,
+                    type_error: Some(error),
+                });
+            }
+
+            values.push(eval_top_level(form, env).map_err(ReplError::Eval)?);
+            *type_env = next_env;
         }
 
-        values.push(eval_top_level(form, env).map_err(ReplError::Eval)?);
-        *type_env = next_env;
+        *surface = next_surface;
     }
 
     Ok(EvalOutput {
@@ -179,5 +185,62 @@ mod tests {
         assert!(env.lookup("broken").is_none());
         let types = infer_query_with_context("x", &surface, &type_env).unwrap();
         assert_eq!(types[0].to_string(), "number?");
+    }
+
+    #[test]
+    fn keeps_successful_macros_before_later_forms() {
+        let env = Env::new();
+        let mut surface = SurfaceContext::new();
+        let mut type_env = TypeEnv::new();
+
+        let output = eval_input(
+            "(define-syntax id
+               (syntax-rules ()
+                 ((id x) x)))
+             (id 1)",
+            &env,
+            &mut surface,
+            &mut type_env,
+        )
+        .unwrap();
+
+        assert_eq!(
+            output
+                .values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["1".to_string()]
+        );
+        assert_eq!(
+            infer_query_with_context("(id \"x\")", &surface, &type_env).unwrap()[0].to_string(),
+            "string?"
+        );
+    }
+
+    #[test]
+    fn does_not_keep_macros_after_failed_forms() {
+        let env = Env::new();
+        let mut surface = SurfaceContext::new();
+        let mut type_env = TypeEnv::new();
+
+        let output = eval_input(
+            "(define (broken x) (+ x \"hello\"))
+             (define-syntax id
+               (syntax-rules ()
+                 ((id x) x)))",
+            &env,
+            &mut surface,
+            &mut type_env,
+        )
+        .unwrap();
+
+        assert!(output.type_error.is_some());
+        let QueryError::Type(error) =
+            infer_query_with_context("(id 1)", &surface, &type_env).unwrap_err()
+        else {
+            panic!("expected id macro not to be installed");
+        };
+        assert_eq!(error.to_string(), "unbound variable: id");
     }
 }
