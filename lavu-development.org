@@ -459,6 +459,9 @@ Scheme value is valid.
   typed metadata.
 - Add =call-with-input-file= around file-backed input ports.
 - Add dynamic default input rebinding with =with-input-from-file=.
+- Type input-file combinator callbacks as input-port procedures or
+  thunks, with compatible rest procedures accepted in fixed callback
+  slots.
 ** Load
 - Add native =load= over the current evaluator environment, so loaded
   top-level definitions are visible to following expressions.
@@ -469,6 +472,7 @@ Scheme value is valid.
 ** Dynamic Wind
 - Add ordinary =dynamic-wind= entry/thunk/exit behavior. Continuation
   re-entry behavior remains part of the future =call/cc= work.
+- Type =dynamic-wind= operands as thunks.
 ** Continuations
 - Add initial escape-continuation support for =call/cc= and
   =call-with-current-continuation= within the dynamic extent of the call.
@@ -484,6 +488,8 @@ Scheme value is valid.
   =close-output-port=.
 - Add =call-with-output-file= around file-backed output ports.
 - Add dynamic default output rebinding with =with-output-to-file=.
+- Type output-file combinator callbacks as output-port procedures or
+  thunks.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.

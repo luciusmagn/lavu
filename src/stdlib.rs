@@ -37,6 +37,7 @@ impl Primitive {
 pub fn r5rs_primitives() -> Vec<Primitive> {
     let a = Type::Var("a".to_string());
     let b = Type::Var("b".to_string());
+    let thunk = Type::procedure(vec![], Type::Any);
 
     let mut primitives = vec![
         Primitive::predicate("boolean?", Type::Boolean),
@@ -145,19 +146,31 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "call-with-input-file",
-            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+            Type::procedure(
+                vec![
+                    Type::String,
+                    Type::procedure(vec![Type::InputPort], Type::Any),
+                ],
+                Type::Any,
+            ),
         ),
         Primitive::new(
             "call-with-output-file",
-            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+            Type::procedure(
+                vec![
+                    Type::String,
+                    Type::procedure(vec![Type::OutputPort], Type::Any),
+                ],
+                Type::Any,
+            ),
         ),
         Primitive::new(
             "with-input-from-file",
-            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+            Type::procedure(vec![Type::String, thunk.clone()], Type::Any),
         ),
         Primitive::new(
             "with-output-to-file",
-            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+            Type::procedure(vec![Type::String, thunk.clone()], Type::Any),
         ),
         Primitive::new("load", Type::procedure(vec![Type::String], Type::Unknown)),
         Primitive::new(
@@ -178,7 +191,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "dynamic-wind",
-            Type::procedure(vec![Type::Any, Type::Any, Type::Any], Type::Any),
+            Type::procedure(vec![thunk.clone(), thunk.clone(), thunk], Type::Any),
         ),
         Primitive::new(
             "call-with-current-continuation",
@@ -979,28 +992,28 @@ mod tests {
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? any? any?)"
+            "(-> string? (-> input-port? any?) any?)"
         );
         assert_eq!(
             primitive("call-with-output-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? any? any?)"
+            "(-> string? (-> output-port? any?) any?)"
         );
         assert_eq!(
             primitive("with-input-from-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? any? any?)"
+            "(-> string? (-> any?) any?)"
         );
         assert_eq!(
             primitive("with-output-to-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? any? any?)"
+            "(-> string? (-> any?) any?)"
         );
         assert_eq!(
             primitive("load").unwrap().signature.to_string(),
@@ -1019,7 +1032,7 @@ mod tests {
         );
         assert_eq!(
             primitive("dynamic-wind").unwrap().signature.to_string(),
-            "(-> any? any? any? any?)"
+            "(-> (-> any?) (-> any?) (-> any?) any?)"
         );
         assert_eq!(
             primitive("call/cc").unwrap().signature.to_string(),

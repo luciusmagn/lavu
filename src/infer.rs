@@ -929,6 +929,61 @@ impl Inferencer {
                     param: actual_param,
                     result: actual_result,
                 },
+                ProcedureType::Fixed {
+                    params: expected_params,
+                    result: expected_result,
+                },
+            ) => {
+                let params = expected_params
+                    .into_iter()
+                    .map(|expected| self.unify((*actual_param).clone(), expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+
+                Ok(Type::procedure(params, result))
+            }
+            (
+                ProcedureType::Rest {
+                    required: actual_required,
+                    rest: actual_rest,
+                    result: actual_result,
+                },
+                ProcedureType::Fixed {
+                    params: expected_params,
+                    result: expected_result,
+                },
+            ) => {
+                if expected_params.len() < actual_required.len() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: format!("at least {}", actual_required.len()),
+                        actual: expected_params.len(),
+                        span,
+                    });
+                }
+
+                let required_len = actual_required.len();
+                let required = actual_required
+                    .into_iter()
+                    .zip(expected_params.iter().cloned())
+                    .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let rest = expected_params
+                    .into_iter()
+                    .skip(required_len)
+                    .map(|expected| self.unify((*actual_rest).clone(), expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+
+                Ok(Type::procedure(
+                    required.into_iter().chain(rest).collect::<Vec<_>>(),
+                    result,
+                ))
+            }
+            (
+                ProcedureType::UniformVariadic {
+                    param: actual_param,
+                    result: actual_result,
+                },
                 ProcedureType::UniformVariadic {
                     param: expected_param,
                     result: expected_result,
@@ -1584,10 +1639,18 @@ mod tests {
             infer_one("(call-with-output-file \"x\" (lambda (p) (write \"x\" p)))"),
             "any?"
         );
+        assert_eq!(
+            infer_one("(lambda (f) (call-with-input-file \"x\" f))"),
+            "(-> (-> input-port? any?) any?)"
+        );
         assert_eq!(infer_one("(with-input-from-file \"x\" read)"), "any?");
         assert_eq!(
             infer_one("(with-output-to-file \"x\" (lambda () (write \"x\")))"),
             "any?"
+        );
+        assert_eq!(
+            infer_one("(lambda (thunk) (with-output-to-file \"x\" thunk))"),
+            "(-> (-> any?) any?)"
         );
         assert_eq!(infer_one("(load \"x\")"), "unknown?");
         assert_eq!(
@@ -1598,6 +1661,10 @@ mod tests {
         assert_eq!(
             infer_one("(dynamic-wind (lambda () 1) (lambda () 2) (lambda () 3))"),
             "any?"
+        );
+        assert_eq!(
+            infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
+            "(-> (-> any?) (-> any?) (-> any?) any?)"
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "any?");
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
