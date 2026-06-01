@@ -129,6 +129,35 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::String], Type::Number),
         ),
         Primitive::new(
+            "make-vector",
+            Type::rest_procedure(vec![Type::Number], Type::Any, Type::Vector),
+        ),
+        Primitive::new("vector", Type::uniform_variadic(a.clone(), Type::Vector)),
+        Primitive::new(
+            "vector-length",
+            Type::procedure(vec![Type::Vector], Type::Number),
+        ),
+        Primitive::new(
+            "vector-ref",
+            Type::procedure(vec![Type::Vector, Type::Number], Type::Any),
+        ),
+        Primitive::new(
+            "vector-set!",
+            Type::procedure(vec![Type::Vector, Type::Number, Type::Any], Type::Unknown),
+        ),
+        Primitive::new(
+            "vector->list",
+            Type::procedure(vec![Type::Vector], Type::List),
+        ),
+        Primitive::new(
+            "list->vector",
+            Type::procedure(vec![Type::List], Type::Vector),
+        ),
+        Primitive::new(
+            "vector-fill!",
+            Type::procedure(vec![Type::Vector, Type::Any], Type::Unknown),
+        ),
+        Primitive::new(
             "cons",
             Type::procedure(
                 vec![a.clone(), b.clone()],
@@ -227,6 +256,22 @@ mod tests {
         assert_eq!(
             primitive("char=?").unwrap().signature.to_string(),
             "(-> char? char? char? * boolean?)"
+        );
+    }
+
+    #[test]
+    fn exposes_vector_primitives() {
+        assert_eq!(
+            primitive("vector").unwrap().signature.to_string(),
+            "(->* a vector?)"
+        );
+        assert_eq!(
+            primitive("vector-ref").unwrap().signature.to_string(),
+            "(-> vector? number? any?)"
+        );
+        assert_eq!(
+            primitive("vector-set!").unwrap().signature.to_string(),
+            "(-> vector? number? any? unknown?)"
         );
     }
 }

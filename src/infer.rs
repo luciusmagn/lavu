@@ -818,4 +818,11 @@ mod tests {
     fn infers_apply_conservatively() {
         assert_eq!(infer_one("(apply + '(1 2 3))"), "any?");
     }
+
+    #[test]
+    fn infers_vector_primitive_types() {
+        assert_eq!(infer_one("(vector 1 2 3)"), "vector?");
+        assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "any?");
+        assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
+    }
 }

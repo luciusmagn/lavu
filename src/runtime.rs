@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use bigdecimal::BigDecimal;
-use num::{BigInt, BigRational, Complex};
+use num::{BigInt, BigRational, Complex, ToPrimitive};
 use thiserror::Error;
 
 use crate::surface::{Expr, Program, TopLevel, classify_expr};
@@ -22,7 +22,7 @@ pub enum Value {
     Symbol(String),
     List(Vec<Value>),
     Pair(Box<Value>, Box<Value>),
-    Vector(Vec<Value>),
+    Vector(Rc<RefCell<Vec<Value>>>),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
@@ -45,7 +45,7 @@ impl PartialEq for Value {
             (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
                 left_car == right_car && left_cdr == right_cdr
             }
-            (Value::Vector(left), Value::Vector(right)) => left == right,
+            (Value::Vector(left), Value::Vector(right)) => *left.borrow() == *right.borrow(),
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
@@ -187,6 +187,14 @@ impl Env {
             "null?",
             "list?",
             "vector?",
+            "make-vector",
+            "vector",
+            "vector-length",
+            "vector-ref",
+            "vector-set!",
+            "vector->list",
+            "list->vector",
+            "vector-fill!",
             "procedure?",
             "port?",
             "input-port?",
@@ -395,6 +403,32 @@ fn apply_primitive(
         ),
         "list?" => predicate(args, span, |value| matches!(value, Value::List(_))),
         "vector?" => predicate(args, span, |value| matches!(value, Value::Vector(_))),
+        "make-vector" => make_vector(args, span),
+        "vector" => Ok(Value::Vector(Rc::new(RefCell::new(args)))),
+        "vector-length" => unary(args, span.clone(), |value| match value {
+            Value::Vector(items) => Ok(Value::Integer(BigInt::from(items.borrow().len()))),
+            _ => Err(EvalError::TypeError {
+                expected: "vector?",
+                span,
+            }),
+        }),
+        "vector-ref" => vector_ref(args, span),
+        "vector-set!" => vector_set(args, span),
+        "vector->list" => unary(args, span.clone(), |value| match value {
+            Value::Vector(items) => Ok(Value::List(items.borrow().clone())),
+            _ => Err(EvalError::TypeError {
+                expected: "vector?",
+                span,
+            }),
+        }),
+        "list->vector" => unary(args, span.clone(), |value| match value {
+            Value::List(items) => Ok(Value::Vector(Rc::new(RefCell::new(items)))),
+            _ => Err(EvalError::TypeError {
+                expected: "list?",
+                span,
+            }),
+        }),
+        "vector-fill!" => vector_fill(args, span),
         "procedure?" => predicate(args, span, |value| {
             matches!(value, Value::Procedure(_) | Value::Primitive(_))
         }),
@@ -891,6 +925,114 @@ fn append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::List(result))
 }
 
+fn make_vector(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let len = exact_nonnegative_integer(&args[0], span.clone())?;
+    let fill = args.get(1).cloned().unwrap_or(Value::Unspecified);
+    Ok(Value::Vector(Rc::new(RefCell::new(vec![fill; len]))))
+}
+
+fn vector_ref(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [vector, index]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+
+    match vector {
+        Value::Vector(items) => items
+            .borrow()
+            .get(index)
+            .cloned()
+            .ok_or(EvalError::TypeError {
+                expected: "valid vector index",
+                span,
+            }),
+        _ => Err(EvalError::TypeError {
+            expected: "vector?",
+            span,
+        }),
+    }
+}
+
+fn vector_set(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [vector, index, value]: [Value; 3] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 3,
+            actual,
+            span: span.clone(),
+        })?;
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+
+    match vector {
+        Value::Vector(items) => {
+            let mut items = items.borrow_mut();
+            let Some(slot) = items.get_mut(index) else {
+                return Err(EvalError::TypeError {
+                    expected: "valid vector index",
+                    span,
+                });
+            };
+            *slot = value;
+            Ok(Value::Unspecified)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "vector?",
+            span,
+        }),
+    }
+}
+
+fn vector_fill(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [vector, value]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+
+    match vector {
+        Value::Vector(items) => {
+            items.borrow_mut().fill(value);
+            Ok(Value::Unspecified)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "vector?",
+            span,
+        }),
+    }
+}
+
+fn exact_nonnegative_integer(value: &Value, span: SourceSpan) -> Result<usize, EvalError> {
+    let Value::Integer(index) = value else {
+        return Err(EvalError::TypeError {
+            expected: "non-negative integer?",
+            span,
+        });
+    };
+    if index < &BigInt::from(0) {
+        return Err(EvalError::TypeError {
+            expected: "non-negative integer?",
+            span,
+        });
+    }
+
+    index.to_usize().ok_or(EvalError::TypeError {
+        expected: "fixnum index?",
+        span,
+    })
+}
+
 fn predicate(
     args: Vec<Value>,
     span: SourceSpan,
@@ -936,7 +1078,7 @@ fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
             .iter()
             .map(datum_to_value)
             .collect::<Result<Vec<_>, _>>()
-            .map(Value::Vector),
+            .map(|items| Value::Vector(Rc::new(RefCell::new(items)))),
         Datum::Quote(inner) => abbreviation_to_value("quote", inner),
         Datum::Quasiquote(inner) => abbreviation_to_value("quasiquote", inner),
         Datum::Unquote(inner) => abbreviation_to_value("unquote", inner),
@@ -978,7 +1120,7 @@ fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Va
             .iter()
             .map(|item| eval_quasiquote(item, env, level))
             .collect::<Result<Vec<_>, _>>()
-            .map(Value::Vector),
+            .map(|items| Value::Vector(Rc::new(RefCell::new(items)))),
         Datum::Atom(_) | Datum::Quote(_) => datum_to_value(datum),
     }
 }
@@ -1095,7 +1237,7 @@ impl fmt::Display for Value {
             Value::Pair(head, tail) => write!(f, "({head} . {tail})"),
             Value::Vector(items) => {
                 write!(f, "#(")?;
-                for (index, item) in items.iter().enumerate() {
+                for (index, item) in items.borrow().iter().enumerate() {
                     if index > 0 {
                         write!(f, " ")?;
                     }
@@ -1231,6 +1373,28 @@ mod tests {
         assert_eq!(eval_one("(input-port? 1)"), "#f");
         assert_eq!(eval_one("(output-port? 1)"), "#f");
         assert_eq!(eval_one("(eof-object? 1)"), "#f");
+    }
+
+    #[test]
+    fn evaluates_vector_primitives() {
+        assert_eq!(eval_one("(vector 1 2 3)"), "#(1 2 3)");
+        assert_eq!(eval_one("(vector-length (vector 1 2 3))"), "3");
+        assert_eq!(eval_one("(vector-ref (vector 1 2 3) 1)"), "2");
+        assert_eq!(eval_one("(make-vector 3 'x)"), "#(x x x)");
+        assert_eq!(eval_one("(vector->list (vector 1 2))"), "(1 2)");
+        assert_eq!(eval_one("(list->vector (list 1 2))"), "#(1 2)");
+    }
+
+    #[test]
+    fn evaluates_vector_mutation_by_reference() {
+        assert_eq!(
+            eval_one("(define v (vector 1 2)) (vector-set! v 0 9) (vector->list v)"),
+            "(9 2)"
+        );
+        assert_eq!(
+            eval_one("(define v (vector 1 2)) (vector-fill! v 'x) (vector->list v)"),
+            "(x x)"
+        );
     }
 
     #[test]
