@@ -2627,6 +2627,12 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_top_level_begin_splicing() {
+        assert_eq!(eval_one("(begin (define x 1) x)"), "1");
+        assert_eq!(eval_one("(begin (begin (define x 1)) x)"), "1");
+    }
+
+    #[test]
     fn evaluates_rest_lambda_formals() {
         assert_eq!(eval_one("((lambda args args) 1 2 3)"), "(1 2 3)");
         assert_eq!(eval_one("((lambda (x y . rest) rest) 1 2 3 4)"), "(3 4)");

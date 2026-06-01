@@ -86,12 +86,28 @@ pub enum SurfaceError {
 }
 
 pub fn classify_program(datums: &[Spanned<Datum>]) -> Result<Program, SurfaceError> {
-    let forms = datums
-        .iter()
-        .map(classify_top_level)
-        .collect::<Result<Vec<_>, _>>()?;
+    let forms = datums.iter().try_fold(Vec::new(), |mut forms, datum| {
+        forms.extend(classify_top_level_forms(datum)?);
+        Ok::<_, SurfaceError>(forms)
+    })?;
 
     Ok(Program { forms })
+}
+
+fn classify_top_level_forms(
+    datum: &Spanned<Datum>,
+) -> Result<Vec<Spanned<TopLevel>>, SurfaceError> {
+    if let Datum::List(items) = &datum.node
+        && let Some((head, rest)) = items.split_first()
+        && identifier_name(head).as_deref() == Some("begin")
+    {
+        return rest.iter().try_fold(Vec::new(), |mut forms, datum| {
+            forms.extend(classify_top_level_forms(datum)?);
+            Ok(forms)
+        });
+    }
+
+    classify_top_level(datum).map(|form| vec![form])
 }
 
 pub fn classify_top_level(datum: &Spanned<Datum>) -> Result<Spanned<TopLevel>, SurfaceError> {
@@ -1239,6 +1255,16 @@ mod tests {
 
         assert_eq!(name.node, "add1");
         assert!(matches!(value.node, Expr::Lambda { .. }));
+    }
+
+    #[test]
+    fn splices_top_level_begin_forms() {
+        let datums = parse("(begin (define x 1) x)").unwrap();
+        let program = classify_program(&datums).unwrap();
+
+        assert_eq!(program.forms.len(), 2);
+        assert!(matches!(program.forms[0].node, TopLevel::Define { .. }));
+        assert!(matches!(program.forms[1].node, TopLevel::Expr(_)));
     }
 
     #[test]

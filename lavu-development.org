@@ -264,6 +264,9 @@ Scheme value is valid.
 ** Derived Forms
 - Add R5RS =cond= arrow clauses and preserve single evaluation of
   test-only =cond= clauses by lowering through generated lambda bindings.
+- Splice top-level =begin= forms during program classification so nested
+  top-level definitions are evaluated and inferred as ordinary program
+  forms.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the
