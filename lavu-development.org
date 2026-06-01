@@ -589,10 +589,16 @@ Scheme value is valid.
   top-level definitions are visible to following expressions.
 - Return =#<unspecified>= from =load= itself, matching R5RS while
   preserving loaded definitions and side effects.
+- Thread the current evaluator environment through generic primitive
+  application so =(apply load ...)= still loads into the active
+  environment instead of requiring a syntactic direct call.
 ** Eval Environments
 - Add conservative environment values with =scheme-report-environment=,
   =null-environment=, =interaction-environment=, and native =eval= over
   datum-shaped runtime values.
+- Let =interaction-environment= work through generic primitive
+  application, including =apply=, while still returning the active
+  evaluator environment value.
 ** Dynamic Wind
 - Add ordinary =dynamic-wind= entry/thunk/exit behavior. Continuation
   re-entry behavior remains part of the future =call/cc= work.

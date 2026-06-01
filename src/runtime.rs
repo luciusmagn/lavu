@@ -403,7 +403,7 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
                 Value::Primitive("interaction-environment") => {
                     interaction_environment(args, expr.span.clone(), env)
                 }
-                procedure => apply(procedure, args, expr.span.clone()),
+                procedure => apply(procedure, args, expr.span.clone(), env),
             }
         }
     }
@@ -497,7 +497,7 @@ fn eval_tail_expr(mut expr: Spanned<Expr>, mut env: Env) -> Result<Value, EvalEr
                             return Ok(Value::Unspecified);
                         }
                     }
-                    procedure => return apply(procedure, args, span),
+                    procedure => return apply(procedure, args, span, &env),
                 }
             }
         }
@@ -554,9 +554,14 @@ fn eval_letrec_bindings(
     Ok(local)
 }
 
-fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn apply(
+    procedure: Value,
+    args: Vec<Value>,
+    span: SourceSpan,
+    env: &Env,
+) -> Result<Value, EvalError> {
     match procedure {
-        Value::Primitive(name) => apply_primitive(name, args, span),
+        Value::Primitive(name) => apply_primitive(name, args, span, env),
         Value::Continuation(continuation) => apply_continuation(continuation, args, span),
         Value::Procedure(procedure) => {
             let env = procedure_application_env(&procedure, args, span)?;
@@ -611,6 +616,7 @@ fn apply_primitive(
     name: &'static str,
     args: Vec<Value>,
     span: SourceSpan,
+    env: &Env,
 ) -> Result<Value, EvalError> {
     match name {
         "+" => add(args, span),
@@ -759,23 +765,17 @@ fn apply_primitive(
         "current-output-port" => current_output_port(args, span),
         "open-input-file" => open_input_file(args, span),
         "open-output-file" => open_output_file(args, span),
-        "call-with-input-file" => call_with_input_file(args, span),
-        "call-with-output-file" => call_with_output_file(args, span),
-        "with-input-from-file" => with_input_from_file(args, span),
-        "with-output-to-file" => with_output_to_file(args, span),
-        "load" => Err(EvalError::TypeError {
-            expected: "direct load call?",
-            span,
-        }),
+        "call-with-input-file" => call_with_input_file(args, span, env),
+        "call-with-output-file" => call_with_output_file(args, span, env),
+        "with-input-from-file" => with_input_from_file(args, span, env),
+        "with-output-to-file" => with_output_to_file(args, span, env),
+        "load" => load(args, span, env),
         "eval" => eval_value(args, span),
         "scheme-report-environment" => scheme_report_environment(args, span),
         "null-environment" => null_environment(args, span),
-        "interaction-environment" => Err(EvalError::TypeError {
-            expected: "direct interaction-environment call?",
-            span,
-        }),
-        "dynamic-wind" => dynamic_wind(args, span),
-        "call-with-current-continuation" | "call/cc" => call_cc(args, span),
+        "interaction-environment" => interaction_environment(args, span, env),
+        "dynamic-wind" => dynamic_wind(args, span, env),
+        "call-with-current-continuation" | "call/cc" => call_cc(args, span, env),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -795,8 +795,8 @@ fn apply_primitive(
         "equal?" => equal(args, span),
         "force" => force(args, span),
         "values" => Ok(Value::Values(args)),
-        "call-with-values" => call_with_values(args, span),
-        "apply" => apply_procedure_argument(args, span),
+        "call-with-values" => call_with_values(args, span, env),
+        "apply" => apply_procedure_argument(args, span, env),
         "symbol->string" => unary(args, span.clone(), |value| match value {
             Value::Symbol(name) => Ok(string_value(name)),
             _ => Err(EvalError::TypeError {
@@ -852,8 +852,8 @@ fn apply_primitive(
         "assq" => assoc(args, span, eq_value),
         "assv" => assoc(args, span, eqv_value),
         "assoc" => assoc(args, span, equal_value),
-        "map" => map_list(args, span),
-        "for-each" => for_each(args, span),
+        "map" => map_list(args, span, env),
+        "for-each" => for_each(args, span, env),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.borrow().chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -2327,7 +2327,7 @@ fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     })
 }
 
-fn call_with_values(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn call_with_values(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let actual = args.len();
     let [producer, consumer]: [Value; 2] =
         args.try_into().map_err(|_| EvalError::ArityMismatch {
@@ -2336,12 +2336,12 @@ fn call_with_values(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
             span: span.clone(),
         })?;
 
-    let produced = apply(producer, Vec::new(), span.clone())?;
+    let produced = apply(producer, Vec::new(), span.clone(), env)?;
     let consumer_args = match produced {
         Value::Values(values) => values,
         value => vec![value],
     };
-    apply(consumer, consumer_args, span)
+    apply(consumer, consumer_args, span, env)
 }
 
 fn current_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -2549,7 +2549,7 @@ fn output_port_from_path(path: &str, span: SourceSpan) -> Result<OutputPort, Eva
         })
 }
 
-fn call_with_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn call_with_input_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let actual = args.len();
     let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
         expected: 2,
@@ -2568,12 +2568,17 @@ fn call_with_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eva
         procedure,
         vec![Value::InputPort(port.clone())],
         span.clone(),
+        env,
     );
     port.0.borrow_mut().closed = true;
     result
 }
 
-fn call_with_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn call_with_output_file(
+    args: Vec<Value>,
+    span: SourceSpan,
+    env: &Env,
+) -> Result<Value, EvalError> {
     let actual = args.len();
     let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
         expected: 2,
@@ -2592,12 +2597,13 @@ fn call_with_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Ev
         procedure,
         vec![Value::OutputPort(port.clone())],
         span.clone(),
+        env,
     );
     close_output_port_value(port);
     result
 }
 
-fn with_input_from_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn with_input_from_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let actual = args.len();
     let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
         expected: 2,
@@ -2613,7 +2619,7 @@ fn with_input_from_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eva
 
     let port = input_port_from_path(path.borrow().as_str(), span.clone())?;
     let old = CURRENT_INPUT_PORT.with(|current| current.replace(port.clone()));
-    let result = apply(thunk, Vec::new(), span);
+    let result = apply(thunk, Vec::new(), span, env);
     CURRENT_INPUT_PORT.with(|current| {
         current.replace(old);
     });
@@ -2621,7 +2627,7 @@ fn with_input_from_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eva
     result
 }
 
-fn with_output_to_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn with_output_to_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let actual = args.len();
     let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
         expected: 2,
@@ -2637,7 +2643,7 @@ fn with_output_to_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eval
 
     let port = output_port_from_path(path.borrow().as_str(), span.clone())?;
     let old = CURRENT_OUTPUT_PORT.with(|current| current.replace(port.clone()));
-    let result = apply(thunk, Vec::new(), span);
+    let result = apply(thunk, Vec::new(), span, env);
     CURRENT_OUTPUT_PORT.with(|current| {
         current.replace(old);
     });
@@ -2693,7 +2699,7 @@ fn eval_value(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     eval_expr(&expr, &env)
 }
 
-fn dynamic_wind(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn dynamic_wind(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let actual = args.len();
     let [before, thunk, after]: [Value; 3] =
         args.try_into().map_err(|_| EvalError::ArityMismatch {
@@ -2702,20 +2708,20 @@ fn dynamic_wind(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
             span: span.clone(),
         })?;
 
-    apply(before, Vec::new(), span.clone())?;
-    let result = apply(thunk, Vec::new(), span.clone());
-    let after_result = apply(after, Vec::new(), span);
+    apply(before, Vec::new(), span.clone(), env)?;
+    let result = apply(thunk, Vec::new(), span.clone(), env);
+    let after_result = apply(after, Vec::new(), span, env);
     match (result, after_result) {
         (Ok(value), Ok(_)) => Ok(value),
         (Err(error), Ok(_)) | (Ok(_), Err(error)) | (Err(error), Err(_)) => Err(error),
     }
 }
 
-fn call_cc(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn call_cc(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     unary(args, span.clone(), |procedure| {
         let id = next_continuation_id();
         let continuation = Value::Continuation(Continuation { id });
-        match apply(procedure, vec![continuation], span.clone()) {
+        match apply(procedure, vec![continuation], span.clone(), env) {
             Err(EvalError::ContinuationJump {
                 id: jump_id, value, ..
             }) if jump_id == id => Ok(*value),
@@ -2982,7 +2988,11 @@ fn write_output_raw(text: &str, port: &OutputPort, span: SourceSpan) -> Result<(
     }
 }
 
-fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn apply_procedure_argument(
+    args: Vec<Value>,
+    span: SourceSpan,
+    env: &Env,
+) -> Result<Value, EvalError> {
     if args.len() < 2 {
         return Err(EvalError::ArityMismatch {
             expected: 2,
@@ -3002,7 +3012,7 @@ fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value,
     let final_operands = expect_list_items(&final_operand, span.clone())?;
 
     operands.extend(final_operands);
-    apply(procedure, operands, span)
+    apply(procedure, operands, span, env)
 }
 
 fn integer_to_char(n: BigInt, span: SourceSpan) -> Result<Value, EvalError> {
@@ -3546,7 +3556,7 @@ fn assoc(
     Ok(Value::Boolean(false))
 }
 
-fn map_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn map_list(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let (procedure, lists) = procedure_and_lists(args, span.clone())?;
     let len = common_list_len(&lists, span.clone())?;
     let mut results = Vec::with_capacity(len);
@@ -3556,13 +3566,13 @@ fn map_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             .iter()
             .map(|items| items[index].clone())
             .collect::<Vec<_>>();
-        results.push(apply(procedure.clone(), operands, span.clone())?);
+        results.push(apply(procedure.clone(), operands, span.clone(), env)?);
     }
 
     Ok(list_value(results))
 }
 
-fn for_each(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+fn for_each(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
     let (procedure, lists) = procedure_and_lists(args, span.clone())?;
     let len = common_list_len(&lists, span.clone())?;
 
@@ -3571,7 +3581,7 @@ fn for_each(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             .iter()
             .map(|items| items[index].clone())
             .collect::<Vec<_>>();
-        apply(procedure.clone(), operands, span.clone())?;
+        apply(procedure.clone(), operands, span.clone(), env)?;
     }
 
     Ok(Value::Unspecified)
@@ -5053,6 +5063,9 @@ mod tests {
         let input = format!("(load \"{}\") loaded", path.to_string_lossy());
 
         assert_eq!(eval_one(&input), "41");
+
+        let apply_input = format!("(apply load '(\"{}\")) loaded", path.to_string_lossy());
+        assert_eq!(eval_one(&apply_input), "41");
         std::fs::remove_file(path).unwrap();
     }
 
@@ -5071,6 +5084,10 @@ mod tests {
             "4"
         );
         assert_eq!(eval_one("(interaction-environment)"), "#<environment>");
+        assert_eq!(
+            eval_one("(apply interaction-environment '())"),
+            "#<environment>"
+        );
     }
 
     #[test]
