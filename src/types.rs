@@ -22,6 +22,7 @@ pub enum Type {
     InputPort,
     OutputPort,
     EofObject,
+    Unspecified,
     Values(Vec<Type>),
     Var(String),
     Union(Vec<Type>),
@@ -181,6 +182,7 @@ impl fmt::Display for Type {
             Type::InputPort => write!(f, "input-port?"),
             Type::OutputPort => write!(f, "output-port?"),
             Type::EofObject => write!(f, "eof-object?"),
+            Type::Unspecified => write!(f, "unspecified?"),
             Type::Values(types) => {
                 write_joined(f, "(values", types)?;
                 write!(f, ")")
@@ -254,6 +256,7 @@ mod tests {
         assert_eq!(Type::InputPort.to_string(), "input-port?");
         assert_eq!(Type::OutputPort.to_string(), "output-port?");
         assert_eq!(Type::EofObject.to_string(), "eof-object?");
+        assert_eq!(Type::Unspecified.to_string(), "unspecified?");
     }
 
     #[test]

@@ -145,7 +145,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "close-input-port",
-            Type::procedure(vec![Type::InputPort], Type::Unknown),
+            Type::procedure(vec![Type::InputPort], Type::Unspecified),
         ),
         Primitive::new(
             "open-output-file",
@@ -179,7 +179,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "with-output-to-file",
             Type::procedure(vec![Type::String, result_thunk.clone()], a.clone()),
         ),
-        Primitive::new("load", Type::procedure(vec![Type::String], Type::Unknown)),
+        Primitive::new(
+            "load",
+            Type::procedure(vec![Type::String], Type::Unspecified),
+        ),
         Primitive::new(
             "eval",
             Type::procedure(vec![Type::Any, Type::Any], Type::Any),
@@ -213,7 +216,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "close-output-port",
-            Type::procedure(vec![Type::OutputPort], Type::Unknown),
+            Type::procedure(vec![Type::OutputPort], Type::Unspecified),
         ),
         Primitive::new(
             "read",
@@ -241,25 +244,25 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "write",
-            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unknown),
+            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unspecified),
         ),
         Primitive::new(
             "display",
-            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unknown),
+            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unspecified),
         ),
         Primitive::new(
             "newline",
-            Type::optional_procedure(vec![], vec![Type::OutputPort], Type::Unknown),
+            Type::optional_procedure(vec![], vec![Type::OutputPort], Type::Unspecified),
         ),
         Primitive::new(
             "write-char",
-            Type::optional_procedure(vec![Type::Char], vec![Type::OutputPort], Type::Unknown),
+            Type::optional_procedure(vec![Type::Char], vec![Type::OutputPort], Type::Unspecified),
         ),
         Primitive::new(
             "transcript-on",
-            Type::procedure(vec![Type::String], Type::Unknown),
+            Type::procedure(vec![Type::String], Type::Unspecified),
         ),
-        Primitive::new("transcript-off", Type::procedure(vec![], Type::Unknown)),
+        Primitive::new("transcript-off", Type::procedure(vec![], Type::Unspecified)),
         Primitive::new(
             "number->string",
             Type::optional_procedure(vec![Type::Number], vec![Type::Number], Type::String),
@@ -469,7 +472,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "string-set!",
-            Type::procedure(vec![Type::String, Type::Number, Type::Char], Type::Unknown),
+            Type::procedure(
+                vec![Type::String, Type::Number, Type::Char],
+                Type::Unspecified,
+            ),
         ),
         Primitive::new(
             "substring",
@@ -493,7 +499,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "string-fill!",
-            Type::procedure(vec![Type::String, Type::Char], Type::Unknown),
+            Type::procedure(vec![Type::String, Type::Char], Type::Unspecified),
         ),
         Primitive::new(
             "make-vector",
@@ -522,7 +528,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "vector-set!",
             Type::procedure(
                 vec![Type::VectorOf(Box::new(a.clone())), Type::Number, a.clone()],
-                Type::Unknown,
+                Type::Unspecified,
             ),
         ),
         Primitive::new(
@@ -543,7 +549,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "vector-fill!",
             Type::procedure(
                 vec![Type::VectorOf(Box::new(a.clone())), a.clone()],
-                Type::Unknown,
+                Type::Unspecified,
             ),
         ),
         Primitive::new(
@@ -574,7 +580,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
                     Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
                     Type::Any,
                 ],
-                Type::Unknown,
+                Type::Unspecified,
             ),
         ),
         Primitive::new(
@@ -584,7 +590,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
                     Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
                     Type::Any,
                 ],
-                Type::Unknown,
+                Type::Unspecified,
             ),
         ),
         Primitive::new(
@@ -707,7 +713,7 @@ fn for_each_signature() -> Type {
             Type::ListOf(Box::new(element.clone())),
         ],
         Type::ListOf(Box::new(element)),
-        Type::Unknown,
+        Type::Unspecified,
     )
 }
 
@@ -762,7 +768,7 @@ mod tests {
         );
         assert_eq!(
             primitive("set-car!").unwrap().signature.to_string(),
-            "(-> (pair? any? any?) any? unknown?)"
+            "(-> (pair? any? any?) any? unspecified?)"
         );
         assert_eq!(
             primitive("length").unwrap().signature.to_string(),
@@ -910,7 +916,7 @@ mod tests {
         );
         assert_eq!(
             primitive("string-set!").unwrap().signature.to_string(),
-            "(-> string? number? char? unknown?)"
+            "(-> string? number? char? unspecified?)"
         );
         assert_eq!(
             primitive("string->list").unwrap().signature.to_string(),
@@ -934,7 +940,7 @@ mod tests {
         );
         assert_eq!(
             primitive("vector-set!").unwrap().signature.to_string(),
-            "(-> (vectorof a) number? a unknown?)"
+            "(-> (vectorof a) number? a unspecified?)"
         );
         assert_eq!(
             primitive("vector->list").unwrap().signature.to_string(),
@@ -978,7 +984,7 @@ mod tests {
         );
         assert_eq!(
             primitive("for-each").unwrap().signature.to_string(),
-            "(-> (-> a a * any?) (listof a) (listof a) * unknown?)"
+            "(-> (-> a a * any?) (listof a) (listof a) * unspecified?)"
         );
     }
 
@@ -1020,7 +1026,7 @@ mod tests {
         );
         assert_eq!(
             primitive("write").unwrap().signature.to_string(),
-            "(-> any? output-port? ? unknown?)"
+            "(-> any? output-port? ? unspecified?)"
         );
         assert_eq!(
             primitive("open-output-file").unwrap().signature.to_string(),
@@ -1056,7 +1062,7 @@ mod tests {
         );
         assert_eq!(
             primitive("load").unwrap().signature.to_string(),
-            "(-> string? unknown?)"
+            "(-> string? unspecified?)"
         );
         assert_eq!(
             primitive("eval").unwrap().signature.to_string(),
@@ -1086,15 +1092,15 @@ mod tests {
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),
-            "(-> char? output-port? ? unknown?)"
+            "(-> char? output-port? ? unspecified?)"
         );
         assert_eq!(
             primitive("transcript-on").unwrap().signature.to_string(),
-            "(-> string? unknown?)"
+            "(-> string? unspecified?)"
         );
         assert_eq!(
             primitive("transcript-off").unwrap().signature.to_string(),
-            "(-> unknown?)"
+            "(-> unspecified?)"
         );
     }
 }

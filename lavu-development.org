@@ -123,6 +123,7 @@ Core displayed atoms:
 any?
 unknown?
 never?
+unspecified?
 boolean?
 number?
 char?
@@ -200,8 +201,9 @@ string?
 (-> (listof a) (listof a))
 #+end_src
 
-=unknown?= means Lavu could not infer a useful type yet. =any?= means any
-Scheme value is valid.
+=unknown?= means Lavu could not infer a useful type yet.
+=unspecified?= is the known R5RS unspecified result produced by mutators
+and output procedures. =any?= means any Scheme value is valid.
 
 * Dynamic Features
 - =values= should be modeled with expression result types, for example
@@ -851,6 +853,9 @@ Scheme value is valid.
   failed form do not leak into later interactions.
 - Label hard unification failures as type constraint conflicts, reserving
   =unknown?= and =any?= for intentionally coarse inference results.
+- Split known R5RS unspecified results from =unknown?=, so mutators,
+  output procedures, =load=, and =for-each= infer as =unspecified?=
+  instead of pretending inference lost precision.
 - Normalize collection and port unions in displayed inference results,
   so branch merges prefer shapes like =(listof (U number? string?))=
   over redundant unions with =null?= or multiple =listof= arms.

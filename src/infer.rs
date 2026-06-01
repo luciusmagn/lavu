@@ -344,7 +344,7 @@ impl Inferencer {
                         })?;
                 let actual = self.infer_expr(value, env)?;
                 self.unify(actual, expected, value.span.clone())?;
-                Ok(Type::Unknown)
+                Ok(Type::Unspecified)
             }
             Expr::Delay(expr) => Ok(Type::PromiseOf(Box::new(self.infer_expr(expr, env)?))),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
@@ -635,7 +635,7 @@ impl Inferencer {
         let mut else_inferencer = base;
         let alternate_ty = match alternate {
             Some(expr) => else_inferencer.infer_expr(expr, &else_env)?,
-            None => Type::Unknown,
+            None => Type::Unspecified,
         };
 
         self.merge_branch_substitutions(refinement.as_ref(), &then_inferencer, &else_inferencer);
@@ -703,7 +703,7 @@ impl Inferencer {
         exprs: &[Spanned<Expr>],
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let mut result = Type::Unknown;
+        let mut result = Type::Unspecified;
         for expr in exprs {
             result = self.infer_expr(expr, env)?;
         }
@@ -1411,7 +1411,7 @@ impl Inferencer {
 
         match result {
             HigherOrderListResult::Mapped => Ok(Type::ListOf(Box::new(self.resolve(mapped_ty)))),
-            HigherOrderListResult::Unspecified => Ok(Type::Unknown),
+            HigherOrderListResult::Unspecified => Ok(Type::Unspecified),
         }
     }
 
@@ -1429,7 +1429,7 @@ impl Inferencer {
 
         Some(match result {
             HigherOrderListResult::Mapped => Type::ListOf(Box::new(mapped)),
-            HigherOrderListResult::Unspecified => Type::Unknown,
+            HigherOrderListResult::Unspecified => Type::Unspecified,
         })
     }
 
@@ -2961,6 +2961,10 @@ mod tests {
             infer_one("(lambda (x) (set! x (+ x 1)) x)"),
             "(-> number? number?)"
         );
+        assert_eq!(
+            infer_all("(define x 1) (set! x 2)"),
+            vec!["number?".to_string(), "unspecified?".to_string()]
+        );
 
         let TypeError::Mismatch {
             expected, actual, ..
@@ -2982,8 +2986,8 @@ mod tests {
 
     #[test]
     fn infers_pair_mutators() {
-        assert_eq!(infer_one("(set-car! (cons 1 2) 9)"), "unknown?");
-        assert_eq!(infer_one("(set-cdr! (cons 1 2) 9)"), "unknown?");
+        assert_eq!(infer_one("(set-car! (cons 1 2) 9)"), "unspecified?");
+        assert_eq!(infer_one("(set-cdr! (cons 1 2) 9)"), "unspecified?");
     }
 
     #[test]
@@ -3412,7 +3416,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("for-each"),
-            "(-> (-> t0 t0 * any?) (listof t0) (listof t0) * unknown?)"
+            "(-> (-> t0 t0 * any?) (listof t0) (listof t0) * unspecified?)"
         );
         assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "(listof number?)");
         assert_eq!(
@@ -3433,9 +3437,9 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (xs) (for-each string-length xs))"),
-            "(-> (listof string?) unknown?)"
+            "(-> (listof string?) unspecified?)"
         );
-        assert_eq!(infer_one("(for-each + '(1 2) '(3 4))"), "unknown?");
+        assert_eq!(infer_one("(for-each + '(1 2) '(3 4))"), "unspecified?");
     }
 
     #[test]
@@ -3467,7 +3471,7 @@ mod tests {
         assert_eq!(infer_one("(call-with-input-file \"x\" read)"), "any?");
         assert_eq!(
             infer_one("(call-with-output-file \"x\" (lambda (p) (write \"x\" p)))"),
-            "unknown?"
+            "unspecified?"
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-input-file \"x\" f))"),
@@ -3480,13 +3484,13 @@ mod tests {
         assert_eq!(infer_one("(with-input-from-file \"x\" read)"), "any?");
         assert_eq!(
             infer_one("(with-output-to-file \"x\" (lambda () (write \"x\")))"),
-            "unknown?"
+            "unspecified?"
         );
         assert_eq!(
             infer_one("(lambda (thunk) (with-output-to-file \"x\" thunk))"),
             "(-> (-> t0) t0)"
         );
-        assert_eq!(infer_one("(load \"x\")"), "unknown?");
+        assert_eq!(infer_one("(load \"x\")"), "unspecified?");
         assert_eq!(
             infer_one("(eval '(+ 1 2) (scheme-report-environment 5))"),
             "any?"
@@ -3519,7 +3523,7 @@ mod tests {
             infer_one("(lambda (f) (call/cc f))"),
             "(-> (-> (-> t0 never?) t1) (U t0 t1))"
         );
-        assert_eq!(infer_one("(write \"x\")"), "unknown?");
+        assert_eq!(infer_one("(write \"x\")"), "unspecified?");
     }
 
     #[test]
@@ -3529,7 +3533,7 @@ mod tests {
         assert_eq!(infer_one("(string->list \"ab\")"), "(listof char?)");
         assert_eq!(infer_one("(list->string '(#\\a #\\b))"), "string?");
         assert_eq!(infer_one("(list->string '())"), "string?");
-        assert_eq!(infer_one("(string-set! \"ab\" 0 #\\z)"), "unknown?");
+        assert_eq!(infer_one("(string-set! \"ab\" 0 #\\z)"), "unspecified?");
     }
 
     #[test]
