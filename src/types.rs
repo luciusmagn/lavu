@@ -90,6 +90,7 @@ impl Type {
             return Self::Any;
         }
         types.retain(|ty| !matches!(ty, Self::Never));
+        types = normalize_union_elements(types);
         types.sort();
         types.dedup();
 
@@ -99,6 +100,62 @@ impl Type {
             _ => Self::Union(types),
         }
     }
+}
+
+fn normalize_union_elements(types: Vec<Type>) -> Vec<Type> {
+    normalize_port_union(normalize_vector_union(normalize_list_union(types)))
+}
+
+fn normalize_list_union(mut types: Vec<Type>) -> Vec<Type> {
+    if types.iter().any(|ty| matches!(ty, Type::List)) {
+        types.retain(|ty| !matches!(ty, Type::Null | Type::ListOf(_)));
+        return types;
+    }
+
+    let elements = types
+        .iter()
+        .filter_map(|ty| match ty {
+            Type::ListOf(element) => Some((**element).clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if !elements.is_empty() {
+        types.retain(|ty| !matches!(ty, Type::Null | Type::ListOf(_)));
+        types.push(Type::ListOf(Box::new(Type::union(elements))));
+    }
+
+    types
+}
+
+fn normalize_vector_union(mut types: Vec<Type>) -> Vec<Type> {
+    if types.iter().any(|ty| matches!(ty, Type::Vector)) {
+        types.retain(|ty| !matches!(ty, Type::VectorOf(_)));
+        return types;
+    }
+
+    let elements = types
+        .iter()
+        .filter_map(|ty| match ty {
+            Type::VectorOf(element) => Some((**element).clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if !elements.is_empty() {
+        types.retain(|ty| !matches!(ty, Type::VectorOf(_)));
+        types.push(Type::VectorOf(Box::new(Type::union(elements))));
+    }
+
+    types
+}
+
+fn normalize_port_union(mut types: Vec<Type>) -> Vec<Type> {
+    if types.iter().any(|ty| matches!(ty, Type::Port)) {
+        types.retain(|ty| !matches!(ty, Type::InputPort | Type::OutputPort));
+    }
+
+    types
 }
 
 impl fmt::Display for Type {
@@ -241,6 +298,34 @@ mod tests {
         assert_eq!(Type::union(vec![Type::Any, Type::Char]).to_string(), "any?");
         assert_eq!(Type::union(Vec::new()).to_string(), "never?");
         assert_eq!(Type::union(vec![Type::Char]).to_string(), "char?");
+        assert_eq!(
+            Type::union(vec![Type::Null, Type::ListOf(Box::new(Type::Number))]).to_string(),
+            "(listof number?)"
+        );
+        assert_eq!(
+            Type::union(vec![
+                Type::ListOf(Box::new(Type::Number)),
+                Type::ListOf(Box::new(Type::String))
+            ])
+            .to_string(),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(
+            Type::union(vec![Type::List, Type::ListOf(Box::new(Type::String))]).to_string(),
+            "list?"
+        );
+        assert_eq!(
+            Type::union(vec![
+                Type::VectorOf(Box::new(Type::Number)),
+                Type::VectorOf(Box::new(Type::String))
+            ])
+            .to_string(),
+            "(vectorof (U number? string?))"
+        );
+        assert_eq!(
+            Type::union(vec![Type::Port, Type::InputPort]).to_string(),
+            "port?"
+        );
     }
 
     #[test]

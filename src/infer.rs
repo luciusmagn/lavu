@@ -2596,6 +2596,19 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_collection_branch_unions() {
+        assert_eq!(
+            infer_one("(if #t '(1) '(\"x\"))"),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(infer_one("(if #t '() '(1))"), "(listof number?)");
+        assert_eq!(
+            infer_one("(if #t '#(1) '#(\"x\"))"),
+            "(vectorof (U number? string?))"
+        );
+    }
+
+    #[test]
     fn infers_simple_apply_calls() {
         assert_eq!(infer_one("(apply + '(1 2 3))"), "number?");
         assert_eq!(infer_one("(apply string-append '(\"a\" \"b\"))"), "string?");
