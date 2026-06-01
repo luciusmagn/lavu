@@ -4,7 +4,7 @@ use num::ToPrimitive;
 use thiserror::Error;
 
 use crate::stdlib::primitive;
-use crate::surface::{Expr, Program, TopLevel};
+use crate::surface::{Expr, Program, TopLevel, classify_expr};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 use crate::types::{ProcedureType, Type};
 
@@ -324,7 +324,7 @@ impl Inferencer {
             Expr::Literal(atom) => Ok(type_of_atom(atom)),
             Expr::Variable(name) => self.infer_variable(name, expr.span.clone(), env),
             Expr::Quote(datum) => Ok(type_of_datum(datum)),
-            Expr::Quasiquote(datum) => Ok(type_of_quasiquote_datum(datum)),
+            Expr::Quasiquote(datum) => self.infer_quasiquote_datum(datum, env, 0),
             Expr::Lambda { params, rest, body } => {
                 self.infer_lambda(params, rest.as_ref(), body, env)
             }
@@ -1210,6 +1210,127 @@ impl Inferencer {
                 .map(|ty| self.resolve(ty))
                 .collect::<Vec<_>>(),
         )
+    }
+
+    fn infer_quasiquote_datum(
+        &mut self,
+        datum: &Spanned<Datum>,
+        env: &TypeEnv,
+        level: usize,
+    ) -> Result<Type, TypeError> {
+        match &datum.node {
+            Datum::Unquote(inner) if level == 0 => self.infer_unquoted_datum(inner, env),
+            Datum::Unquote(inner) => Ok(abbreviation_type(
+                "unquote",
+                self.infer_quasiquote_datum(inner, env, level - 1)?,
+            )),
+            Datum::UnquoteSplicing(_) if level == 0 => Ok(Type::Any),
+            Datum::UnquoteSplicing(inner) => Ok(abbreviation_type(
+                "unquote-splicing",
+                self.infer_quasiquote_datum(inner, env, level - 1)?,
+            )),
+            Datum::Quasiquote(inner) => Ok(abbreviation_type(
+                "quasiquote",
+                self.infer_quasiquote_datum(inner, env, level + 1)?,
+            )),
+            Datum::List(items) => self.infer_quasiquote_list_type(items, env, level),
+            Datum::DottedList(items, tail) => {
+                let tail = self.infer_quasiquote_datum(tail, env, level)?;
+                self.infer_quasiquote_item_types(items, env, level)
+                    .map(|items| {
+                        items
+                            .into_iter()
+                            .rev()
+                            .fold(tail, |cdr, car| Type::Pair(Box::new(car), Box::new(cdr)))
+                    })
+            }
+            Datum::Vector(items) => self.infer_quasiquote_vector_type(items, env, level),
+            Datum::Quote(inner) => Ok(abbreviation_type("quote", type_of_datum(inner))),
+            Datum::Atom(_) => Ok(type_of_datum(datum)),
+        }
+    }
+
+    fn infer_quasiquote_list_type(
+        &mut self,
+        items: &[Spanned<Datum>],
+        env: &TypeEnv,
+        level: usize,
+    ) -> Result<Type, TypeError> {
+        let items = self.infer_quasiquote_item_types(items, env, level)?;
+
+        Ok(match items.as_slice() {
+            [] => Type::Null,
+            _ => Type::ListOf(Box::new(Type::union(items))),
+        })
+    }
+
+    fn infer_quasiquote_vector_type(
+        &mut self,
+        items: &[Spanned<Datum>],
+        env: &TypeEnv,
+        level: usize,
+    ) -> Result<Type, TypeError> {
+        let items = self.infer_quasiquote_item_types(items, env, level)?;
+
+        Ok(match items.as_slice() {
+            [] => Type::Vector,
+            _ => Type::VectorOf(Box::new(Type::union(items))),
+        })
+    }
+
+    fn infer_quasiquote_item_types(
+        &mut self,
+        items: &[Spanned<Datum>],
+        env: &TypeEnv,
+        level: usize,
+    ) -> Result<Vec<Type>, TypeError> {
+        let mut types = Vec::new();
+        for item in items {
+            match &item.node {
+                Datum::UnquoteSplicing(inner) if level == 0 => {
+                    match self.infer_unquote_splicing_element_type(inner, env)? {
+                        Type::Never | Type::Null => {}
+                        element => types.push(element),
+                    }
+                }
+                _ => types.push(self.infer_quasiquote_datum(item, env, level)?),
+            }
+        }
+        Ok(types)
+    }
+
+    fn infer_unquoted_datum(
+        &mut self,
+        datum: &Spanned<Datum>,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let Ok(expr) = classify_expr(datum) else {
+            return Ok(Type::Any);
+        };
+        self.infer_expr(&expr, env)
+    }
+
+    fn infer_unquote_splicing_element_type(
+        &mut self,
+        datum: &Spanned<Datum>,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let ty = self.infer_unquoted_datum(datum, env)?;
+        match self.resolve(ty) {
+            Type::Null => Ok(Type::Null),
+            Type::ListOf(element) => Ok(self.resolve(*element)),
+            Type::List | Type::Any | Type::Unknown => Ok(Type::Any),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(element)
+            }
+            actual => {
+                self.unify(actual, Type::List, datum.span.clone())?;
+                Ok(Type::Any)
+            }
+        }
     }
 
     fn infer_apply_constructor(
@@ -2499,26 +2620,6 @@ fn type_of_datum(datum: &Spanned<Datum>) -> Type {
     }
 }
 
-fn type_of_quasiquote_datum(datum: &Spanned<Datum>) -> Type {
-    if datum_contains_unquote(datum) {
-        Type::Any
-    } else {
-        type_of_datum(datum)
-    }
-}
-
-fn datum_contains_unquote(datum: &Spanned<Datum>) -> bool {
-    match &datum.node {
-        Datum::List(items) | Datum::Vector(items) => items.iter().any(datum_contains_unquote),
-        Datum::DottedList(items, tail) => {
-            items.iter().any(datum_contains_unquote) || datum_contains_unquote(tail)
-        }
-        Datum::Quote(inner) | Datum::Quasiquote(inner) => datum_contains_unquote(inner),
-        Datum::Unquote(_) | Datum::UnquoteSplicing(_) => true,
-        Datum::Atom(_) => false,
-    }
-}
-
 fn type_of_vector_datums(items: &[Spanned<Datum>]) -> Type {
     if items.is_empty() {
         return Type::Vector;
@@ -2540,10 +2641,11 @@ fn type_of_list_datums(items: &[Spanned<Datum>]) -> Type {
 }
 
 fn abbreviation_datum_type(_name: &'static str, datum: &Spanned<Datum>) -> Type {
-    Type::ListOf(Box::new(Type::union(vec![
-        Type::Symbol,
-        type_of_datum(datum),
-    ])))
+    abbreviation_type(_name, type_of_datum(datum))
+}
+
+fn abbreviation_type(_name: &'static str, datum: Type) -> Type {
+    Type::ListOf(Box::new(Type::union(vec![Type::Symbol, datum])))
 }
 
 fn span_for_operands(operands: &[Spanned<Expr>]) -> SourceSpan {
@@ -3066,11 +3168,15 @@ mod tests {
     }
 
     #[test]
-    fn infers_quasiquote_conservatively() {
+    fn infers_quasiquote_shapes() {
         assert_eq!(infer_one("`(1 2 3)"), "(listof number?)");
         assert_eq!(infer_one("`#(1 \"x\")"), "(vectorof (U number? string?))");
-        assert_eq!(infer_one("`(1 ,(+ 1 2))"), "any?");
-        assert_eq!(infer_one("`(,@xs)"), "any?");
+        assert_eq!(infer_one("`(1 ,(+ 1 2))"), "(listof number?)");
+        assert_eq!(
+            infer_one("`#(1 ,(string-append \"a\" \"b\"))"),
+            "(vectorof (U number? string?))"
+        );
+        assert_eq!(infer_one("(lambda xs `(,@xs))"), "(-> xs * (listof xs))");
     }
 
     #[test]

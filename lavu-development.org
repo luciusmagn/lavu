@@ -314,7 +314,7 @@ Scheme value is valid.
 - Infer direct =car= and =cdr= over both pair shapes and proper =listof=
   values.
 - Infer composed =car=/=cdr= accessors through the same pair and =listof=
-  access path while keeping their primitive metadata conservative.
+  access path, backed by structural primitive metadata.
 - Represent constructed proper lists as shared cons cells so mutating a
   list or one of its tails is visible through aliases.
 - Make =list?= detect mutable-pair cycles and return =#f= instead of
@@ -565,8 +565,9 @@ Scheme value is valid.
   quasiquote, unquote, and unquote-splicing directly over stable datums.
 - Support unquote-splicing in quasiquoted vector templates, sharing the
   same proper-list splice validation used for list templates.
-- Infer static quasiquote datum shapes like quoted data, while keeping
-  quasiquotes with unquote or unquote-splicing conservative.
+- Infer quasiquote datum shapes like quoted data, while letting
+  unquoted expressions and proper-list splices contribute element types
+  when their payloads can be classified.
 ** Quoted Datum Types
 - Infer structural types for quoted data, including proper lists,
   dotted pairs, heterogeneous list element unions, and =null?=.
