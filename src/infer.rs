@@ -267,12 +267,13 @@ impl Inferencer {
     ) -> Result<Type, TypeError> {
         match &form.node {
             TopLevel::Define { name, value } => {
+                let mut local = env.clone();
                 let recursive_seed = matches!(value.node, Expr::Lambda { .. }).then(|| {
                     let seed = self.fresh_type_var();
-                    env.define(name.node.clone(), seed.clone());
+                    local.define(name.node.clone(), seed.clone());
                     seed
                 });
-                let ty = self.infer_expr(value, env)?;
+                let ty = self.infer_expr(value, &local)?;
                 let ty = match recursive_seed {
                     Some(seed) => self.unify(ty, seed, value.span.clone())?,
                     None => ty,
@@ -2176,6 +2177,13 @@ mod tests {
         inferencer.infer_program(&program, &mut env).unwrap_err()
     }
 
+    fn infer_error_with_env(input: &str, env: &mut TypeEnv) -> TypeError {
+        let datums = parse(input).unwrap();
+        let program = classify_program(&datums).unwrap();
+        let mut inferencer = Inferencer::new();
+        inferencer.infer_program(&program, env).unwrap_err()
+    }
+
     #[test]
     fn displays_type_error_details() {
         assert_eq!(
@@ -2199,6 +2207,30 @@ mod tests {
     #[test]
     fn infers_primitive_arithmetic_lambda() {
         assert_eq!(infer_one("(lambda (x) (+ x 1))"), "(-> number? number?)");
+    }
+
+    #[test]
+    fn rejects_impossible_arithmetic_lambda_bodies() {
+        assert_eq!(
+            infer_error("(lambda (x) (+ x \"hello\"))").to_string(),
+            "type mismatch: expected number?, got string?"
+        );
+        assert_eq!(
+            infer_error("(define (broken x) (+ x \"hello\"))").to_string(),
+            "type mismatch: expected number?, got string?"
+        );
+    }
+
+    #[test]
+    fn failed_recursive_definitions_do_not_update_type_env() {
+        let mut env = TypeEnv::new();
+
+        assert_eq!(
+            infer_error_with_env("(define (broken x) (+ x \"hello\"))", &mut env).to_string(),
+            "type mismatch: expected number?, got string?"
+        );
+
+        assert!(env.binding("broken").is_none());
     }
 
     #[test]

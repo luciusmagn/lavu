@@ -770,3 +770,6 @@ Scheme value is valid.
 - Dispatch primitive-specific inference before inferring the primitive
   operator as a value, avoiding unused fresh type variables in displayed
   results.
+- Reject invariant body errors such as =(+ x "hello")= during inference,
+  including inside inferred definitions, and avoid committing recursive
+  top-level placeholder bindings when inference fails.
