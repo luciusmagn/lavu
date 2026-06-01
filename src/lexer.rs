@@ -71,6 +71,11 @@ pub enum Token {
         callback = |lex| parse_ratio_literal(&lex.slice()[2..])
     )]
     #[regex(
+        r"#[dD][+-]?[0-9]+/[0-9]+",
+        priority = 6,
+        callback = |lex| parse_ratio_literal(&lex.slice()[2..])
+    )]
+    #[regex(
         r"#[eE]#[dD][+-]?[0-9]+/[0-9]+",
         priority = 8,
         callback = |lex| parse_ratio_literal(&lex.slice()[4..])
@@ -252,6 +257,11 @@ pub enum Token {
     )]
     #[regex(
         r"#[iI][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 6,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[dD][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
         priority = 6,
         callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
     )]
@@ -705,21 +715,29 @@ mod tests {
         assert_eq!(exactness[12].0, Token::Hex(BigInt::from(16)));
         assert_eq!(exactness[14].0, Token::Decimal(BigDecimal::from(16)));
 
-        let radix_rationals = tokenize("#b101/10 #o10/4 #x10/4 #i#b101/10");
+        let radix_rationals = tokenize("#d3/2 #d1.5 #b101/10 #o10/4 #x10/4 #i#b101/10");
         assert_eq!(
             radix_rationals[0].0,
-            Token::Real((BigInt::from(5), BigInt::from(2)))
+            Token::Real((BigInt::from(3), BigInt::from(2)))
         );
         assert_eq!(
             radix_rationals[2].0,
-            Token::Real((BigInt::from(8), BigInt::from(4)))
+            Token::Decimal(BigDecimal::from_str("1.5").unwrap())
         );
         assert_eq!(
             radix_rationals[4].0,
-            Token::Real((BigInt::from(16), BigInt::from(4)))
+            Token::Real((BigInt::from(5), BigInt::from(2)))
         );
         assert_eq!(
             radix_rationals[6].0,
+            Token::Real((BigInt::from(8), BigInt::from(4)))
+        );
+        assert_eq!(
+            radix_rationals[8].0,
+            Token::Real((BigInt::from(16), BigInt::from(4)))
+        );
+        assert_eq!(
+            radix_rationals[10].0,
             Token::Decimal(BigDecimal::from_str("2.5").unwrap())
         );
     }

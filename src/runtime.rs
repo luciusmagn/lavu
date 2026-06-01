@@ -4837,6 +4837,8 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#i#x10\")"), "16");
         assert_eq!(eval_one("(string->number \"#x#i10\" 2)"), "16");
         assert_eq!(eval_one("(string->number \"#b101/10\")"), "5/2");
+        assert_eq!(eval_one("(string->number \"#d3/2\")"), "3/2");
+        assert_eq!(eval_one("(string->number \"#d1.5\")"), "1.5");
         assert_eq!(eval_one("(string->number \"#x10/4\")"), "4");
         assert_eq!(eval_one("(string->number \"#i#b101/10\")"), "2.5");
         assert_eq!(eval_one("(string->number \".5\")"), "0.5");

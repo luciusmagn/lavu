@@ -600,6 +600,8 @@ Scheme value is valid.
   for integer literals.
 - Parse radix-prefixed rational literals such as =#b101/10= and
   =#x10/4=, with inexact exactness prefixes producing decimal values.
+- Parse plain decimal-radix fractional and decimal literals such as
+  =#d3/2= and =#d1.5=.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.
