@@ -421,7 +421,7 @@ pub enum Token {
 
     // Strings
     #[regex(
-        r#""([^"\\]|\\["\\nt])*""#,
+        r#""([^"\\]|\\["\\])*""#,
         |lex| lex.slice().to_string()
     )]
     String(String),
@@ -1134,6 +1134,14 @@ mod tests {
         assert!(tokens[2].0.is_string());
         assert!(tokens[4].0.is_character());
         assert!(tokens[6].0.is_character());
+
+        assert!(matches!(
+            tokenize_checked(r#""not an r5rs \n escape""#),
+            Err(SpannedLexerError {
+                error: LexerError::DefaultError,
+                ..
+            })
+        ));
     }
 
     // TODO: convert the rest

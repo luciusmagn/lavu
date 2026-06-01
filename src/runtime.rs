@@ -4272,8 +4272,6 @@ fn write_string_literal(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {
         match ch {
             '"' => write!(f, "\\\"")?,
             '\\' => write!(f, "\\\\")?,
-            '\n' => write!(f, "\\n")?,
-            '\t' => write!(f, "\\t")?,
             ch => write!(f, "{ch}")?,
         }
     }
@@ -5177,7 +5175,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(*output.borrow(), "\"a\\\"b\\\\c\\n\" raw\" ");
+        assert_eq!(*output.borrow(), "\"a\\\"b\\\\c\n\" raw\" ");
     }
 
     #[test]

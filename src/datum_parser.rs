@@ -325,8 +325,6 @@ fn unescape_string_token(token: &str) -> String {
             match chars.next() {
                 Some('"') => output.push('"'),
                 Some('\\') => output.push('\\'),
-                Some('n') => output.push('\n'),
-                Some('t') => output.push('\t'),
                 Some(other) => {
                     output.push('\\');
                     output.push(other);

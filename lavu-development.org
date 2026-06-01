@@ -436,6 +436,9 @@ Scheme value is valid.
   comments, =#;= datum comments, =#'= syntax quote, and square-bracket
   delimiters in the datum parser while keeping tokenizer support for
   highlighting and precise diagnostics.
+- Keep string literal escapes to the R5RS reader surface: only escaped
+  double quotes and escaped backslashes are accepted, and =write= emits
+  literal newline/tab characters instead of non-standard escape names.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.
