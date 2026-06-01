@@ -48,7 +48,7 @@ pub enum Token {
     // Identifiers
     #[regex(
         r"([a-zA-Z!$%&*/:<=>?^_~+@-][a-zA-Z0-9!$%&*/:<>=?^_~+@-]*)|(\.\.\.)",
-        |lex| lex.slice().to_string()
+        |lex| lex.slice().to_ascii_lowercase()
     )]
     Identifier(String),
 
@@ -764,10 +764,10 @@ mod tests {
 
     #[test]
     fn test_identifiers() {
-        let input = "foo bar+ set! string->symbol";
+        let input = "foo bar+ set! string->symbol MixedCase";
         let tokens = tokenize(input);
 
-        assert_eq!(tokens.len(), 7); // 4 identifiers + 3 whitespaces
+        assert_eq!(tokens.len(), 9); // 5 identifiers + 4 whitespaces
         assert!(tokens[0].0.is_identifier());
         assert_eq!(tokens[0].1, "foo");
         assert!(tokens[2].0.is_identifier());
@@ -776,6 +776,7 @@ mod tests {
         assert_eq!(tokens[4].1, "set!");
         assert!(tokens[6].0.is_identifier());
         assert_eq!(tokens[6].1, "string->symbol");
+        assert_eq!(tokens[8].0, Token::Identifier("mixedcase".to_string()));
     }
 
     #[test]

@@ -4614,6 +4614,9 @@ mod tests {
     #[test]
     fn evaluates_define_procedure_shorthand() {
         assert_eq!(eval_one("(define (add1 x) (+ x 1)) (add1 4)"), "5");
+        assert_eq!(eval_one("(define X 1) x"), "1");
+        assert_eq!(eval_one("(eq? 'MixedCase 'mixedcase)"), "#t");
+        assert_eq!(eval_one("'(Foo BAR)"), "(foo bar)");
     }
 
     #[test]
@@ -4986,6 +4989,10 @@ mod tests {
     fn evaluates_conversion_primitives() {
         assert_eq!(eval_one("(symbol->string 'hello)"), "\"hello\"");
         assert_eq!(eval_one("(string->symbol \"hello\")"), "hello");
+        assert_eq!(
+            eval_one("(symbol->string (string->symbol \"MixedCase\"))"),
+            "\"MixedCase\""
+        );
         assert_eq!(eval_one("(char->integer #\\A)"), "65");
         assert_eq!(eval_one("(integer->char 65)"), "#\\A");
         assert_eq!(eval_one("(number->string 1/2)"), "\"1/2\"");

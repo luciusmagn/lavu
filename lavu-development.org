@@ -400,6 +400,9 @@ Scheme value is valid.
 ** Stable Datum Parser
 - Add a library datum parser that uses existing lexer tokens but produces
   stable =Spanned<Datum>= nodes with byte spans.
+- Fold reader identifiers to lowercase to match R5RS case-insensitive
+  source syntax while leaving strings, characters, and =string->symbol=
+  names alone.
 - Add checked tokenization for parser entry points so lexer failures
   such as unclosed block comments and invalid named characters become
   spanned parse diagnostics instead of disappearing from best-effort
