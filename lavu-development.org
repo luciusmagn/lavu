@@ -502,9 +502,10 @@ Scheme value is valid.
 - Add typed and native =map= and =for-each= over equal-length proper
   lists, applying both closures and primitive procedures from Rust.
 ** Multiple Values
-- Add native =values= and =call-with-values= with conservative
-  =unknown?=/=any?= type metadata. Rich expression-result typing remains
-  a future type-system pass.
+- Add native =values= and =call-with-values= with conservative primitive
+  metadata.
+- Add fixed multiple-value expression types for direct =values= and common
+  =call-with-values= inference paths.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.

@@ -146,6 +146,17 @@ impl Inferencer {
                 if matches!(&operator.node, Expr::Variable(name) if name == "apply") {
                     return self.infer_apply_primitive(operands, operand_tys, expr.span.clone());
                 }
+                if matches!(&operator.node, Expr::Variable(name) if name == "values") {
+                    return Ok(Type::Values(
+                        operand_tys
+                            .into_iter()
+                            .map(|ty| self.resolve(ty))
+                            .collect::<Vec<_>>(),
+                    ));
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "call-with-values") {
+                    return self.infer_call_with_values(operands, operand_tys, expr.span.clone());
+                }
 
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
             }
@@ -359,6 +370,44 @@ impl Inferencer {
         }
     }
 
+    fn infer_call_with_values(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let [producer_ty, consumer_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span: span.clone(),
+                })?;
+
+        let produced = match self.resolve(producer_ty) {
+            Type::Procedure(ProcedureType::Fixed { params, result }) if params.is_empty() => {
+                *result
+            }
+            Type::Procedure(ProcedureType::Rest {
+                required,
+                rest: _,
+                result,
+            }) if required.is_empty() => *result,
+            _ => Type::Any,
+        };
+        let value_tys = match self.resolve(produced) {
+            Type::Values(values) => values,
+            value => vec![value],
+        };
+        let value_operands = value_tys
+            .iter()
+            .map(|_| operands[0].clone())
+            .collect::<Vec<_>>();
+
+        self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
     fn infer_apply_primitive(
         &mut self,
         operands: &[Spanned<Expr>],
@@ -515,6 +564,22 @@ impl Inferencer {
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
+            (Type::Values(actual), Type::Values(expected)) => {
+                if actual.len() != expected.len() {
+                    return Err(TypeError::ArityMismatch {
+                        expected: expected.len().to_string(),
+                        actual: actual.len(),
+                        span,
+                    });
+                }
+
+                actual
+                    .into_iter()
+                    .zip(expected)
+                    .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Type::Values)
+            }
             (Type::Pair(actual_car, actual_cdr), Type::Pair(expected_car, expected_cdr)) => {
                 let car = self.unify(*actual_car, *expected_car, span.clone())?;
                 let cdr = self.unify(*actual_cdr, *expected_cdr, span)?;
@@ -646,6 +711,12 @@ impl Inferencer {
             Type::Pair(car, cdr) => {
                 Type::Pair(Box::new(self.resolve(*car)), Box::new(self.resolve(*cdr)))
             }
+            Type::Values(types) => Type::Values(
+                types
+                    .into_iter()
+                    .map(|ty| self.resolve(ty))
+                    .collect::<Vec<_>>(),
+            ),
             Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
                 params
                     .into_iter()
@@ -702,6 +773,7 @@ fn contains_var(ty: &Type, name: &str) -> bool {
         Type::Var(var) => var == name,
         Type::Pair(car, cdr) => contains_var(car, name) || contains_var(cdr, name),
         Type::ListOf(element) => contains_var(element, name),
+        Type::Values(types) => types.iter().any(|ty| contains_var(ty, name)),
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(|ty| contains_var(ty, name)) || contains_var(result, name)
         }
@@ -1071,11 +1143,22 @@ mod tests {
     }
 
     #[test]
-    fn infers_multiple_values_conservatively() {
-        assert_eq!(infer_one("(values 1 2)"), "unknown?");
+    fn infers_fixed_multiple_values() {
+        assert_eq!(infer_one("(values 1 \"x\")"), "(values number? string?)");
         assert_eq!(
             infer_one("(call-with-values (lambda () (values 1 2)) +)"),
-            "any?"
+            "number?"
+        );
+        assert_eq!(
+            infer_one(
+                "(call-with-values (lambda () (values 1 \"xx\")) \
+                 (lambda (n s) (+ n (string-length s))))"
+            ),
+            "number?"
+        );
+        assert_eq!(
+            infer_one("(call-with-values (lambda () (values)) (lambda () 1))"),
+            "number?"
         );
     }
 

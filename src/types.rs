@@ -20,6 +20,7 @@ pub enum Type {
     InputPort,
     OutputPort,
     EofObject,
+    Values(Vec<Type>),
     Var(String),
     Union(Vec<Type>),
 }
@@ -98,6 +99,10 @@ impl fmt::Display for Type {
             Type::InputPort => write!(f, "input-port?"),
             Type::OutputPort => write!(f, "output-port?"),
             Type::EofObject => write!(f, "eof-object?"),
+            Type::Values(types) => {
+                write_joined(f, "(values", types)?;
+                write!(f, ")")
+            }
             Type::Var(name) => write!(f, "{name}"),
             Type::Union(types) => {
                 write_joined(f, "(U", types)?;
@@ -158,6 +163,15 @@ mod tests {
         assert_eq!(Type::InputPort.to_string(), "input-port?");
         assert_eq!(Type::OutputPort.to_string(), "output-port?");
         assert_eq!(Type::EofObject.to_string(), "eof-object?");
+    }
+
+    #[test]
+    fn displays_values() {
+        assert_eq!(
+            Type::Values(vec![Type::Number, Type::String]).to_string(),
+            "(values number? string?)"
+        );
+        assert_eq!(Type::Values(Vec::new()).to_string(), "(values)");
     }
 
     #[test]
