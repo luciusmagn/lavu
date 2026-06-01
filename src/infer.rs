@@ -227,7 +227,7 @@ impl Inferencer {
             Expr::Literal(atom) => Ok(type_of_atom(atom)),
             Expr::Variable(name) => self.infer_variable(name, expr.span.clone(), env),
             Expr::Quote(datum) => Ok(type_of_datum(datum)),
-            Expr::Quasiquote(_) => Ok(Type::Any),
+            Expr::Quasiquote(datum) => Ok(type_of_quasiquote_datum(datum)),
             Expr::Lambda { params, rest, body } => {
                 self.infer_lambda(params, rest.as_ref(), body, env)
             }
@@ -1585,6 +1585,26 @@ fn type_of_datum(datum: &Spanned<Datum>) -> Type {
     }
 }
 
+fn type_of_quasiquote_datum(datum: &Spanned<Datum>) -> Type {
+    if datum_contains_unquote(datum) {
+        Type::Any
+    } else {
+        type_of_datum(datum)
+    }
+}
+
+fn datum_contains_unquote(datum: &Spanned<Datum>) -> bool {
+    match &datum.node {
+        Datum::List(items) | Datum::Vector(items) => items.iter().any(datum_contains_unquote),
+        Datum::DottedList(items, tail) => {
+            items.iter().any(datum_contains_unquote) || datum_contains_unquote(tail)
+        }
+        Datum::Quote(inner) | Datum::Quasiquote(inner) => datum_contains_unquote(inner),
+        Datum::Unquote(_) | Datum::UnquoteSplicing(_) => true,
+        Datum::Atom(_) => false,
+    }
+}
+
 fn type_of_vector_datums(items: &[Spanned<Datum>]) -> Type {
     if items.is_empty() {
         return Type::Vector;
@@ -2064,7 +2084,10 @@ mod tests {
 
     #[test]
     fn infers_quasiquote_conservatively() {
+        assert_eq!(infer_one("`(1 2 3)"), "(listof number?)");
+        assert_eq!(infer_one("`#(1 \"x\")"), "(vectorof (U number? string?))");
         assert_eq!(infer_one("`(1 ,(+ 1 2))"), "any?");
+        assert_eq!(infer_one("`(,@xs)"), "any?");
     }
 
     #[test]
