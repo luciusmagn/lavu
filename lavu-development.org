@@ -19,9 +19,9 @@ occurrence typing.
   tiny pass.
 - Keep the tiny-pass learning style by making each parser, desugar, type,
   or normalization pass small and inspectable.
-- Gerbil is temporary. The final implementation should use Lavu's native
-  parser, normalizer, type inference engine, evaluator, and standard
-  library.
+- The Gerbil wrapper has been removed. Keep the implementation on Lavu's
+  native parser, normalizer, type inference engine, evaluator, and
+  standard library.
 - Preserve source spans and origin metadata through parser, macro
   expansion, rewrites, normalization, type inference, and evaluation.
 - Ariadne diagnostics and Reedline highlighting are core design
@@ -218,8 +218,8 @@ Scheme value is valid.
   =SurfaceExpr=, and =CoreExpr= instead of many numbered AST enums.
 - Record the need for shared traversal helpers to keep tiny passes tiny.
 - Record that quoted data should stay data, not classified expressions.
-- Record that Gerbil is temporary and Lavu should eventually run on its
-  native evaluator and Rust standard library.
+- Record that Gerbil was temporary and Lavu should run on its native
+  evaluator and Rust standard library.
 - Record the R5RS-only scope and future SRFI-9 opening.
 - Record the REPL type query syntax as =? expr...=.
 - Record the predicate-shaped displayed type syntax.

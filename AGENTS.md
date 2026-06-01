@@ -14,9 +14,8 @@
 
 - Lavu aims for R5RS Scheme: nothing more, nothing less.
 - Keep the door open for future SRFI-9 records.
-- Gerbil is temporary; the final implementation should use Lavu's native
-  parser, normalizer, type inference engine, evaluator, and Rust standard
-  library.
+- Gerbil has been removed; keep Lavu on its native parser, normalizer,
+  type inference engine, evaluator, and Rust standard library.
 - Preserve high-quality syntax highlighting, source spans, and Ariadne
   diagnostics throughout parser, rewrite, type inference, and evaluation work.
 - Future REPL work should support stepping through Scheme
