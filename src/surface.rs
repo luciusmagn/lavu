@@ -87,6 +87,13 @@ pub enum SurfaceError {
         span: SourceSpan,
     },
 
+    #[error("{context} reserves identifier {name}")]
+    ReservedIdentifier {
+        context: &'static str,
+        name: String,
+        span: SourceSpan,
+    },
+
     #[error("empty application")]
     EmptyApplication { span: SourceSpan },
 
@@ -855,6 +862,13 @@ fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>,
     let mut literals = BTreeSet::new();
     for item in items {
         let name = expect_identifier(item, "syntax-rules literal")?;
+        if name.node == "..." {
+            return Err(SurfaceError::ReservedIdentifier {
+                context: "syntax-rules literals",
+                name: name.node,
+                span: name.span,
+            });
+        }
         if !literals.insert(name.node.clone()) {
             return Err(SurfaceError::DuplicateIdentifier {
                 context: "syntax-rules literals",
@@ -3008,6 +3022,21 @@ mod tests {
         assert!(matches!(
             classify_program(&datums),
             Err(SurfaceError::DuplicateIdentifier { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_reserved_syntax_rule_literals() {
+        let datums = parse(
+            "(define-syntax m
+               (syntax-rules (...)
+                 ((m x) x)))",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            classify_program(&datums),
+            Err(SurfaceError::ReservedIdentifier { .. })
         ));
     }
 

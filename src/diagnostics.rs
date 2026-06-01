@@ -82,6 +82,7 @@ fn surface_span(error: &SurfaceError) -> SourceSpan {
         | SurfaceError::ExpectedIdentifier { span, .. }
         | SurfaceError::ExpectedList { span, .. }
         | SurfaceError::DuplicateIdentifier { span, .. }
+        | SurfaceError::ReservedIdentifier { span, .. }
         | SurfaceError::EmptyApplication { span }
         | SurfaceError::UnsupportedDatum { span }
         | SurfaceError::DefinitionContext { span, .. }

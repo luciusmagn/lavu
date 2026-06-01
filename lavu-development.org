@@ -307,6 +307,8 @@ Scheme value is valid.
   namespace so user identifiers cannot capture them.
 - Reject duplicate =syntax-rules= literals during macro definition parsing
   instead of silently collapsing them into a set.
+- Reject reserved =...= entries in =syntax-rules= literal lists before
+  expansion.
 - Match a =syntax-rules= rule head as the macro keyword itself, so a typo
   in the rule head cannot accidentally become a pattern variable.
 - Reject duplicate =syntax-rules= pattern variables at macro definition
