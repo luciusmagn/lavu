@@ -831,6 +831,10 @@ Scheme value is valid.
 - Reject invariant body errors such as =(+ x "hello")= during inference,
   including inside inferred definitions, and avoid committing recursive
   top-level placeholder bindings when inference fails.
+- Keep path-sensitive occurrence-typing conflicts in the same category:
+  a branch refined to =string?= cannot satisfy a later =number?=
+  arithmetic requirement, and this is a hard constraint conflict rather
+  than an =unknown?= result.
 - In the REPL, infer each top-level form before evaluation so an
   invariant type conflict cannot define a runtime binding.
 - Advance REPL macro state datum-by-datum so syntax definitions after a

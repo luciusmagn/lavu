@@ -2879,6 +2879,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_predicate_refined_branch_conflicts() {
+        assert_eq!(
+            infer_error("(lambda (x) (if (string? x) (+ x 1) 0))").to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
+        assert_eq!(
+            infer_error("(lambda (x) (if (not (number? x)) 0 (+ x \"hello\")))").to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
+    }
+
+    #[test]
     fn failed_recursive_definitions_do_not_update_type_env() {
         let mut env = TypeEnv::new();
 
