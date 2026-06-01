@@ -124,6 +124,26 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::Char], Type::Char),
         ),
         Primitive::new(
+            "current-output-port",
+            Type::procedure(vec![], Type::OutputPort),
+        ),
+        Primitive::new(
+            "write",
+            Type::rest_procedure(vec![Type::Any], Type::OutputPort, Type::Unknown),
+        ),
+        Primitive::new(
+            "display",
+            Type::rest_procedure(vec![Type::Any], Type::OutputPort, Type::Unknown),
+        ),
+        Primitive::new(
+            "newline",
+            Type::rest_procedure(vec![], Type::OutputPort, Type::Unknown),
+        ),
+        Primitive::new(
+            "write-char",
+            Type::rest_procedure(vec![Type::Char], Type::OutputPort, Type::Unknown),
+        ),
+        Primitive::new(
             "number->string",
             Type::rest_procedure(vec![Type::Number], Type::Number, Type::String),
         ),
@@ -805,6 +825,25 @@ mod tests {
         assert_eq!(
             primitive("string->number").unwrap().signature.to_string(),
             "(-> string? number? * (U boolean? number?))"
+        );
+    }
+
+    #[test]
+    fn exposes_output_primitives() {
+        assert_eq!(
+            primitive("current-output-port")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> output-port?)"
+        );
+        assert_eq!(
+            primitive("write").unwrap().signature.to_string(),
+            "(-> any? output-port? * unknown?)"
+        );
+        assert_eq!(
+            primitive("write-char").unwrap().signature.to_string(),
+            "(-> char? output-port? * unknown?)"
         );
     }
 }

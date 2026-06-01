@@ -405,6 +405,10 @@ Scheme value is valid.
 ** Resource Predicates
 - Bind conservative runtime predicates for port and EOF object metadata
   so typed names are available even before resource values exist.
+** Output Ports
+- Add a first stdout-backed output port, plus native =current-output-port=,
+  =write=, =display=, =newline=, and =write-char= with conservative
+  type metadata. File and input ports remain future R5RS work.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.

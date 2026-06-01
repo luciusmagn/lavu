@@ -1088,6 +1088,16 @@ mod tests {
     }
 
     #[test]
+    fn infers_output_primitives() {
+        assert_eq!(infer_one("(current-output-port)"), "output-port?");
+        assert_eq!(
+            infer_one("(output-port? (current-output-port))"),
+            "boolean?"
+        );
+        assert_eq!(infer_one("(write \"x\")"), "unknown?");
+    }
+
+    #[test]
     fn infers_string_primitives() {
         assert_eq!(infer_one("(string #\\a #\\b)"), "string?");
         assert_eq!(infer_one("(string-ref \"abc\" 1)"), "char?");

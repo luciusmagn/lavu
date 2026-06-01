@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use std::io::{self, Write};
 use std::rc::Rc;
 
 use bigdecimal::{BigDecimal, RoundingMode};
@@ -27,6 +28,7 @@ pub enum Value {
     List(Vec<Value>),
     Pair(Rc<RefCell<PairValue>>),
     Vector(Rc<RefCell<Vec<Value>>>),
+    OutputPort(OutputPort),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
@@ -53,6 +55,7 @@ impl PartialEq for Value {
                 left.car == right.car && left.cdr == right.cdr
             }
             (Value::Vector(left), Value::Vector(right)) => *left.borrow() == *right.borrow(),
+            (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
@@ -62,6 +65,13 @@ impl PartialEq for Value {
             _ => false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputPort {
+    Stdout,
+    #[cfg(test)]
+    Buffer(Rc<RefCell<String>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +138,9 @@ pub enum EvalError {
         expected: &'static str,
         span: SourceSpan,
     },
+
+    #[error("I/O error: {message}")]
+    IoError { message: String, span: SourceSpan },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -275,6 +288,11 @@ impl Env {
             "port?",
             "input-port?",
             "output-port?",
+            "current-output-port",
+            "write",
+            "display",
+            "newline",
+            "write-char",
             "eof-object?",
             "not",
             "eqv?",
@@ -668,9 +686,15 @@ fn apply_primitive(
         "procedure?" => predicate(args, span, |value| {
             matches!(value, Value::Procedure(_) | Value::Primitive(_))
         }),
-        "port?" | "input-port?" | "output-port?" | "eof-object?" => {
-            predicate(args, span, |_| false)
-        }
+        "port?" => predicate(args, span, |value| matches!(value, Value::OutputPort(_))),
+        "input-port?" => predicate(args, span, |_| false),
+        "output-port?" => predicate(args, span, |value| matches!(value, Value::OutputPort(_))),
+        "current-output-port" => current_output_port(args, span),
+        "write" => output_value(args, span, OutputMode::Write),
+        "display" => output_value(args, span, OutputMode::Display),
+        "newline" => newline(args, span),
+        "write-char" => write_char(args, span),
+        "eof-object?" => predicate(args, span, |_| false),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
         "eq?" => eq(args, span),
@@ -2145,6 +2169,132 @@ fn call_with_values(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     apply(consumer, consumer_args, span)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum OutputMode {
+    Write,
+    Display,
+}
+
+fn current_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if !args.is_empty() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    Ok(Value::OutputPort(OutputPort::Stdout))
+}
+
+fn output_value(args: Vec<Value>, span: SourceSpan, mode: OutputMode) -> Result<Value, EvalError> {
+    let (value, port) = value_and_optional_output_port(args, span.clone())?;
+    let text = match mode {
+        OutputMode::Write => value.to_string(),
+        OutputMode::Display => display_text(&value),
+    };
+    write_output(&text, &port, span)
+}
+
+fn newline(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let port = optional_output_port(args, span.clone())?;
+    write_output("\n", &port, span)
+}
+
+fn write_char(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let (value, port) = value_and_optional_output_port(args, span.clone())?;
+    match value {
+        Value::Character(ch) => write_output(&ch.to_string(), &port, span),
+        _ => Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        }),
+    }
+}
+
+fn value_and_optional_output_port(
+    args: Vec<Value>,
+    span: SourceSpan,
+) -> Result<(Value, OutputPort), EvalError> {
+    let actual = args.len();
+    let mut args = args.into_iter();
+    let value = args.next().ok_or(EvalError::ArityMismatch {
+        expected: 1,
+        actual,
+        span: span.clone(),
+    })?;
+    let port = match args.next() {
+        Some(port) => output_port(port, span.clone())?,
+        None => OutputPort::Stdout,
+    };
+    if args.next().is_some() {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual,
+            span,
+        });
+    }
+
+    Ok((value, port))
+}
+
+fn optional_output_port(args: Vec<Value>, span: SourceSpan) -> Result<OutputPort, EvalError> {
+    let actual = args.len();
+    let mut args = args.into_iter();
+    let port = match args.next() {
+        Some(port) => output_port(port, span.clone())?,
+        None => OutputPort::Stdout,
+    };
+    if args.next().is_some() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual,
+            span,
+        });
+    }
+
+    Ok(port)
+}
+
+fn output_port(value: Value, span: SourceSpan) -> Result<OutputPort, EvalError> {
+    match value {
+        Value::OutputPort(port) => Ok(port),
+        _ => Err(EvalError::TypeError {
+            expected: "output-port?",
+            span,
+        }),
+    }
+}
+
+fn display_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.borrow().clone(),
+        Value::Character(ch) => ch.to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn write_output(text: &str, port: &OutputPort, span: SourceSpan) -> Result<Value, EvalError> {
+    match port {
+        OutputPort::Stdout => {
+            let mut stdout = io::stdout().lock();
+            stdout
+                .write_all(text.as_bytes())
+                .and_then(|_| stdout.flush())
+                .map_err(|error| EvalError::IoError {
+                    message: error.to_string(),
+                    span,
+                })?;
+            Ok(Value::Unspecified)
+        }
+        #[cfg(test)]
+        OutputPort::Buffer(output) => {
+            output.borrow_mut().push_str(text);
+            Ok(Value::Unspecified)
+        }
+    }
+}
+
 fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if args.len() < 2 {
         return Err(EvalError::ArityMismatch {
@@ -2336,6 +2486,7 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Character(left), Value::Character(right)) => left == right,
         (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
+        (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
     }
@@ -3008,6 +3159,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
+            Value::OutputPort(_) => write!(f, "#<output-port>"),
             Value::Promise(_) => write!(f, "#<promise>"),
             Value::Values(values) => {
                 write!(f, "(values")?;
@@ -3025,6 +3177,8 @@ impl fmt::Display for Value {
 
 #[cfg(test)]
 mod tests {
+    use super::{OutputMode, OutputPort, Value, newline, output_value, string_value, write_char};
+
     use crate::datum_parser::parse;
     use crate::runtime::{Env, eval_program};
     use crate::surface::classify_program;
@@ -3318,6 +3472,36 @@ mod tests {
         assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
         assert_eq!(eval_one("(string->number \"12\" 2)"), "#f");
         assert_eq!(eval_one("(string->number \"wat\")"), "#f");
+    }
+
+    #[test]
+    fn evaluates_output_primitives() {
+        assert_eq!(eval_one("(output-port? (current-output-port))"), "#t");
+        assert_eq!(eval_one("(port? (current-output-port))"), "#t");
+        assert_eq!(eval_one("(current-output-port)"), "#<output-port>");
+    }
+
+    #[test]
+    fn writes_to_output_ports() {
+        let output = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let port = Value::OutputPort(OutputPort::Buffer(output.clone()));
+
+        output_value(
+            vec![string_value("x"), port.clone()],
+            0..0,
+            OutputMode::Write,
+        )
+        .unwrap();
+        newline(vec![port.clone()], 0..0).unwrap();
+        output_value(
+            vec![string_value("y"), port.clone()],
+            0..0,
+            OutputMode::Display,
+        )
+        .unwrap();
+        write_char(vec![Value::Character('z'), port], 0..0).unwrap();
+
+        assert_eq!(*output.borrow(), "\"x\"\nyz");
     }
 
     #[test]

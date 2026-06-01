@@ -100,6 +100,7 @@ fn eval_span(error: &EvalError) -> SourceSpan {
         | EvalError::UninitializedVariable { span, .. }
         | EvalError::NotProcedure { span }
         | EvalError::ArityMismatch { span, .. }
-        | EvalError::TypeError { span, .. } => span.clone(),
+        | EvalError::TypeError { span, .. }
+        | EvalError::IoError { span, .. } => span.clone(),
     }
 }
