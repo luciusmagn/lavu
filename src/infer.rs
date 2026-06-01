@@ -2579,6 +2579,14 @@ fn predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<Bran
         });
     }
 
+    if let Some(refinement) = truthy_predicate_refinement(condition, env) {
+        return Some(BranchRefinement {
+            branch: RefinedBranch::Then,
+            name: refinement.0,
+            positive: refinement.1,
+        });
+    }
+
     let Expr::Apply { operator, operands } = &condition.node else {
         return None;
     };
@@ -2594,6 +2602,31 @@ fn predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<Bran
         name,
         positive,
     })
+}
+
+fn truthy_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<(String, Type)> {
+    if let Some(refinement) = direct_predicate_refinement(condition, env) {
+        return Some(refinement);
+    }
+
+    let Expr::If {
+        condition,
+        consequent,
+        alternate: Some(alternate),
+    } = &condition.node
+    else {
+        return None;
+    };
+    if !is_false_literal(alternate) {
+        return None;
+    }
+
+    truthy_predicate_refinement(condition, env)
+        .or_else(|| truthy_predicate_refinement(consequent, env))
+}
+
+fn is_false_literal(expr: &Spanned<Expr>) -> bool {
+    matches!(expr.node, Expr::Literal(Atom::Boolean(false)))
 }
 
 fn direct_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<(String, Type)> {
@@ -2910,6 +2943,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) #f))"),
             "(-> x (U boolean? number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x flag) (if (and (string? x) flag) (string-length x) 0))"),
+            "(-> x flag number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x flag) (if (and flag (string? x)) (string-length x) 0))"),
+            "(-> x flag number?)"
         );
         assert_eq!(
             infer_one("(lambda (x) (and (string? x) (string-length x)))"),

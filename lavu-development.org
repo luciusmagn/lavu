@@ -391,6 +391,8 @@ Scheme value is valid.
   other.
 - Treat =(not (predicate? x))= as a positive refinement for the alternate
   branch.
+- Preserve predicate refinements when =and= is used as an =if=
+  condition, matching the desugared nested conditional shape.
 - Infer simple =apply= calls for uniform variadic and rest procedures
   when the final argument has a known list element type.
 - Cover =set!= assignment inference so reassignment is checked against
