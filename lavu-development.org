@@ -261,6 +261,12 @@ Scheme value is valid.
 - Lower leading internal =define= forms in body contexts to =letrec= so
   lambda, let, let*, and letrec bodies can use R5RS-style local
   definitions without adding another AST variant.
+** Occurrence Typing
+- Infer both =if= branches in isolated inference states and merge their
+  substitutions, so constraints from one branch do not leak into the
+  other.
+- Treat =(not (predicate? x))= as a positive refinement for the alternate
+  branch.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.

@@ -218,38 +218,38 @@ impl Inferencer {
         alternate: Option<&Spanned<Expr>>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let predicate = predicate_refinement(condition);
+        let refinement = predicate_refinement(condition);
         self.infer_expr(condition, env)?;
-
-        let Some((refined_name, refined_type)) = predicate else {
-            let consequent_ty = self.infer_expr(consequent, env)?;
-            let alternate_ty = match alternate {
-                Some(expr) => self.infer_expr(expr, env)?,
-                None => Type::Unknown,
-            };
-            return Ok(Type::union(vec![
-                self.resolve(consequent_ty),
-                self.resolve(alternate_ty),
-            ]));
-        };
 
         let base = self.clone();
 
         let mut then_env = env.clone();
-        then_env.define(refined_name.clone(), refined_type.clone());
+        if let Some(refinement) = refinement
+            .as_ref()
+            .filter(|r| r.branch == RefinedBranch::Then)
+        {
+            then_env.define(refinement.name.clone(), refinement.positive.clone());
+        }
         let mut then_inferencer = base.clone();
         let consequent_ty = then_inferencer.infer_expr(consequent, &then_env)?;
 
+        let mut else_env = env.clone();
+        if let Some(refinement) = refinement
+            .as_ref()
+            .filter(|r| r.branch == RefinedBranch::Else)
+        {
+            else_env.define(refinement.name.clone(), refinement.positive.clone());
+        }
         let mut else_inferencer = base;
         let alternate_ty = match alternate {
-            Some(expr) => else_inferencer.infer_expr(expr, env)?,
+            Some(expr) => else_inferencer.infer_expr(expr, &else_env)?,
             None => Type::Unknown,
         };
 
         self.merge_branch_substitutions(
-            &refined_name,
-            refined_type,
+            refinement.as_ref(),
             consequent,
+            alternate,
             &then_inferencer,
             &else_inferencer,
         );
@@ -262,14 +262,16 @@ impl Inferencer {
 
     fn merge_branch_substitutions(
         &mut self,
-        refined_name: &str,
-        refined_type: Type,
+        refinement: Option<&BranchRefinement>,
         consequent: &Spanned<Expr>,
+        alternate: Option<&Spanned<Expr>>,
         then_inferencer: &Inferencer,
         else_inferencer: &Inferencer,
     ) {
         let mut names = BTreeSet::new();
-        names.insert(refined_name.to_string());
+        if let Some(refinement) = refinement {
+            names.insert(refinement.name.clone());
+        }
         names.extend(then_inferencer.substitutions.keys().cloned());
         names.extend(else_inferencer.substitutions.keys().cloned());
 
@@ -280,14 +282,27 @@ impl Inferencer {
                 .cloned()
                 .map(|ty| then_inferencer.resolve(ty))
                 .or_else(|| {
-                    (name == refined_name && expr_mentions_variable(consequent, refined_name))
-                        .then(|| refined_type.clone())
+                    refinement.and_then(|refinement| {
+                        (refinement.branch == RefinedBranch::Then
+                            && name == refinement.name.as_str()
+                            && expr_mentions_variable(consequent, &refinement.name))
+                        .then(|| refinement.positive.clone())
+                    })
                 });
             let else_ty = else_inferencer
                 .substitutions
                 .get(&name)
                 .cloned()
-                .map(|ty| else_inferencer.resolve(ty));
+                .map(|ty| else_inferencer.resolve(ty))
+                .or_else(|| {
+                    refinement.and_then(|refinement| {
+                        (refinement.branch == RefinedBranch::Else
+                            && name == refinement.name.as_str()
+                            && alternate
+                                .is_some_and(|expr| expr_mentions_variable(expr, &refinement.name)))
+                        .then(|| refinement.positive.clone())
+                    })
+                });
 
             let merged = match (then_ty, else_ty) {
                 (Some(then_ty), Some(else_ty)) => Type::union(vec![then_ty, else_ty]),
@@ -676,7 +691,46 @@ fn span_for_operands(operands: &[Spanned<Expr>]) -> SourceSpan {
     }
 }
 
-fn predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefinedBranch {
+    Then,
+    Else,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BranchRefinement {
+    branch: RefinedBranch,
+    name: String,
+    positive: Type,
+}
+
+fn predicate_refinement(condition: &Spanned<Expr>) -> Option<BranchRefinement> {
+    if let Some(refinement) = direct_predicate_refinement(condition) {
+        return Some(BranchRefinement {
+            branch: RefinedBranch::Then,
+            name: refinement.0,
+            positive: refinement.1,
+        });
+    }
+
+    let Expr::Apply { operator, operands } = &condition.node else {
+        return None;
+    };
+    let Expr::Variable(operator_name) = &operator.node else {
+        return None;
+    };
+    if operator_name != "not" || operands.len() != 1 {
+        return None;
+    }
+
+    direct_predicate_refinement(&operands[0]).map(|(name, positive)| BranchRefinement {
+        branch: RefinedBranch::Else,
+        name,
+        positive,
+    })
+}
+
+fn direct_predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
     let Expr::Apply { operator, operands } = &condition.node else {
         return None;
     };
@@ -810,6 +864,22 @@ mod tests {
     fn infers_union_parameters_from_predicate_branches() {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) (+ x 1)))"),
+            "(-> (U number? string?) number?)"
+        );
+    }
+
+    #[test]
+    fn isolates_if_branch_constraints_without_predicates() {
+        assert_eq!(
+            infer_one("(lambda (x flag) (if flag (+ x 1) (string-length x)))"),
+            "(-> (U number? string?) flag number?)"
+        );
+    }
+
+    #[test]
+    fn refines_not_predicates_in_alternate_branch() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (not (string? x)) (+ x 1) (string-length x)))"),
             "(-> (U number? string?) number?)"
         );
     }
