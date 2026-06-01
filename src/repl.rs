@@ -11,7 +11,8 @@ use std::borrow::Cow;
 use std::env;
 
 use crate::lexer::{
-    Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate, is_special_form,
+    LexerError, Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate,
+    is_special_form,
 };
 
 pub fn history() -> Result<Box<dyn History>> {
@@ -104,18 +105,32 @@ pub fn validator() -> Result<Box<dyn Validator>> {
 
     impl Validator for SchemeValidator {
         fn validate(&self, line: &str) -> ValidationResult {
-            let lparens = line.chars().filter(|c| *c == '(').count() as i64;
-            let rparens = line.chars().filter(|c| *c == ')').count() as i64;
-
-            if lparens - rparens != 0 {
-                ValidationResult::Incomplete
-            } else {
+            if input_is_complete(line) {
                 ValidationResult::Complete
+            } else {
+                ValidationResult::Incomplete
             }
         }
     }
 
     Ok(Box::new(SchemeValidator))
+}
+
+fn input_is_complete(line: &str) -> bool {
+    let mut parens = 0_i64;
+    let mut brackets = 0_i64;
+    for token in Token::lexer(line) {
+        match token {
+            Ok(Token::LParen) => parens += 1,
+            Ok(Token::RParen) => parens -= 1,
+            Ok(Token::LBracket) => brackets += 1,
+            Ok(Token::RBracket) => brackets -= 1,
+            Err(LexerError::UnclosedBlockComment) => return false,
+            Ok(_) | Err(_) => {}
+        }
+    }
+
+    parens <= 0 && brackets <= 0
 }
 
 pub fn prompt() -> Result<Box<dyn Prompt>> {
@@ -186,4 +201,28 @@ pub fn line_editor() -> Result<(Reedline, Box<dyn Prompt>)> {
     let prompt = prompt()?;
 
     Ok((line_editor, prompt))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::input_is_complete;
+
+    #[test]
+    fn validation_tracks_token_delimiters() {
+        assert!(input_is_complete("(+ 1 2)"));
+        assert!(!input_is_complete("(+ 1 2"));
+        assert!(!input_is_complete("[+ 1 2"));
+    }
+
+    #[test]
+    fn validation_ignores_delimiters_in_non_code_tokens() {
+        assert!(input_is_complete("\"(\""));
+        assert!(input_is_complete("; ("));
+        assert!(input_is_complete("#| ( |#"));
+    }
+
+    #[test]
+    fn validation_waits_for_unclosed_block_comments() {
+        assert!(!input_is_complete("#| ("));
+    }
 }
