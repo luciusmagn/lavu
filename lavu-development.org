@@ -358,3 +358,6 @@ Scheme value is valid.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.
+** Complete Text Comparisons
+- Add typed and native =char<=?=, =char>=?=, character case-insensitive
+  comparisons, and the matching string comparison family.

@@ -233,9 +233,23 @@ impl Env {
             "char=?",
             "char<?",
             "char>?",
+            "char<=?",
+            "char>=?",
+            "char-ci=?",
+            "char-ci<?",
+            "char-ci>?",
+            "char-ci<=?",
+            "char-ci>=?",
             "string=?",
             "string<?",
             "string>?",
+            "string<=?",
+            "string>=?",
+            "string-ci=?",
+            "string-ci<?",
+            "string-ci>?",
+            "string-ci<=?",
+            "string-ci>=?",
         ] {
             self.define(name, Value::Primitive(name));
         }
@@ -539,9 +553,23 @@ fn apply_primitive(
         "char=?" => char_eq(args, span),
         "char<?" => char_compare(args, span, |left, right| left < right),
         "char>?" => char_compare(args, span, |left, right| left > right),
+        "char<=?" => char_compare(args, span, |left, right| left <= right),
+        "char>=?" => char_compare(args, span, |left, right| left >= right),
+        "char-ci=?" => char_ci_compare(args, span, |left, right| left == right),
+        "char-ci<?" => char_ci_compare(args, span, |left, right| left < right),
+        "char-ci>?" => char_ci_compare(args, span, |left, right| left > right),
+        "char-ci<=?" => char_ci_compare(args, span, |left, right| left <= right),
+        "char-ci>=?" => char_ci_compare(args, span, |left, right| left >= right),
         "string=?" => string_compare(args, span, |left, right| left == right),
         "string<?" => string_compare(args, span, |left, right| left < right),
         "string>?" => string_compare(args, span, |left, right| left > right),
+        "string<=?" => string_compare(args, span, |left, right| left <= right),
+        "string>=?" => string_compare(args, span, |left, right| left >= right),
+        "string-ci=?" => string_ci_compare(args, span, |left, right| left == right),
+        "string-ci<?" => string_ci_compare(args, span, |left, right| left < right),
+        "string-ci>?" => string_ci_compare(args, span, |left, right| left > right),
+        "string-ci<=?" => string_ci_compare(args, span, |left, right| left <= right),
+        "string-ci>=?" => string_ci_compare(args, span, |left, right| left >= right),
         _ => Err(EvalError::UnboundVariable {
             name: name.to_string(),
             span,
@@ -851,6 +879,37 @@ fn char_compare(
     ))
 }
 
+fn char_ci_compare(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl Fn(&str, &str) -> bool,
+) -> Result<Value, EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let chars = args
+        .into_iter()
+        .map(|value| match value {
+            Value::Character(c) => Ok(c.to_lowercase().to_string()),
+            _ => Err(EvalError::TypeError {
+                expected: "char?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Value::Boolean(
+        chars
+            .windows(2)
+            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
+    ))
+}
+
 fn string_compare(
     args: Vec<Value>,
     span: SourceSpan,
@@ -868,6 +927,37 @@ fn string_compare(
         .into_iter()
         .map(|value| match value {
             Value::String(text) => Ok(text),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Value::Boolean(
+        strings
+            .windows(2)
+            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
+    ))
+}
+
+fn string_ci_compare(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl Fn(&str, &str) -> bool,
+) -> Result<Value, EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let strings = args
+        .into_iter()
+        .map(|value| match value {
+            Value::String(text) => Ok(text.to_lowercase()),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span: span.clone(),
@@ -1714,6 +1804,10 @@ mod tests {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
         assert_eq!(eval_one("(char<? #\\a #\\b)"), "#t");
+        assert_eq!(eval_one("(char<=? #\\a #\\a #\\b)"), "#t");
+        assert_eq!(eval_one("(char>=? #\\b #\\a #\\a)"), "#t");
+        assert_eq!(eval_one("(char-ci=? #\\A #\\a)"), "#t");
+        assert_eq!(eval_one("(char-ci<? #\\a #\\B)"), "#t");
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
     }
 
@@ -1731,6 +1825,10 @@ mod tests {
         assert_eq!(eval_one("(string=? \"a\" \"a\")"), "#t");
         assert_eq!(eval_one("(string<? \"a\" \"b\")"), "#t");
         assert_eq!(eval_one("(string>? \"b\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string<=? \"a\" \"a\" \"b\")"), "#t");
+        assert_eq!(eval_one("(string>=? \"b\" \"a\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string-ci=? \"A\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string-ci<? \"a\" \"B\")"), "#t");
     }
 
     #[test]
