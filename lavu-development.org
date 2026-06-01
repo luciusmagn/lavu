@@ -314,3 +314,7 @@ Scheme value is valid.
 ** Quoted Datum Types
 - Infer structural types for quoted data, including proper lists,
   dotted pairs, heterogeneous list element unions, and =null?=.
+** Predicate Refinement Merge
+- Keep predicate refinements branch-local unless the refined branch
+  actually mentions the variable, avoiding over-constrained parameters
+  for guarded constant branches.

@@ -232,6 +232,7 @@ impl Inferencer {
         self.merge_branch_substitutions(
             &refined_name,
             refined_type,
+            consequent,
             &then_inferencer,
             &else_inferencer,
         );
@@ -246,6 +247,7 @@ impl Inferencer {
         &mut self,
         refined_name: &str,
         refined_type: Type,
+        consequent: &Spanned<Expr>,
         then_inferencer: &Inferencer,
         else_inferencer: &Inferencer,
     ) {
@@ -255,15 +257,15 @@ impl Inferencer {
         names.extend(else_inferencer.substitutions.keys().cloned());
 
         for name in names {
-            let then_ty = if name == refined_name {
-                Some(refined_type.clone())
-            } else {
-                then_inferencer
-                    .substitutions
-                    .get(&name)
-                    .cloned()
-                    .map(|ty| then_inferencer.resolve(ty))
-            };
+            let then_ty = then_inferencer
+                .substitutions
+                .get(&name)
+                .cloned()
+                .map(|ty| then_inferencer.resolve(ty))
+                .or_else(|| {
+                    (name == refined_name && expr_mentions_variable(consequent, refined_name))
+                        .then(|| refined_type.clone())
+                });
             let else_ty = else_inferencer
                 .substitutions
                 .get(&name)
@@ -678,6 +680,50 @@ fn predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
     })
 }
 
+fn expr_mentions_variable(expr: &Spanned<Expr>, name: &str) -> bool {
+    match &expr.node {
+        Expr::Variable(variable) => variable == name,
+        Expr::Lambda { params, body } => {
+            !params.iter().any(|param| param.node == name)
+                && body.iter().any(|expr| expr_mentions_variable(expr, name))
+        }
+        Expr::If {
+            condition,
+            consequent,
+            alternate,
+        } => {
+            expr_mentions_variable(condition, name)
+                || expr_mentions_variable(consequent, name)
+                || alternate
+                    .as_deref()
+                    .is_some_and(|expr| expr_mentions_variable(expr, name))
+        }
+        Expr::Begin(exprs) => exprs.iter().any(|expr| expr_mentions_variable(expr, name)),
+        Expr::Set {
+            name: set_name,
+            value,
+        } => set_name.node == name || expr_mentions_variable(value, name),
+        Expr::Delay(expr) => expr_mentions_variable(expr, name),
+        Expr::LetRec { bindings, body } => {
+            let shadows = bindings
+                .iter()
+                .any(|(binding_name, _)| binding_name.node == name);
+            !shadows
+                && (bindings
+                    .iter()
+                    .any(|(_, value)| expr_mentions_variable(value, name))
+                    || body.iter().any(|expr| expr_mentions_variable(expr, name)))
+        }
+        Expr::Apply { operator, operands } => {
+            expr_mentions_variable(operator, name)
+                || operands
+                    .iter()
+                    .any(|operand| expr_mentions_variable(operand, name))
+        }
+        Expr::Literal(_) | Expr::Quote(_) | Expr::Quasiquote(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
@@ -718,6 +764,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) (+ x 1)))"),
             "(-> (U number? string?) number?)"
+        );
+    }
+
+    #[test]
+    fn does_not_export_unused_predicate_refinements() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (number? x) 1 0))"),
+            "(-> x number?)"
         );
     }
 
