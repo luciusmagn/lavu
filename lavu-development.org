@@ -461,6 +461,9 @@ Scheme value is valid.
 - Preserve predicate-accepted inputs when the opposite branch constrains
   the same variable, so forms like =(if (string? x) #t (+ x 1))= infer
   both accepted parameter cases.
+- Recognize the generated single-evaluation =or= shape during inference
+  so predicate-first =or= forms can still contribute occurrence-typing
+  information without changing runtime lowering.
 ** Native Diagnostics
 - Route native parser, surface, type, and evaluator errors through
   Ariadne reports in the REPL so the new implementation keeps highlighted

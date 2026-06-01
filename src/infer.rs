@@ -252,6 +252,10 @@ impl Inferencer {
             Expr::Delay(_) => Ok(Type::Any),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
+                if let Some((condition, alternate)) = desugared_or_operands(operator, operands) {
+                    return self.infer_desugared_or(condition, alternate, env);
+                }
+
                 let operator_ty = self.infer_expr(operator, env)?;
                 let operand_tys = operands
                     .iter()
@@ -270,6 +274,20 @@ impl Inferencer {
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
             }
         }
+    }
+
+    fn infer_desugared_or(
+        &mut self,
+        condition: &Spanned<Expr>,
+        alternate: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let truth = Spanned {
+            node: Expr::Literal(Atom::Boolean(true)),
+            span: condition.span.clone(),
+            origin: condition.origin,
+        };
+        self.infer_if(condition, &truth, Some(alternate), env)
     }
 
     fn infer_primitive_application(
@@ -1653,6 +1671,49 @@ fn direct_predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Typ
     })
 }
 
+fn desugared_or_operands<'a>(
+    operator: &'a Spanned<Expr>,
+    operands: &'a [Spanned<Expr>],
+) -> Option<(&'a Spanned<Expr>, &'a Spanned<Expr>)> {
+    let [condition] = operands else {
+        return None;
+    };
+    direct_predicate_refinement(condition)?;
+
+    let Expr::Lambda { params, rest, body } = &operator.node else {
+        return None;
+    };
+    let [param] = params.as_slice() else {
+        return None;
+    };
+    if rest.is_some() || body.len() != 1 || !param.node.starts_with("__lavu_or_value") {
+        return None;
+    }
+
+    let Expr::If {
+        condition: if_condition,
+        consequent,
+        alternate: Some(alternate),
+    } = &body[0].node
+    else {
+        return None;
+    };
+    if variable_name(if_condition).map(String::as_str) != Some(param.node.as_str())
+        || variable_name(consequent).map(String::as_str) != Some(param.node.as_str())
+    {
+        return None;
+    }
+
+    Some((condition, alternate))
+}
+
+fn variable_name(expr: &Spanned<Expr>) -> Option<&String> {
+    match &expr.node {
+        Expr::Variable(name) => Some(name),
+        _ => None,
+    }
+}
+
 fn expr_mentions_variable(expr: &Spanned<Expr>, name: &str) -> bool {
     match &expr.node {
         Expr::Variable(variable) => variable == name,
@@ -1909,6 +1970,18 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
             "(-> (U number? string?) (U boolean? number?))"
+        );
+    }
+
+    #[test]
+    fn propagates_predicate_refinements_through_or() {
+        assert_eq!(
+            infer_one("(lambda (x) (or (string? x) (+ x 1)))"),
+            "(-> (U number? string?) (U boolean? number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (or (string? x) #f))"),
+            "(-> x boolean?)"
         );
     }
 
