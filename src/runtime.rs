@@ -199,6 +199,11 @@ impl Env {
             "append",
             "string-length",
             "char=?",
+            "char<?",
+            "char>?",
+            "string=?",
+            "string<?",
+            "string>?",
         ] {
             self.define(name, Value::Primitive(name));
         }
@@ -414,6 +419,11 @@ fn apply_primitive(
             }),
         }),
         "char=?" => char_eq(args, span),
+        "char<?" => char_compare(args, span, |left, right| left < right),
+        "char>?" => char_compare(args, span, |left, right| left > right),
+        "string=?" => string_compare(args, span, |left, right| left == right),
+        "string<?" => string_compare(args, span, |left, right| left < right),
+        "string>?" => string_compare(args, span, |left, right| left > right),
         _ => Err(EvalError::UnboundVariable {
             name: name.to_string(),
             span,
@@ -691,6 +701,14 @@ fn complex_one() -> Complex<BigDecimal> {
 }
 
 fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    char_compare(args, span, |left, right| left == right)
+}
+
+fn char_compare(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl Fn(char, char) -> bool,
+) -> Result<Value, EvalError> {
     if args.len() < 2 {
         return Err(EvalError::ArityMismatch {
             expected: 2,
@@ -711,7 +729,38 @@ fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Value::Boolean(
-        chars.windows(2).all(|pair| pair[0] == pair[1]),
+        chars.windows(2).all(|pair| pred(pair[0], pair[1])),
+    ))
+}
+
+fn string_compare(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl Fn(&str, &str) -> bool,
+) -> Result<Value, EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let strings = args
+        .into_iter()
+        .map(|value| match value {
+            Value::String(text) => Ok(text),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Value::Boolean(
+        strings
+            .windows(2)
+            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
     ))
 }
 
@@ -1128,7 +1177,15 @@ mod tests {
     fn evaluates_list_reverse_and_char_comparison() {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
+        assert_eq!(eval_one("(char<? #\\a #\\b)"), "#t");
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
+    }
+
+    #[test]
+    fn evaluates_string_comparisons() {
+        assert_eq!(eval_one("(string=? \"a\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string<? \"a\" \"b\")"), "#t");
+        assert_eq!(eval_one("(string>? \"b\" \"a\")"), "#t");
     }
 
     #[test]
