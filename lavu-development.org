@@ -551,6 +551,9 @@ Scheme value is valid.
   primitives with matching typed metadata.
 - Add =vectorof= element flow for vector construction, access,
   conversion, mutation, fill metadata, and quoted vector data.
+- Infer visible heterogeneous =list= and =vector= constructors as unions,
+  and infer no-fill =make-vector= elements as =any?= instead of leaking
+  unconstrained type variables.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

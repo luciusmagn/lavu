@@ -123,6 +123,9 @@ enum PrimitiveApplication {
     CallCc,
     Map,
     ForEach,
+    List,
+    MakeVector,
+    Vector,
     ListRef,
     ListTail,
     Car,
@@ -146,6 +149,9 @@ impl PrimitiveApplication {
             "call/cc" | "call-with-current-continuation" => Some(Self::CallCc),
             "map" => Some(Self::Map),
             "for-each" => Some(Self::ForEach),
+            "list" => Some(Self::List),
+            "make-vector" => Some(Self::MakeVector),
+            "vector" => Some(Self::Vector),
             "list-ref" => Some(Self::ListRef),
             "list-tail" => Some(Self::ListTail),
             "car" => Some(Self::Car),
@@ -323,6 +329,9 @@ impl Inferencer {
                 span,
                 HigherOrderListResult::Unspecified,
             ),
+            PrimitiveApplication::List => Ok(self.infer_list_constructor(operand_tys)),
+            PrimitiveApplication::MakeVector => self.infer_make_vector(operands, operand_tys, span),
+            PrimitiveApplication::Vector => Ok(self.infer_vector_constructor(operand_tys)),
             PrimitiveApplication::ListRef => {
                 self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Element)
             }
@@ -755,6 +764,52 @@ impl Inferencer {
         } else {
             Type::union(vec![direct, escape])
         })
+    }
+
+    fn infer_list_constructor(&self, operand_tys: Vec<Type>) -> Type {
+        match operand_tys.as_slice() {
+            [] => Type::Null,
+            _ => Type::ListOf(Box::new(self.union_resolved(operand_tys))),
+        }
+    }
+
+    fn infer_make_vector(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        match operand_tys.as_slice() {
+            [length] => {
+                self.unify(length.clone(), Type::Number, operands[0].span.clone())?;
+                Ok(Type::VectorOf(Box::new(Type::Any)))
+            }
+            [length, fill] => {
+                self.unify(length.clone(), Type::Number, operands[0].span.clone())?;
+                Ok(Type::VectorOf(Box::new(self.resolve(fill.clone()))))
+            }
+            _ => Err(TypeError::ArityMismatch {
+                expected: "1 to 2".to_string(),
+                actual: operand_tys.len(),
+                span,
+            }),
+        }
+    }
+
+    fn infer_vector_constructor(&self, operand_tys: Vec<Type>) -> Type {
+        match operand_tys.as_slice() {
+            [] => Type::Vector,
+            _ => Type::VectorOf(Box::new(self.union_resolved(operand_tys))),
+        }
+    }
+
+    fn union_resolved(&self, types: Vec<Type>) -> Type {
+        Type::union(
+            types
+                .into_iter()
+                .map(|ty| self.resolve(ty))
+                .collect::<Vec<_>>(),
+        )
     }
 
     fn infer_higher_order_list(
@@ -2207,9 +2262,20 @@ mod tests {
 
     #[test]
     fn infers_vector_primitive_types() {
+        assert_eq!(infer_one("(vector)"), "vector?");
         assert_eq!(infer_one("(vector 1 2 3)"), "(vectorof number?)");
+        assert_eq!(
+            infer_one("(vector 1 \"x\")"),
+            "(vectorof (U number? string?))"
+        );
         assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "number?");
+        assert_eq!(
+            infer_one("(vector-ref (vector 1 \"x\") 0)"),
+            "(U number? string?)"
+        );
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
+        assert_eq!(infer_one("(make-vector 3)"), "(vectorof any?)");
+        assert_eq!(infer_one("(make-vector 3 #\\a)"), "(vectorof char?)");
         assert_eq!(
             infer_one("(vector->list (vector #\\a #\\b))"),
             "(listof char?)"
@@ -2248,6 +2314,9 @@ mod tests {
 
     #[test]
     fn infers_indexed_list_primitives() {
+        assert_eq!(infer_one("(list)"), "null?");
+        assert_eq!(infer_one("(list 1 \"x\")"), "(listof (U number? string?))");
+        assert_eq!(infer_one("(car (list 1 \"x\"))"), "(U number? string?)");
         assert_eq!(infer_one("(length '(a b c))"), "number?");
         assert_eq!(infer_one("(append)"), "null?");
         assert_eq!(infer_one("(append '(a) '(b c))"), "(listof symbol?)");
