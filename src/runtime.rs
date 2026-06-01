@@ -383,6 +383,7 @@ impl Env {
             "scheme-report-environment",
             "null-environment",
             "interaction-environment",
+            "dynamic-wind",
             "close-input-port",
             "close-output-port",
             "read",
@@ -816,6 +817,7 @@ fn apply_primitive(
             expected: "direct interaction-environment call?",
             span,
         }),
+        "dynamic-wind" => dynamic_wind(args, span),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -2648,6 +2650,24 @@ fn eval_value(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     eval_expr(&expr, &env)
 }
 
+fn dynamic_wind(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [before, thunk, after]: [Value; 3] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 3,
+            actual,
+            span: span.clone(),
+        })?;
+
+    apply(before, Vec::new(), span.clone())?;
+    let result = apply(thunk, Vec::new(), span.clone());
+    let after_result = apply(after, Vec::new(), span);
+    match (result, after_result) {
+        (Ok(value), Ok(_)) => Ok(value),
+        (Err(error), Ok(_)) | (Ok(_), Err(error)) | (Err(error), Err(_)) => Err(error),
+    }
+}
+
 fn scheme_report_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     require_environment_version(args, span)?;
     Ok(Value::Environment(Env::new()))
@@ -3994,6 +4014,25 @@ mod tests {
             "5"
         );
         assert_eq!(eval_one("(values 1 2)"), "(values 1 2)");
+    }
+
+    #[test]
+    fn evaluates_dynamic_wind() {
+        assert_eq!(
+            eval_one("(dynamic-wind (lambda () 1) (lambda () 2) (lambda () 3))"),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(define xs '())
+                 (dynamic-wind
+                   (lambda () (set! xs (append xs '(before))))
+                   (lambda () (set! xs (append xs '(during))) 'value)
+                   (lambda () (set! xs (append xs '(after)))))
+                 xs"
+            ),
+            "(before during after)"
+        );
     }
 
     #[test]

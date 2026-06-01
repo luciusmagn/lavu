@@ -1115,6 +1115,10 @@ mod tests {
             "any?"
         );
         assert_eq!(infer_one("(interaction-environment)"), "any?");
+        assert_eq!(
+            infer_one("(dynamic-wind (lambda () 1) (lambda () 2) (lambda () 3))"),
+            "any?"
+        );
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 

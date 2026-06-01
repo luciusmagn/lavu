@@ -177,6 +177,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![], Type::Any),
         ),
         Primitive::new(
+            "dynamic-wind",
+            Type::procedure(vec![Type::Any, Type::Any, Type::Any], Type::Any),
+        ),
+        Primitive::new(
             "close-output-port",
             Type::procedure(vec![Type::OutputPort], Type::Unknown),
         ),
@@ -979,6 +983,10 @@ mod tests {
                 .signature
                 .to_string(),
             "(-> any?)"
+        );
+        assert_eq!(
+            primitive("dynamic-wind").unwrap().signature.to_string(),
+            "(-> any? any? any? any?)"
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),

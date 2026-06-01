@@ -418,6 +418,9 @@ Scheme value is valid.
 - Add conservative environment values with =scheme-report-environment=,
   =null-environment=, =interaction-environment=, and native =eval= over
   datum-shaped runtime values.
+** Dynamic Wind
+- Add ordinary =dynamic-wind= entry/thunk/exit behavior. Continuation
+  re-entry behavior remains part of the future =call/cc= work.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
   =display= raw.
