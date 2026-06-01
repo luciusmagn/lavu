@@ -120,6 +120,7 @@ enum PrimitiveApplication {
     Apply,
     Values,
     CallWithValues,
+    CallCc,
     Map,
     ForEach,
     ListRef,
@@ -142,6 +143,7 @@ impl PrimitiveApplication {
             "apply" => Some(Self::Apply),
             "values" => Some(Self::Values),
             "call-with-values" => Some(Self::CallWithValues),
+            "call/cc" | "call-with-current-continuation" => Some(Self::CallCc),
             "map" => Some(Self::Map),
             "for-each" => Some(Self::ForEach),
             "list-ref" => Some(Self::ListRef),
@@ -308,6 +310,7 @@ impl Inferencer {
             PrimitiveApplication::CallWithValues => {
                 self.infer_call_with_values(operands, operand_tys, span)
             }
+            PrimitiveApplication::CallCc => self.infer_call_cc(operands, operand_tys, span),
             PrimitiveApplication::Map => self.infer_higher_order_list(
                 operands,
                 operand_tys,
@@ -450,6 +453,10 @@ impl Inferencer {
             &then_inferencer,
             &else_inferencer,
         );
+        self.next_var = self
+            .next_var
+            .max(then_inferencer.next_var)
+            .max(else_inferencer.next_var);
 
         Ok(Type::union(vec![
             then_inferencer.resolve(consequent_ty),
@@ -702,6 +709,52 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
+    fn infer_call_cc(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let [receiver_ty]: [Type; 1] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "1".to_string(),
+                    actual: operand_tys.len(),
+                    span: span.clone(),
+                })?;
+
+        match self.resolve(receiver_ty) {
+            Type::Procedure(receiver) => self.infer_call_cc_receiver(receiver, operands),
+            actual => {
+                self.unify(actual, call_cc_receiver_type(), operands[0].span.clone())?;
+                Ok(Type::Any)
+            }
+        }
+    }
+
+    fn infer_call_cc_receiver(
+        &mut self,
+        receiver: ProcedureType,
+        operands: &[Spanned<Expr>],
+    ) -> Result<Type, TypeError> {
+        let escape_seed = self.fresh_type_var();
+        let continuation = Type::procedure(vec![escape_seed.clone()], Type::Never);
+        let direct = self.apply_procedure(receiver, operands, vec![continuation])?;
+        let direct = self.resolve(direct);
+        let escape = self.resolve(escape_seed.clone());
+
+        if same_type_var(&escape, &escape_seed) {
+            return Ok(direct);
+        }
+
+        Ok(if direct == Type::Never {
+            escape
+        } else {
+            Type::union(vec![direct, escape])
+        })
     }
 
     fn infer_higher_order_list(
@@ -1582,6 +1635,14 @@ fn type_of_atom(atom: &Atom) -> Type {
     }
 }
 
+fn call_cc_receiver_type() -> Type {
+    Type::procedure(vec![Type::procedure(vec![Type::Any], Type::Any)], Type::Any)
+}
+
+fn same_type_var(left: &Type, right: &Type) -> bool {
+    matches!((left, right), (Type::Var(left), Type::Var(right)) if left == right)
+}
+
 fn quoted_proper_list_types(expr: &Spanned<Expr>) -> Option<Vec<Type>> {
     let Expr::Quote(datum) = &expr.node else {
         return None;
@@ -2293,7 +2354,12 @@ mod tests {
             infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
             "(-> (-> any?) (-> any?) (-> any?) any?)"
         );
-        assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "any?");
+        assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "number?");
+        assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");
+        assert_eq!(
+            infer_one("(call-with-current-continuation (lambda (k) (if #t (k 5) \"x\")))"),
+            "(U number? string?)"
+        );
         assert_eq!(
             infer_one("(lambda (f) (call/cc f))"),
             "(-> (-> (-> any? any?) any?) any?)"

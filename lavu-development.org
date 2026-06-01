@@ -513,6 +513,8 @@ Scheme value is valid.
   Full reusable R5RS continuations remain future work.
 - Type the =call/cc= callback as receiving a one-argument continuation
   procedure while keeping the overall result conservative.
+- Infer direct =call/cc= callback procedure results, including simple
+  escape values, while keeping unknown callback values conservative.
 - Treat captured continuations as procedures for =procedure?=.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
