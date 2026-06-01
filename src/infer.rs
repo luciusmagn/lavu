@@ -79,6 +79,12 @@ enum MembershipResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum AppendTail {
+    Proper(Option<Type>),
+    Improper,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PrimitiveApplication {
     Apply,
     Values,
@@ -89,6 +95,7 @@ enum PrimitiveApplication {
     ListTail,
     Car,
     Cdr,
+    Append,
     Member,
     Assoc,
     ComposedAccessor(Vec<ListAccessResult>),
@@ -110,6 +117,7 @@ impl PrimitiveApplication {
             "list-tail" => Some(Self::ListTail),
             "car" => Some(Self::Car),
             "cdr" => Some(Self::Cdr),
+            "append" => Some(Self::Append),
             "memq" | "memv" | "member" => Some(Self::Member),
             "assq" | "assv" | "assoc" => Some(Self::Assoc),
             _ => composed_accessor_steps(name).map(Self::ComposedAccessor),
@@ -273,6 +281,7 @@ impl Inferencer {
             PrimitiveApplication::Cdr => {
                 self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Tail)
             }
+            PrimitiveApplication::Append => self.infer_append(operands, operand_tys),
             PrimitiveApplication::Member => {
                 self.infer_membership(operands, operand_tys, span, MembershipResult::Tail)
             }
@@ -580,6 +589,58 @@ impl Inferencer {
                 self.unify(actual, Type::List, operand.span.clone())?;
                 Ok(Type::Any)
             }
+        }
+    }
+
+    fn infer_append(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+    ) -> Result<Type, TypeError> {
+        let Some((last_ty, leading_tys)) = operand_tys.split_last() else {
+            return Ok(Type::Null);
+        };
+
+        let mut elements = leading_tys
+            .iter()
+            .cloned()
+            .zip(operands)
+            .filter_map(|(ty, operand)| self.infer_append_list_element(ty, operand).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        match self.infer_append_tail_elements(last_ty.clone()) {
+            AppendTail::Proper(element) => {
+                if let Some(element) = element {
+                    elements.push(element);
+                }
+                Ok(match elements.as_slice() {
+                    [] => Type::Null,
+                    _ => Type::ListOf(Box::new(Type::union(elements))),
+                })
+            }
+            AppendTail::Improper => Ok(Type::Any),
+        }
+    }
+
+    fn infer_append_list_element(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+    ) -> Result<Option<Type>, TypeError> {
+        match self.resolve(actual) {
+            Type::Null => Ok(None),
+            actual => self
+                .infer_list_element_type(actual, operand)
+                .map(|element| Some(self.resolve(element))),
+        }
+    }
+
+    fn infer_append_tail_elements(&self, actual: Type) -> AppendTail {
+        match self.resolve(actual) {
+            Type::Null => AppendTail::Proper(None),
+            Type::ListOf(element) => AppendTail::Proper(Some(*element)),
+            Type::List => AppendTail::Proper(Some(Type::Any)),
+            _ => AppendTail::Improper,
         }
     }
 
@@ -1619,6 +1680,12 @@ mod tests {
     #[test]
     fn infers_indexed_list_primitives() {
         assert_eq!(infer_one("(length '(a b c))"), "number?");
+        assert_eq!(infer_one("(append)"), "null?");
+        assert_eq!(infer_one("(append '(a) '(b c))"), "(listof symbol?)");
+        assert_eq!(
+            infer_one("(append '(1) '(\"x\"))"),
+            "(listof (U number? string?))"
+        );
         assert_eq!(infer_one("(append '(a) 'b)"), "any?");
         assert_eq!(infer_one("(cadr '(a b c))"), "symbol?");
         assert_eq!(infer_one("(caddr '(a b c))"), "symbol?");

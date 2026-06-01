@@ -509,6 +509,9 @@ Scheme value is valid.
   procedure type model can express final-list rest application.
 - Keep =append= type metadata conservative because R5RS permits an
   arbitrary final tail, including improper-list results.
+- Infer direct =append= calls as proper =listof= results when every
+  visible argument is a proper list, while preserving =any?= for
+  improper final tails.
 ** Vector Primitives
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill
