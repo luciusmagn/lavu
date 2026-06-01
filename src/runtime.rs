@@ -2462,6 +2462,17 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_internal_definitions() {
+        assert_eq!(eval_one("((lambda () (define x 1) x))"), "1");
+        assert_eq!(
+            eval_one("((lambda () (define (add1 x) (+ x 1)) (add1 4)))"),
+            "5"
+        );
+        assert_eq!(eval_one("(let () (define x 1) x)"), "1");
+        assert_eq!(eval_one("(let* () (define x 1) x)"), "1");
+    }
+
+    #[test]
     fn evaluates_recursive_top_level_definitions() {
         assert_eq!(
             eval_one("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)"),

@@ -143,7 +143,7 @@ fn classify_list(
     match head_name.as_deref() {
         Some("quote") => parse_quote(span, rest),
         Some("quasiquote") => parse_quasiquote(span, rest),
-        Some("lambda") => parse_lambda(rest),
+        Some("lambda") => parse_lambda(span, origin, rest),
         Some("if") => parse_if(rest),
         Some("begin") => parse_begin(rest),
         Some("set!") => parse_set(rest),
@@ -198,10 +198,7 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 define_formals_from_list(formals, None, &rest[0])?;
             let name = expect_identifier(name_datum, "define procedure")?;
             let params = parse_required_formals(params, "define procedure formals")?;
-            let body = rest[1..]
-                .iter()
-                .map(classify_expr)
-                .collect::<Result<Vec<_>, _>>()?;
+            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
             let value = Spanned {
                 node: Expr::Lambda {
                     params,
@@ -219,10 +216,7 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 define_formals_from_list(formals, Some(tail.as_ref()), &rest[0])?;
             let name = expect_identifier(name_datum, "define procedure")?;
             let params = parse_required_formals(params, "define procedure formals")?;
-            let body = rest[1..]
-                .iter()
-                .map(classify_expr)
-                .collect::<Result<Vec<_>, _>>()?;
+            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
             let value = Spanned {
                 node: Expr::Lambda {
                     params,
@@ -266,7 +260,11 @@ fn parse_quasiquote(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, S
     Ok(Expr::Quasiquote(Box::new(rest[0].clone())))
 }
 
-fn parse_lambda(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_lambda(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         let span = rest.first().map(|item| item.span.clone()).unwrap_or(0..0);
         return Err(SurfaceError::BadArity {
@@ -277,10 +275,7 @@ fn parse_lambda(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
     }
 
     let (params, rest_param) = parse_formals(&rest[0])?;
-    let body = rest[1..]
-        .iter()
-        .map(classify_expr)
-        .collect::<Result<Vec<_>, _>>()?;
+    let body = parse_body(&rest[1..], span, origin)?;
 
     Ok(Expr::Lambda {
         params,
@@ -361,10 +356,7 @@ fn parse_let(
 
     let bindings = parse_bindings(&rest[0], "let bindings")?;
     let (params, operands): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
-    let body = rest[1..]
-        .iter()
-        .map(classify_expr)
-        .collect::<Result<Vec<_>, _>>()?;
+    let body = parse_body(&rest[1..], span.clone(), origin)?;
 
     Ok(Expr::Apply {
         operator: Box::new(Spanned {
@@ -402,10 +394,7 @@ fn parse_named_let(
         operands.push(operand);
     }
 
-    let lambda_body = rest[2..]
-        .iter()
-        .map(classify_expr)
-        .collect::<Result<Vec<_>, _>>()?;
+    let lambda_body = parse_body(&rest[2..], span.clone(), origin)?;
     let call = Spanned {
         node: Expr::Apply {
             operator: Box::new(Spanned {
@@ -451,7 +440,7 @@ fn parse_let_star(
 
     let bindings = parse_bindings(&rest[0], "let* bindings")?;
     let mut current = Spanned {
-        node: body_expr(&rest[1..], span.clone(), origin)?,
+        node: body_sequence_expr(&rest[1..], span.clone(), origin)?,
         span: span.clone(),
         origin,
     };
@@ -525,10 +514,7 @@ fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfa
 
     Ok(Expr::LetRec {
         bindings: parse_bindings(&rest[0], "letrec bindings")?,
-        body: rest[1..]
-            .iter()
-            .map(classify_expr)
-            .collect::<Result<Vec<_>, _>>()?,
+        body: parse_body(&rest[1..], span.clone(), None)?,
     })
 }
 
@@ -969,6 +955,57 @@ fn parse_do_bindings(bindings: &Spanned<Datum>) -> Result<Vec<DoBinding>, Surfac
         .collect()
 }
 
+fn parse_body(
+    body: &[Spanned<Datum>],
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Result<Vec<Spanned<Expr>>, SurfaceError> {
+    let mut bindings = Vec::new();
+    let mut index = 0;
+
+    while index < body.len() {
+        let Some(binding) = parse_define(&body[index])? else {
+            break;
+        };
+        bindings.push(binding);
+        index += 1;
+    }
+
+    if bindings.is_empty() {
+        return body.iter().map(classify_expr).collect();
+    }
+    if index == body.len() {
+        return Err(SurfaceError::BadArity {
+            form: "body",
+            expected: "at least one expression after internal definitions",
+            span,
+        });
+    }
+
+    let body = body[index..]
+        .iter()
+        .map(classify_expr)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(vec![Spanned {
+        node: Expr::LetRec { bindings, body },
+        span,
+        origin,
+    }])
+}
+
+fn body_sequence_expr(
+    body: &[Spanned<Datum>],
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Result<Expr, SurfaceError> {
+    let exprs = parse_body(body, span.clone(), origin)?;
+    Ok(match exprs.as_slice() {
+        [] => Expr::Begin(Vec::new()),
+        [single] => single.node.clone(),
+        _ => Expr::Begin(exprs),
+    })
+}
+
 fn body_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
@@ -1179,6 +1216,18 @@ mod tests {
         assert_eq!(name.node, "collect");
         assert_eq!(params[0].node, "x");
         assert_eq!(rest.as_ref().unwrap().node, "rest");
+    }
+
+    #[test]
+    fn lowers_internal_definitions_to_letrec() {
+        let datums = parse("(lambda () (define x 1) x)").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        let TopLevel::Expr(Expr::Lambda { body, .. }) = form.node else {
+            panic!("expected lambda");
+        };
+
+        assert!(matches!(body[0].node, Expr::LetRec { .. }));
     }
 
     #[test]

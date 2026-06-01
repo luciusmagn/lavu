@@ -773,6 +773,15 @@ mod tests {
     }
 
     #[test]
+    fn infers_internal_definitions() {
+        assert_eq!(infer_one("((lambda () (define x 1) x))"), "number?");
+        assert_eq!(
+            infer_one("((lambda () (define (add1 x) (+ x 1)) (add1 4)))"),
+            "number?"
+        );
+    }
+
+    #[test]
     fn infers_reverse_lambda_from_primitive_signature() {
         assert_eq!(
             infer_one("(lambda (x) (reverse x))"),

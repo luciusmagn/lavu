@@ -250,6 +250,10 @@ Scheme value is valid.
 ** List Library
 - Add =length= and the R5RS composed =car=/=cdr= accessors through four
   levels, with conservative =any?= metadata for the composed accessors.
+** Internal Definitions
+- Lower leading internal =define= forms in body contexts to =letrec= so
+  lambda, let, let*, and letrec bodies can use R5RS-style local
+  definitions without adding another AST variant.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.
