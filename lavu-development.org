@@ -273,6 +273,8 @@ Scheme value is valid.
   other.
 - Treat =(not (predicate? x))= as a positive refinement for the alternate
   branch.
+- Infer simple =apply= calls for uniform variadic and rest procedures
+  when the final argument has a known list element type.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

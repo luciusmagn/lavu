@@ -143,6 +143,10 @@ impl Inferencer {
                     .map(|operand| self.infer_expr(operand, env))
                     .collect::<Result<Vec<_>, _>>()?;
 
+                if matches!(&operator.node, Expr::Variable(name) if name == "apply") {
+                    return self.infer_apply_primitive(operands, operand_tys, expr.span.clone());
+                }
+
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
             }
         }
@@ -353,6 +357,87 @@ impl Inferencer {
             }
             actual => Err(TypeError::ExpectedProcedure { actual, span }),
         }
+    }
+
+    fn infer_apply_primitive(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        if operand_tys.len() < 2 {
+            return Err(TypeError::ArityMismatch {
+                expected: "at least 2".to_string(),
+                actual: operand_tys.len(),
+                span,
+            });
+        }
+
+        let mut operand_tys = operand_tys.into_iter();
+        let procedure_ty = operand_tys
+            .next()
+            .expect("arity check ensures a procedure operand");
+        let mut arguments = operand_tys.collect::<Vec<_>>();
+        let final_list = arguments
+            .pop()
+            .expect("arity check ensures a final list operand");
+        let fixed_operands = &operands[1..operands.len() - 1];
+        let final_operand = operands
+            .last()
+            .expect("arity check ensures a final list operand");
+
+        match self.resolve(procedure_ty) {
+            Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+                for (actual, operand) in arguments.into_iter().zip(fixed_operands) {
+                    self.unify(actual, (*param).clone(), operand.span.clone())?;
+                }
+                self.unify_apply_final_list(final_list, (*param).clone(), final_operand)?;
+                Ok(self.resolve(*result))
+            }
+            Type::Procedure(ProcedureType::Rest {
+                required,
+                rest,
+                result,
+            }) if arguments.len() >= required.len() => {
+                for ((actual, expected), operand) in arguments
+                    .iter()
+                    .cloned()
+                    .zip(required.iter().cloned())
+                    .zip(fixed_operands)
+                {
+                    self.unify(actual, expected, operand.span.clone())?;
+                }
+                for (actual, operand) in arguments
+                    .into_iter()
+                    .skip(required.len())
+                    .zip(fixed_operands.iter().skip(required.len()))
+                {
+                    self.unify(actual, (*rest).clone(), operand.span.clone())?;
+                }
+                self.unify_apply_final_list(final_list, (*rest).clone(), final_operand)?;
+                Ok(self.resolve(*result))
+            }
+            _ => Ok(Type::Any),
+        }
+    }
+
+    fn unify_apply_final_list(
+        &mut self,
+        actual: Type,
+        expected_element: Type,
+        operand: &Spanned<Expr>,
+    ) -> Result<(), TypeError> {
+        match self.resolve(actual) {
+            Type::ListOf(element) => {
+                self.unify(*element, expected_element, operand.span.clone())?;
+            }
+            Type::Null => {}
+            Type::List => {}
+            actual => {
+                self.unify(actual, Type::List, operand.span.clone())?;
+            }
+        }
+        Ok(())
     }
 
     fn apply_procedure(
@@ -940,8 +1025,9 @@ mod tests {
     }
 
     #[test]
-    fn infers_apply_conservatively() {
-        assert_eq!(infer_one("(apply + '(1 2 3))"), "any?");
+    fn infers_simple_apply_calls() {
+        assert_eq!(infer_one("(apply + '(1 2 3))"), "number?");
+        assert_eq!(infer_one("(apply string-append '(\"a\" \"b\"))"), "string?");
     }
 
     #[test]
