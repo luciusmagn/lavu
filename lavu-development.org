@@ -307,7 +307,7 @@ Scheme value is valid.
   definitions to =letrec=.
 ** List Library
 - Add =length= and the R5RS composed =car=/=cdr= accessors through four
-  levels, with conservative =any?= metadata for the composed accessors.
+  levels, with structural pair metadata for the composed accessors.
 - Make improper pair values reference-backed as groundwork for R5RS
   =set-car!= and =set-cdr!=.
 - Add =set-car!= and =set-cdr!= for shared pair values.

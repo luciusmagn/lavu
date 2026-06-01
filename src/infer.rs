@@ -2874,6 +2874,10 @@ mod tests {
 
     #[test]
     fn infers_pair_accessors_over_lists() {
+        assert_eq!(
+            infer_one("cadddr"),
+            "(-> (pair? any? (pair? any? (pair? any? (pair? t0 any?)))) t0)"
+        );
         assert_eq!(infer_one("(car '(1 2))"), "number?");
         assert_eq!(infer_one("(cdr '(1 2))"), "(listof number?)");
         assert_eq!(infer_one("(car '(1 \"x\"))"), "number?");

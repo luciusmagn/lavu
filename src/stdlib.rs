@@ -742,8 +742,23 @@ fn composed_accessor_primitives() -> Vec<Primitive> {
         "cadddr", "cdaaar", "cdaadr", "cdadar", "cdaddr", "cddaar", "cddadr", "cdddar", "cddddr",
     ]
     .into_iter()
-    .map(|name| Primitive::new(name, Type::procedure(vec![Type::Any], Type::Any)))
+    .map(|name| Primitive::new(name, composed_accessor_signature(name)))
     .collect()
+}
+
+fn composed_accessor_signature(name: &str) -> Type {
+    let result = Type::Var("a".to_string());
+    let middle = name
+        .strip_prefix('c')
+        .and_then(|name| name.strip_suffix('r'))
+        .expect("composed accessor table only contains c...r names");
+    let input = middle.chars().fold(result.clone(), |input, op| match op {
+        'a' => Type::Pair(Box::new(input), Box::new(Type::Any)),
+        'd' => Type::Pair(Box::new(Type::Any), Box::new(input)),
+        _ => unreachable!("composed accessor table only contains a and d"),
+    });
+
+    Type::procedure(vec![input], result)
 }
 
 #[cfg(test)]
@@ -783,7 +798,7 @@ mod tests {
         );
         assert_eq!(
             primitive("cadddr").unwrap().signature.to_string(),
-            "(-> any? any?)"
+            "(-> (pair? any? (pair? any? (pair? any? (pair? a any?)))) a)"
         );
     }
 
