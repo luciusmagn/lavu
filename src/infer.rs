@@ -115,6 +115,12 @@ enum AppendTail {
     Improper,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConstructorKind {
+    List,
+    Vector,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PrimitiveApplication {
     Apply,
@@ -179,6 +185,18 @@ fn composed_accessor_steps(name: &str) -> Option<Vec<ListAccessResult>> {
             _ => None,
         })
         .collect()
+}
+
+fn constructor_kind(expr: &Spanned<Expr>) -> Option<ConstructorKind> {
+    let Expr::Variable(name) = &expr.node else {
+        return None;
+    };
+
+    match name.as_str() {
+        "list" => Some(ConstructorKind::List),
+        "vector" => Some(ConstructorKind::Vector),
+        _ => None,
+    }
 }
 
 impl Inferencer {
@@ -812,6 +830,52 @@ impl Inferencer {
         )
     }
 
+    fn infer_apply_constructor(
+        &mut self,
+        constructor: ConstructorKind,
+        fixed_argument_tys: Vec<Type>,
+        final_list_ty: Type,
+        final_operand: &Spanned<Expr>,
+    ) -> Result<Type, TypeError> {
+        let mut element_tys = fixed_argument_tys
+            .into_iter()
+            .map(|ty| self.resolve(ty))
+            .collect::<Vec<_>>();
+        element_tys
+            .extend(self.infer_apply_constructor_final_elements(final_list_ty, final_operand)?);
+
+        Ok(match constructor {
+            ConstructorKind::List => self.infer_list_constructor(element_tys),
+            ConstructorKind::Vector => self.infer_vector_constructor(element_tys),
+        })
+    }
+
+    fn infer_apply_constructor_final_elements(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+    ) -> Result<Vec<Type>, TypeError> {
+        if let Some(types) = quoted_proper_list_types(operand) {
+            return Ok(types);
+        }
+
+        match self.resolve(actual) {
+            Type::Null => Ok(Vec::new()),
+            Type::ListOf(element) => Ok(vec![self.resolve(*element)]),
+            Type::List | Type::Any | Type::Unknown => Ok(vec![Type::Any]),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(vec![element])
+            }
+            actual => {
+                self.unify(actual, Type::List, operand.span.clone())?;
+                Ok(vec![Type::Any])
+            }
+        }
+    }
+
     fn infer_higher_order_list(
         &mut self,
         operands: &[Spanned<Expr>],
@@ -853,14 +917,9 @@ impl Inferencer {
         element_tys: &[Type],
         result: HigherOrderListResult,
     ) -> Option<Type> {
-        let Expr::Variable(name) = &procedure.node else {
-            return None;
-        };
-
-        let mapped = match name.as_str() {
-            "list" => self.infer_list_constructor(element_tys.to_vec()),
-            "vector" => self.infer_vector_constructor(element_tys.to_vec()),
-            _ => return None,
+        let mapped = match constructor_kind(procedure)? {
+            ConstructorKind::List => self.infer_list_constructor(element_tys.to_vec()),
+            ConstructorKind::Vector => self.infer_vector_constructor(element_tys.to_vec()),
         };
 
         Some(match result {
@@ -1137,6 +1196,10 @@ impl Inferencer {
         let final_operand = operands
             .last()
             .expect("arity check ensures a final list operand");
+
+        if let Some(constructor) = constructor_kind(&operands[0]) {
+            return self.infer_apply_constructor(constructor, arguments, final_list, final_operand);
+        }
 
         match self.resolve(procedure_ty) {
             Type::Procedure(
@@ -2272,6 +2335,16 @@ mod tests {
     fn infers_simple_apply_calls() {
         assert_eq!(infer_one("(apply + '(1 2 3))"), "number?");
         assert_eq!(infer_one("(apply string-append '(\"a\" \"b\"))"), "string?");
+        assert_eq!(infer_one("(apply list '())"), "null?");
+        assert_eq!(infer_one("(apply vector '())"), "vector?");
+        assert_eq!(
+            infer_one("(apply list 1 '(\"x\"))"),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(
+            infer_one("(apply vector 1 '(\"x\"))"),
+            "(vectorof (U number? string?))"
+        );
         assert_eq!(
             infer_one("(apply (lambda (x y) (+ x y)) '(1 2))"),
             "number?"
