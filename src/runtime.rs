@@ -5,7 +5,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use bigdecimal::{BigDecimal, RoundingMode};
-use num::{BigInt, BigRational, Complex, Integer, One, Signed, ToPrimitive, Zero};
+use num::{BigInt, BigRational, Complex, Integer, Num, One, Signed, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::lexer::{Token, tokenize};
@@ -675,22 +675,8 @@ fn apply_primitive(
                 span,
             }),
         }),
-        "number->string" => unary(args, span.clone(), |value| match value {
-            Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_) => {
-                Ok(string_value(value.to_string()))
-            }
-            _ => Err(EvalError::TypeError {
-                expected: "number?",
-                span,
-            }),
-        }),
-        "string->number" => unary(args, span.clone(), |value| match value {
-            Value::String(text) => Ok(string_to_number(text.borrow().as_str())),
-            _ => Err(EvalError::TypeError {
-                expected: "string?",
-                span,
-            }),
-        }),
+        "number->string" => number_to_string(args, span),
+        "string->number" => string_to_number_primitive(args, span),
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
@@ -1959,6 +1945,86 @@ fn integer_to_char(n: BigInt, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::Character(ch))
 }
 
+fn number_to_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    if !(1..=2).contains(&actual) {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual,
+            span,
+        });
+    }
+
+    let mut args = args.into_iter();
+    let number = args.next().expect("arity check ensures number argument");
+    let radix = match args.next() {
+        Some(radix) => radix_argument(&radix, span.clone())?,
+        None => 10,
+    };
+
+    if radix == 10 {
+        return match number {
+            Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_) => {
+                Ok(string_value(number.to_string()))
+            }
+            _ => Err(EvalError::TypeError {
+                expected: "number?",
+                span,
+            }),
+        };
+    }
+
+    let integer = exact_integer(&number, span)?;
+    Ok(string_value(integer.to_str_radix(radix)))
+}
+
+fn string_to_number_primitive(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    if !(1..=2).contains(&actual) {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual,
+            span,
+        });
+    }
+
+    let mut args = args.into_iter();
+    let string = args.next().expect("arity check ensures string argument");
+    let text = match string {
+        Value::String(text) => text,
+        _ => {
+            return Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            });
+        }
+    };
+    let radix = match args.next() {
+        Some(radix) => radix_argument(&radix, span.clone())?,
+        None => 10,
+    };
+
+    Ok(string_to_number_with_radix(text.borrow().as_str(), radix))
+}
+
+fn radix_argument(value: &Value, span: SourceSpan) -> Result<u32, EvalError> {
+    let radix = exact_integer(value, span.clone())?;
+    let Some(radix) = radix.to_u32() else {
+        return Err(EvalError::TypeError {
+            expected: "radix 2, 8, 10, or 16?",
+            span,
+        });
+    };
+
+    match radix {
+        2 | 8 | 10 | 16 => Ok(radix),
+        _ => Err(EvalError::TypeError {
+            expected: "radix 2, 8, 10, or 16?",
+            span,
+        }),
+    }
+}
+
 fn string_to_number(text: &str) -> Value {
     let tokens = tokenize(text)
         .into_iter()
@@ -1984,6 +2050,31 @@ fn string_to_number(text: &str) -> Value {
         Token::Complex(n) => Value::Complex(n),
         _ => Value::Boolean(false),
     }
+}
+
+fn string_to_number_with_radix(text: &str, radix: u32) -> Value {
+    if radix == 10 {
+        return string_to_number(text);
+    }
+
+    let text = text.trim();
+    if text_has_explicit_radix(text) {
+        return string_to_number(text);
+    }
+
+    match BigInt::from_str_radix(text, radix) {
+        Ok(number) => Value::Integer(number),
+        Err(_) => Value::Boolean(false),
+    }
+}
+
+fn text_has_explicit_radix(text: &str) -> bool {
+    text.get(..2).is_some_and(|prefix| {
+        matches!(
+            prefix,
+            "#b" | "#B" | "#o" | "#O" | "#d" | "#D" | "#x" | "#X"
+        )
+    })
 }
 
 fn eqv_value(left: &Value, right: &Value) -> bool {
@@ -2941,7 +3032,13 @@ mod tests {
         assert_eq!(eval_one("(char->integer #\\A)"), "65");
         assert_eq!(eval_one("(integer->char 65)"), "#\\A");
         assert_eq!(eval_one("(number->string 1/2)"), "\"1/2\"");
+        assert_eq!(eval_one("(number->string 16 16)"), "\"10\"");
+        assert_eq!(eval_one("(number->string 10 2)"), "\"1010\"");
         assert_eq!(eval_one("(string->number \"#x10\")"), "16");
+        assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
+        assert_eq!(eval_one("(string->number \"101\" 2)"), "5");
+        assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
+        assert_eq!(eval_one("(string->number \"12\" 2)"), "#f");
         assert_eq!(eval_one("(string->number \"wat\")"), "#f");
     }
 

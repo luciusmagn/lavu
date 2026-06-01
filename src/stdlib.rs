@@ -120,12 +120,13 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "number->string",
-            Type::procedure(vec![Type::Number], Type::String),
+            Type::rest_procedure(vec![Type::Number], Type::Number, Type::String),
         ),
         Primitive::new(
             "string->number",
-            Type::procedure(
+            Type::rest_procedure(
                 vec![Type::String],
+                Type::Number,
                 Type::union(vec![Type::Number, Type::Boolean]),
             ),
         ),
@@ -742,7 +743,7 @@ mod tests {
         );
         assert_eq!(
             primitive("string->number").unwrap().signature.to_string(),
-            "(-> string? (U boolean? number?))"
+            "(-> string? number? * (U boolean? number?))"
         );
     }
 }

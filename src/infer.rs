@@ -1072,6 +1072,10 @@ mod tests {
     fn infers_conversion_primitives() {
         assert_eq!(infer_one("(symbol->string 'hello)"), "string?");
         assert_eq!(infer_one("(string->number \"1\")"), "(U boolean? number?)");
+        assert_eq!(
+            infer_one("(string->number \"10\" 16)"),
+            "(U boolean? number?)"
+        );
     }
 
     #[test]

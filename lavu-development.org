@@ -424,6 +424,8 @@ Scheme value is valid.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.
+- Extend =number->string= and =string->number= with the optional R5RS
+  radix argument for radices 2, 8, 10, and 16.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.
