@@ -712,6 +712,9 @@ Scheme value is valid.
 - Infer visible literal-index =list-ref=, =list-tail=, and =vector-ref=
   calls from quoted data or visible constructors without collapsing
   heterogeneous elements into unions.
+- Infer visible =car= and =cdr= calls over quoted proper lists and
+  visible =list= constructors with the same position-sensitive element
+  flow.
 ** Membership Primitives
 - Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
   =assoc= using the corresponding equality predicate semantics.

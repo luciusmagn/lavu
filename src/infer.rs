@@ -447,11 +447,15 @@ impl Inferencer {
             PrimitiveApplication::ListTail => {
                 self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Tail, env)
             }
-            PrimitiveApplication::Car => {
-                self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Element)
-            }
+            PrimitiveApplication::Car => self.infer_pair_accessor(
+                operands,
+                operand_tys,
+                span,
+                ListAccessResult::Element,
+                env,
+            ),
             PrimitiveApplication::Cdr => {
-                self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Tail)
+                self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Tail, env)
             }
             PrimitiveApplication::Append => self.infer_append(operands, operand_tys),
             PrimitiveApplication::Member => {
@@ -1355,6 +1359,7 @@ impl Inferencer {
         operand_tys: Vec<Type>,
         span: SourceSpan,
         result: ListAccessResult,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         let [operand_ty]: [Type; 1] =
             operand_tys
@@ -1364,6 +1369,14 @@ impl Inferencer {
                     actual: operand_tys.len(),
                     span,
                 })?;
+
+        let index = match result {
+            ListAccessResult::Element => 0,
+            ListAccessResult::Tail => 1,
+        };
+        if let Some(ty) = visible_indexed_list_type(&operands[0], index, result, env) {
+            return Ok(ty);
+        }
 
         self.infer_access_type(operand_ty, &operands[0], result)
     }
@@ -2592,6 +2605,11 @@ mod tests {
     fn infers_pair_accessors_over_lists() {
         assert_eq!(infer_one("(car '(1 2))"), "number?");
         assert_eq!(infer_one("(cdr '(1 2))"), "(listof number?)");
+        assert_eq!(infer_one("(car '(1 \"x\"))"), "number?");
+        assert_eq!(infer_one("(cdr '(1 \"x\"))"), "(listof string?)");
+        assert_eq!(infer_one("(cdr '(1))"), "null?");
+        assert_eq!(infer_one("(car (list 1 \"x\"))"), "number?");
+        assert_eq!(infer_one("(cdr (list 1 \"x\"))"), "(listof string?)");
         assert_eq!(infer_one("(car (cons \"x\" 2))"), "string?");
         assert_eq!(infer_one("(cdr (cons \"x\" 2))"), "number?");
     }
@@ -2905,7 +2923,7 @@ mod tests {
     fn infers_indexed_list_primitives() {
         assert_eq!(infer_one("(list)"), "null?");
         assert_eq!(infer_one("(list 1 \"x\")"), "(listof (U number? string?))");
-        assert_eq!(infer_one("(car (list 1 \"x\"))"), "(U number? string?)");
+        assert_eq!(infer_one("(car (list 1 \"x\"))"), "number?");
         assert_eq!(infer_one("(length '(a b c))"), "number?");
         assert_eq!(infer_one("(append)"), "null?");
         assert_eq!(infer_one("(append '(a) '(b c))"), "(listof symbol?)");
