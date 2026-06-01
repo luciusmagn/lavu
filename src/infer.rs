@@ -871,6 +871,8 @@ mod tests {
 
     #[test]
     fn infers_indexed_list_primitives() {
+        assert_eq!(infer_one("(length '(a b c))"), "number?");
+        assert_eq!(infer_one("(cadr '(a b c))"), "any?");
         assert_eq!(infer_one("(list-ref '(a b c) 1)"), "any?");
         assert_eq!(infer_one("(list-tail '(a b c) 1)"), "list?");
     }

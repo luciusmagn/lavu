@@ -256,7 +256,36 @@ impl Env {
             "cons",
             "car",
             "cdr",
+            "caar",
+            "cadr",
+            "cdar",
+            "cddr",
+            "caaar",
+            "caadr",
+            "cadar",
+            "caddr",
+            "cdaar",
+            "cdadr",
+            "cddar",
+            "cdddr",
+            "caaaar",
+            "caaadr",
+            "caadar",
+            "caaddr",
+            "cadaar",
+            "cadadr",
+            "caddar",
+            "cadddr",
+            "cdaaar",
+            "cdaadr",
+            "cdadar",
+            "cdaddr",
+            "cddaar",
+            "cddadr",
+            "cdddar",
+            "cddddr",
             "list",
+            "length",
             "reverse",
             "append",
             "list-ref",
@@ -633,7 +662,15 @@ fn apply_primitive(
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
+        name if composed_accessor_ops(name).is_some() => composed_accessor(name, args, span),
         "list" => Ok(Value::List(args)),
+        "length" => unary(args, span.clone(), |value| match value {
+            Value::List(items) => Ok(Value::Integer(BigInt::from(items.len()))),
+            _ => Err(EvalError::TypeError {
+                expected: "list?",
+                span,
+            }),
+        }),
         "reverse" => unary(args, span.clone(), |value| match value {
             Value::List(mut items) => {
                 items.reverse();
@@ -1781,6 +1818,30 @@ fn cdr(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
+fn composed_accessor(
+    name: &'static str,
+    args: Vec<Value>,
+    span: SourceSpan,
+) -> Result<Value, EvalError> {
+    let ops = composed_accessor_ops(name).expect("caller checks composed accessor name");
+    unary(args, span.clone(), |value| {
+        ops.into_iter().try_fold(value, |value, op| match op {
+            'a' => car(value, span.clone()),
+            'd' => cdr(value, span.clone()),
+            _ => unreachable!("composed accessors only contain a and d"),
+        })
+    })
+}
+
+fn composed_accessor_ops(name: &str) -> Option<Vec<char>> {
+    let inner = name.strip_prefix('c')?.strip_suffix('r')?;
+    if !(2..=4).contains(&inner.len()) || !inner.chars().all(|ch| matches!(ch, 'a' | 'd')) {
+        return None;
+    }
+
+    Some(inner.chars().rev().collect())
+}
+
 fn append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     let mut result = Vec::new();
     for arg in args {
@@ -2564,6 +2625,11 @@ mod tests {
         assert_eq!(eval_one("(cons 1 2)"), "(1 . 2)");
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
+        assert_eq!(eval_one("(length (list 1 2 3))"), "3");
+        assert_eq!(eval_one("(caar '((1 2) (3 4)))"), "1");
+        assert_eq!(eval_one("(cadr '(1 2 3))"), "2");
+        assert_eq!(eval_one("(caddr '(1 2 3))"), "3");
+        assert_eq!(eval_one("(cadddr '(1 2 3 4))"), "4");
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
         assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1)"), "b");
         assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1)"), "(b c)");

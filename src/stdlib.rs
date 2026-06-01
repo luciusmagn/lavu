@@ -38,7 +38,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
     let a = Type::Var("a".to_string());
     let b = Type::Var("b".to_string());
 
-    vec![
+    let mut primitives = vec![
         Primitive::predicate("boolean?", Type::Boolean),
         Primitive::predicate("number?", Type::Number),
         Primitive::predicate("complex?", Type::Number),
@@ -390,6 +390,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "list",
             Type::uniform_variadic(a.clone(), Type::ListOf(Box::new(a.clone()))),
         ),
+        Primitive::new("length", Type::procedure(vec![Type::List], Type::Number)),
         Primitive::new(
             "reverse",
             Type::procedure(
@@ -441,7 +442,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "for-each",
             Type::rest_procedure(vec![Type::Any, Type::List], Type::List, Type::Unknown),
         ),
-    ]
+    ];
+
+    primitives.extend(composed_accessor_primitives());
+    primitives
 }
 
 pub fn primitive(name: &str) -> Option<Primitive> {
@@ -466,6 +470,17 @@ fn char_predicate() -> Type {
     Type::procedure(vec![Type::Char], Type::Boolean)
 }
 
+fn composed_accessor_primitives() -> Vec<Primitive> {
+    [
+        "caar", "cadr", "cdar", "cddr", "caaar", "caadr", "cadar", "caddr", "cdaar", "cdadr",
+        "cddar", "cdddr", "caaaar", "caaadr", "caadar", "caaddr", "cadaar", "cadadr", "caddar",
+        "cadddr", "cdaaar", "cdaadr", "cdadar", "cdaddr", "cddaar", "cddadr", "cdddar", "cddddr",
+    ]
+    .into_iter()
+    .map(|name| Primitive::new(name, Type::procedure(vec![Type::Any], Type::Any)))
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::primitive;
@@ -488,6 +503,14 @@ mod tests {
         assert_eq!(
             primitive("cons").unwrap().signature.to_string(),
             "(-> a b (pair? a b))"
+        );
+        assert_eq!(
+            primitive("length").unwrap().signature.to_string(),
+            "(-> list? number?)"
+        );
+        assert_eq!(
+            primitive("cadddr").unwrap().signature.to_string(),
+            "(-> any? any?)"
         );
     }
 
