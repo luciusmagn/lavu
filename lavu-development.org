@@ -253,6 +253,9 @@ Scheme value is valid.
   exactness prefix.
 - Let =#e= exact complex literals use exact decimal and exponent
   components, so =#e1.5+2.25i= reads as exact rational parts.
+- Parse radix-prefixed exact rectangular and pure-imaginary complex
+  literals, including exactness/radix prefix compositions such as
+  =#e#x1+2i= and =#x#e+i=.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.

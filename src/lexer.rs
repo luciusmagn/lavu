@@ -206,6 +206,26 @@ pub enum Token {
         priority = 10,
         callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[2..])
     )]
+    #[regex(
+        r"(#[bBoOxX]|#[eE]#[bBoOxX]|#[bBoOxX]#[eE])[+-]?[0-9a-fA-F]+(/[0-9a-fA-F]+)?[+-][0-9a-fA-F]+(/[0-9a-fA-F]+)?i",
+        priority = 12,
+        callback = |lex| parse_radix_exact_rectangular_complex(lex.slice())
+    )]
+    #[regex(
+        r"(#[bBoOxX]|#[eE]#[bBoOxX]|#[bBoOxX]#[eE])[+-]i",
+        priority = 10,
+        callback = |lex| parse_radix_exact_imaginary_unit(lex.slice())
+    )]
+    #[regex(
+        r"(#[bBoOxX]|#[eE]#[bBoOxX]|#[bBoOxX]#[eE])[+-]?[0-9a-fA-F]+(/[0-9a-fA-F]+)?i",
+        priority = 10,
+        callback = |lex| parse_radix_exact_pure_imaginary(lex.slice())
+    )]
+    #[regex(
+        r"(#[bBoOxX]|#[eE]#[bBoOxX]|#[bBoOxX]#[eE])[+-]?[0-9a-fA-F]+(/[0-9a-fA-F]+)?[+-]i",
+        priority = 10,
+        callback = |lex| parse_radix_exact_unit_imaginary_complex(lex.slice())
+    )]
     ExactComplex(Complex<BigRational>),
 
     #[regex(
@@ -759,6 +779,109 @@ fn parse_exact_component(slice: &str) -> Result<BigRational, LexerError> {
     Ok(BigRational::new(numerator, denominator))
 }
 
+fn parse_radix_exact_rectangular_complex(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let (radix, body) = strip_exact_radix_prefix(slice)?;
+    let sign_index = body
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_exact_radix_component(&body[..sign_index], radix)?;
+    let imaginary = parse_exact_radix_component(
+        body[sign_index..]
+            .strip_suffix('i')
+            .ok_or(LexerError::DefaultError)?,
+        radix,
+    )?;
+
+    Ok(Complex::new(real, imaginary))
+}
+
+fn parse_radix_exact_imaginary_unit(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let (_, body) = strip_exact_radix_prefix(slice)?;
+    Ok(parse_exact_imaginary_unit(body))
+}
+
+fn parse_radix_exact_pure_imaginary(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let (radix, body) = strip_exact_radix_prefix(slice)?;
+    let imaginary = parse_exact_radix_component(&body[..body.len() - 1], radix)?;
+    Ok(Complex::new(BigRational::zero(), imaginary))
+}
+
+fn parse_radix_exact_unit_imaginary_complex(
+    slice: &str,
+) -> Result<Complex<BigRational>, LexerError> {
+    let (radix, body) = strip_exact_radix_prefix(slice)?;
+    let sign_index = body
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_exact_radix_component(&body[..sign_index], radix)?;
+    let imaginary = if body[sign_index..].starts_with('-') {
+        -1
+    } else {
+        1
+    };
+
+    Ok(Complex::new(
+        real,
+        BigRational::from_integer(BigInt::from(imaginary)),
+    ))
+}
+
+fn strip_exact_radix_prefix(slice: &str) -> Result<(u32, &str), LexerError> {
+    let bytes = slice.as_bytes();
+    match bytes {
+        [b'#', radix, rest @ ..] if is_radix_prefix_byte(*radix) => {
+            Ok((radix_value(*radix)?, &slice[slice.len() - rest.len()..]))
+        }
+        [b'#', exactness, b'#', radix, rest @ ..] if is_exactness_prefix_byte(*exactness) => {
+            Ok((radix_value(*radix)?, &slice[slice.len() - rest.len()..]))
+        }
+        [b'#', radix, b'#', exactness, rest @ ..] if is_exactness_prefix_byte(*exactness) => {
+            Ok((radix_value(*radix)?, &slice[slice.len() - rest.len()..]))
+        }
+        _ => Err(LexerError::DefaultError),
+    }
+}
+
+fn is_exactness_prefix_byte(byte: u8) -> bool {
+    matches!(byte, b'e' | b'E')
+}
+
+fn is_radix_prefix_byte(byte: u8) -> bool {
+    matches!(byte, b'b' | b'B' | b'o' | b'O' | b'x' | b'X')
+}
+
+fn radix_value(byte: u8) -> Result<u32, LexerError> {
+    match byte {
+        b'b' | b'B' => Ok(2),
+        b'o' | b'O' => Ok(8),
+        b'x' | b'X' => Ok(16),
+        _ => Err(LexerError::DefaultError),
+    }
+}
+
+fn parse_exact_radix_component(slice: &str, radix: u32) -> Result<BigRational, LexerError> {
+    let slice = slice.strip_prefix('+').unwrap_or(slice);
+    let Some((numerator, denominator)) = slice.split_once('/') else {
+        return BigInt::from_str_radix(slice, radix)
+            .map(BigRational::from_integer)
+            .map_err(LexerError::from);
+    };
+
+    let numerator = BigInt::from_str_radix(numerator, radix)?;
+    let denominator = BigInt::from_str_radix(denominator, radix)?;
+    if denominator.is_zero() {
+        return Err(LexerError::ZeroDenominator);
+    }
+
+    Ok(BigRational::new(numerator, denominator))
+}
+
 fn has_decimal_syntax(slice: &str) -> bool {
     slice.chars().any(|ch| {
         matches!(
@@ -1279,7 +1402,9 @@ mod tests {
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
         );
 
-        let exact_rectangular = tokenize("1/2+3/4i #e1/2+3/4i #e+i #e1.5+2.25i #e.5+1e2i");
+        let exact_rectangular = tokenize(
+            "1/2+3/4i #e1/2+3/4i #e+i #e1.5+2.25i #e.5+1e2i #b101+10i #x1/2+3/4i #e#x1+2i #x#e+i",
+        );
         assert_eq!(
             exact_rectangular[0].0,
             Token::ExactComplex(Complex::new(
@@ -1313,6 +1438,34 @@ mod tests {
             Token::ExactComplex(Complex::new(
                 BigRational::new(BigInt::from(5), BigInt::from(10)),
                 BigRational::from_integer(BigInt::from(100))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[10].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::from_integer(BigInt::from(5)),
+                BigRational::from_integer(BigInt::from(2))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[12].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(1), BigInt::from(2)),
+                BigRational::new(BigInt::from(3), BigInt::from(4))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[14].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::from_integer(BigInt::from(1)),
+                BigRational::from_integer(BigInt::from(2))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[16].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(1))
             ))
         );
 
