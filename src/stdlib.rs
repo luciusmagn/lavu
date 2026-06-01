@@ -209,43 +209,43 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "read",
-            Type::rest_procedure(vec![], Type::InputPort, Type::Any),
+            Type::optional_procedure(vec![], vec![Type::InputPort], Type::Any),
         ),
         Primitive::new(
             "read-char",
-            Type::rest_procedure(
+            Type::optional_procedure(
                 vec![],
-                Type::InputPort,
+                vec![Type::InputPort],
                 Type::union(vec![Type::Char, Type::EofObject]),
             ),
         ),
         Primitive::new(
             "peek-char",
-            Type::rest_procedure(
+            Type::optional_procedure(
                 vec![],
-                Type::InputPort,
+                vec![Type::InputPort],
                 Type::union(vec![Type::Char, Type::EofObject]),
             ),
         ),
         Primitive::new(
             "char-ready?",
-            Type::rest_procedure(vec![], Type::InputPort, Type::Boolean),
+            Type::optional_procedure(vec![], vec![Type::InputPort], Type::Boolean),
         ),
         Primitive::new(
             "write",
-            Type::rest_procedure(vec![Type::Any], Type::OutputPort, Type::Unknown),
+            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unknown),
         ),
         Primitive::new(
             "display",
-            Type::rest_procedure(vec![Type::Any], Type::OutputPort, Type::Unknown),
+            Type::optional_procedure(vec![Type::Any], vec![Type::OutputPort], Type::Unknown),
         ),
         Primitive::new(
             "newline",
-            Type::rest_procedure(vec![], Type::OutputPort, Type::Unknown),
+            Type::optional_procedure(vec![], vec![Type::OutputPort], Type::Unknown),
         ),
         Primitive::new(
             "write-char",
-            Type::rest_procedure(vec![Type::Char], Type::OutputPort, Type::Unknown),
+            Type::optional_procedure(vec![Type::Char], vec![Type::OutputPort], Type::Unknown),
         ),
         Primitive::new(
             "transcript-on",
@@ -254,13 +254,13 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::new("transcript-off", Type::procedure(vec![], Type::Unknown)),
         Primitive::new(
             "number->string",
-            Type::rest_procedure(vec![Type::Number], Type::Number, Type::String),
+            Type::optional_procedure(vec![Type::Number], vec![Type::Number], Type::String),
         ),
         Primitive::new(
             "string->number",
-            Type::rest_procedure(
+            Type::optional_procedure(
                 vec![Type::String],
-                Type::Number,
+                vec![Type::Number],
                 Type::union(vec![Type::Number, Type::Boolean]),
             ),
         ),
@@ -355,7 +355,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::new("acos", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
             "atan",
-            Type::rest_procedure(vec![Type::Number], Type::Number, Type::Number),
+            Type::optional_procedure(vec![Type::Number], vec![Type::Number], Type::Number),
         ),
         Primitive::new(
             "rationalize",
@@ -492,7 +492,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "make-string",
-            Type::rest_procedure(vec![Type::Number], Type::Char, Type::String),
+            Type::optional_procedure(vec![Type::Number], vec![Type::Char], Type::String),
         ),
         Primitive::new("string", Type::uniform_variadic(Type::Char, Type::String)),
         Primitive::new(
@@ -529,9 +529,9 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "make-vector",
-            Type::rest_procedure(
+            Type::optional_procedure(
                 vec![Type::Number],
-                a.clone(),
+                vec![a.clone()],
                 Type::VectorOf(Box::new(a.clone())),
             ),
         ),
@@ -839,7 +839,7 @@ mod tests {
         );
         assert_eq!(
             primitive("atan").unwrap().signature.to_string(),
-            "(-> number? number? * number?)"
+            "(-> number? number? ? number?)"
         );
         assert_eq!(
             primitive("rationalize").unwrap().signature.to_string(),
@@ -899,7 +899,7 @@ mod tests {
     fn exposes_string_primitives() {
         assert_eq!(
             primitive("make-string").unwrap().signature.to_string(),
-            "(-> number? char? * string?)"
+            "(-> number? char? ? string?)"
         );
         assert_eq!(
             primitive("string").unwrap().signature.to_string(),
@@ -991,7 +991,7 @@ mod tests {
         );
         assert_eq!(
             primitive("string->number").unwrap().signature.to_string(),
-            "(-> string? number? * (U boolean? number?))"
+            "(-> string? number? ? (U boolean? number?))"
         );
     }
 
@@ -1006,11 +1006,11 @@ mod tests {
         );
         assert_eq!(
             primitive("read-char").unwrap().signature.to_string(),
-            "(-> input-port? * (U char? eof-object?))"
+            "(-> input-port? ? (U char? eof-object?))"
         );
         assert_eq!(
             primitive("read").unwrap().signature.to_string(),
-            "(-> input-port? * any?)"
+            "(-> input-port? ? any?)"
         );
         assert_eq!(
             primitive("current-output-port")
@@ -1021,7 +1021,7 @@ mod tests {
         );
         assert_eq!(
             primitive("write").unwrap().signature.to_string(),
-            "(-> any? output-port? * unknown?)"
+            "(-> any? output-port? ? unknown?)"
         );
         assert_eq!(
             primitive("open-output-file").unwrap().signature.to_string(),
@@ -1087,7 +1087,7 @@ mod tests {
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),
-            "(-> char? output-port? * unknown?)"
+            "(-> char? output-port? ? unknown?)"
         );
         assert_eq!(
             primitive("transcript-on").unwrap().signature.to_string(),

@@ -32,6 +32,11 @@ pub enum ProcedureType {
         params: Vec<Type>,
         result: Box<Type>,
     },
+    Optional {
+        required: Vec<Type>,
+        optional: Vec<Type>,
+        result: Box<Type>,
+    },
     UniformVariadic {
         param: Box<Type>,
         result: Box<Type>,
@@ -54,6 +59,18 @@ impl Type {
     pub fn uniform_variadic(param: Type, result: Type) -> Self {
         Self::Procedure(ProcedureType::UniformVariadic {
             param: Box::new(param),
+            result: Box::new(result),
+        })
+    }
+
+    pub fn optional_procedure(
+        required: impl Into<Vec<Type>>,
+        optional: impl Into<Vec<Type>>,
+        result: Type,
+    ) -> Self {
+        Self::Procedure(ProcedureType::Optional {
+            required: required.into(),
+            optional: optional.into(),
             result: Box::new(result),
         })
     }
@@ -124,6 +141,15 @@ impl fmt::Display for ProcedureType {
             ProcedureType::Fixed { params, result } => {
                 write_joined(f, "(->", params)?;
                 write!(f, " {result})")
+            }
+            ProcedureType::Optional {
+                required,
+                optional,
+                result,
+            } => {
+                write_joined(f, "(->", required)?;
+                write_joined(f, "", optional)?;
+                write!(f, " ? {result})")
             }
             ProcedureType::UniformVariadic { param, result } => {
                 write!(f, "(->* {param} {result})")
@@ -224,6 +250,11 @@ mod tests {
         assert_eq!(
             Type::uniform_variadic(Type::Number, Type::Number).to_string(),
             "(->* number? number?)"
+        );
+        assert_eq!(
+            Type::optional_procedure(vec![Type::String], vec![Type::Number], Type::String)
+                .to_string(),
+            "(-> string? number? ? string?)"
         );
         assert_eq!(
             Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean)

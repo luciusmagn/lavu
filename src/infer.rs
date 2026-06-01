@@ -13,7 +13,7 @@ pub enum TypeError {
     UnboundVariable { name: String, span: SourceSpan },
 
     #[error("expected a procedure, got {actual}")]
-    ExpectedProcedure { actual: Type, span: SourceSpan },
+    ExpectedProcedure { actual: Box<Type>, span: SourceSpan },
 
     #[error("wrong number of arguments: expected {expected}, got {actual}")]
     ArityMismatch {
@@ -24,8 +24,8 @@ pub enum TypeError {
 
     #[error("type mismatch: expected {expected}, got {actual}")]
     Mismatch {
-        expected: Type,
-        actual: Type,
+        expected: Box<Type>,
+        actual: Box<Type>,
         span: SourceSpan,
     },
 }
@@ -521,7 +521,10 @@ impl Inferencer {
                 );
                 Ok(self.resolve(result))
             }
-            actual => Err(TypeError::ExpectedProcedure { actual, span }),
+            actual => Err(TypeError::ExpectedProcedure {
+                actual: Box::new(actual),
+                span,
+            }),
         }
     }
 
@@ -580,6 +583,21 @@ impl Inferencer {
             ),
             Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
                 params
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect::<Vec<_>>(),
+                self.instantiate_scheme_type(result, vars),
+            ),
+            Type::Procedure(ProcedureType::Optional {
+                required,
+                optional,
+                result,
+            }) => Type::optional_procedure(
+                required
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect::<Vec<_>>(),
+                optional
                     .iter()
                     .map(|ty| self.instantiate_scheme_type(ty, vars))
                     .collect::<Vec<_>>(),
@@ -1030,6 +1048,40 @@ impl Inferencer {
 
                 Ok(self.resolve(*result))
             }
+            ProcedureType::Optional {
+                required,
+                optional,
+                result,
+            } => {
+                let maximum = required.len() + optional.len();
+                if operand_tys.len() < required.len() || operand_tys.len() > maximum {
+                    return Err(TypeError::ArityMismatch {
+                        expected: format!("{} to {}", required.len(), maximum),
+                        actual: operand_tys.len(),
+                        span: span_for_operands(operands),
+                    });
+                }
+
+                for ((actual, expected), operand) in operand_tys
+                    .iter()
+                    .cloned()
+                    .zip(required.iter().cloned())
+                    .zip(operands)
+                {
+                    self.unify(actual, expected, operand.span.clone())?;
+                }
+
+                for ((actual, expected), operand) in operand_tys
+                    .into_iter()
+                    .skip(required.len())
+                    .zip(optional)
+                    .zip(operands.iter().skip(required.len()))
+                {
+                    self.unify(actual, expected, operand.span.clone())?;
+                }
+
+                Ok(self.resolve(*result))
+            }
             ProcedureType::UniformVariadic { param, result } => {
                 for (actual, operand) in operand_tys.into_iter().zip(operands) {
                     self.unify(actual, (*param).clone(), operand.span.clone())?;
@@ -1113,8 +1165,8 @@ impl Inferencer {
             }
             (actual, expected) if actual == expected => Ok(actual),
             (actual, expected) => Err(TypeError::Mismatch {
-                expected,
-                actual,
+                expected: Box::new(expected),
+                actual: Box::new(actual),
                 span,
             }),
         }
@@ -1147,6 +1199,39 @@ impl Inferencer {
 
                 let params = actual_params
                     .into_iter()
+                    .zip(expected_params)
+                    .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.unify(*actual_result, *expected_result, span)?;
+
+                Ok(Type::procedure(params, result))
+            }
+            (
+                ProcedureType::Optional {
+                    required: actual_required,
+                    optional: actual_optional,
+                    result: actual_result,
+                },
+                ProcedureType::Fixed {
+                    params: expected_params,
+                    result: expected_result,
+                },
+            ) => {
+                let maximum = actual_required.len() + actual_optional.len();
+                if expected_params.len() < actual_required.len() || expected_params.len() > maximum
+                {
+                    return Err(TypeError::ArityMismatch {
+                        expected: format!("{} to {}", actual_required.len(), maximum),
+                        actual: expected_params.len(),
+                        span,
+                    });
+                }
+
+                let actual_params = actual_required
+                    .into_iter()
+                    .chain(actual_optional)
+                    .take(expected_params.len());
+                let params = actual_params
                     .zip(expected_params)
                     .map(|(actual, expected)| self.unify(actual, expected, span.clone()))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1254,8 +1339,8 @@ impl Inferencer {
                 Ok(Type::rest_procedure(required, rest, result))
             }
             (actual, expected) => Err(TypeError::Mismatch {
-                expected: Type::Procedure(expected),
-                actual: Type::Procedure(actual),
+                expected: Box::new(Type::Procedure(expected)),
+                actual: Box::new(Type::Procedure(actual)),
                 span,
             }),
         }
@@ -1298,6 +1383,21 @@ impl Inferencer {
             ),
             Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
                 params
+                    .into_iter()
+                    .map(|ty| self.resolve(ty))
+                    .collect::<Vec<_>>(),
+                self.resolve(*result),
+            ),
+            Type::Procedure(ProcedureType::Optional {
+                required,
+                optional,
+                result,
+            }) => Type::optional_procedure(
+                required
+                    .into_iter()
+                    .map(|ty| self.resolve(ty))
+                    .collect::<Vec<_>>(),
+                optional
                     .into_iter()
                     .map(|ty| self.resolve(ty))
                     .collect::<Vec<_>>(),
@@ -1357,6 +1457,15 @@ fn contains_var(ty: &Type, name: &str) -> bool {
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(|ty| contains_var(ty, name)) || contains_var(result, name)
         }
+        Type::Procedure(ProcedureType::Optional {
+            required,
+            optional,
+            result,
+        }) => {
+            required.iter().any(|ty| contains_var(ty, name))
+                || optional.iter().any(|ty| contains_var(ty, name))
+                || contains_var(result, name)
+        }
         Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
             contains_var(param, name) || contains_var(result, name)
         }
@@ -1382,6 +1491,15 @@ fn has_type_var(ty: &Type) -> bool {
         Type::Values(types) | Type::Union(types) => types.iter().any(has_type_var),
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(has_type_var) || has_type_var(result)
+        }
+        Type::Procedure(ProcedureType::Optional {
+            required,
+            optional,
+            result,
+        }) => {
+            required.iter().any(has_type_var)
+                || optional.iter().any(has_type_var)
+                || has_type_var(result)
         }
         Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
             has_type_var(param) || has_type_var(result)
@@ -1609,6 +1727,10 @@ mod tests {
             "wrong number of arguments: expected 1, got 0"
         );
         assert_eq!(
+            infer_error("(write 1 (current-output-port) (current-output-port))").to_string(),
+            "wrong number of arguments: expected 1 to 2, got 3"
+        );
+        assert_eq!(
             infer_error("(\"x\" 1)").to_string(),
             "expected a procedure, got string?"
         );
@@ -1677,8 +1799,8 @@ mod tests {
         else {
             panic!("expected mismatch");
         };
-        assert_eq!(expected, Type::Number);
-        assert_eq!(actual, Type::String);
+        assert_eq!(*expected, Type::Number);
+        assert_eq!(*actual, Type::String);
     }
 
     #[test]
