@@ -1099,6 +1099,11 @@ mod tests {
             "boolean?"
         );
         assert_eq!(infer_one("(open-output-file \"x\")"), "output-port?");
+        assert_eq!(infer_one("(call-with-input-file \"x\" read)"), "any?");
+        assert_eq!(
+            infer_one("(call-with-output-file \"x\" (lambda (p) (write \"x\" p)))"),
+            "any?"
+        );
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 

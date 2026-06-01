@@ -409,12 +409,14 @@ Scheme value is valid.
 - Add EOF objects, current/file input ports, =read=, =read-char=,
   =peek-char=, =char-ready?=, and =close-input-port= with conservative
   typed metadata.
+- Add =call-with-input-file= around file-backed input ports.
 ** Output Ports
 - Add a first stdout-backed output port, plus native =current-output-port=,
   =write=, =display=, =newline=, and =write-char= with conservative
   type metadata.
 - Add file-backed output ports with =open-output-file= and
   =close-output-port=.
+- Add =call-with-output-file= around file-backed output ports.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.

@@ -367,6 +367,8 @@ impl Env {
             "current-output-port",
             "open-input-file",
             "open-output-file",
+            "call-with-input-file",
+            "call-with-output-file",
             "close-input-port",
             "close-output-port",
             "read",
@@ -779,6 +781,8 @@ fn apply_primitive(
         "current-output-port" => current_output_port(args, span),
         "open-input-file" => open_input_file(args, span),
         "open-output-file" => open_output_file(args, span),
+        "call-with-input-file" => call_with_input_file(args, span),
+        "call-with-output-file" => call_with_output_file(args, span),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -2284,13 +2288,17 @@ fn open_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErro
                 span,
             });
         };
-        fs::read_to_string(path.borrow().as_str())
-            .map(|text| Value::InputPort(InputPort::from_string(text)))
-            .map_err(|error| EvalError::IoError {
-                message: error.to_string(),
-                span,
-            })
+        input_port_from_path(path.borrow().as_str(), span).map(Value::InputPort)
     })
+}
+
+fn input_port_from_path(path: &str, span: SourceSpan) -> Result<InputPort, EvalError> {
+    fs::read_to_string(path)
+        .map(InputPort::from_string)
+        .map_err(|error| EvalError::IoError {
+            message: error.to_string(),
+            span,
+        })
 }
 
 fn close_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -2444,33 +2452,87 @@ fn open_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
                 span,
             });
         };
-        fs::File::create(path.borrow().as_str())
-            .map(|file| {
-                Value::OutputPort(OutputPort::File(Rc::new(RefCell::new(OutputFilePort {
-                    file,
-                    closed: false,
-                }))))
-            })
-            .map_err(|error| EvalError::IoError {
-                message: error.to_string(),
-                span,
-            })
+        output_port_from_path(path.borrow().as_str(), span).map(Value::OutputPort)
     })
+}
+
+fn output_port_from_path(path: &str, span: SourceSpan) -> Result<OutputPort, EvalError> {
+    fs::File::create(path)
+        .map(|file| {
+            OutputPort::File(Rc::new(RefCell::new(OutputFilePort {
+                file,
+                closed: false,
+            })))
+        })
+        .map_err(|error| EvalError::IoError {
+            message: error.to_string(),
+            span,
+        })
+}
+
+fn call_with_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(path) = path else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+
+    let port = input_port_from_path(path.borrow().as_str(), span.clone())?;
+    let result = apply(
+        procedure,
+        vec![Value::InputPort(port.clone())],
+        span.clone(),
+    );
+    port.0.borrow_mut().closed = true;
+    result
+}
+
+fn call_with_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(path) = path else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+
+    let port = output_port_from_path(path.borrow().as_str(), span.clone())?;
+    let result = apply(
+        procedure,
+        vec![Value::OutputPort(port.clone())],
+        span.clone(),
+    );
+    close_output_port_value(port);
+    result
 }
 
 fn close_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let port = output_port(value, span)?;
-        match port {
-            OutputPort::Stdout => Ok(Value::Unspecified),
-            OutputPort::File(file) => {
-                file.borrow_mut().closed = true;
-                Ok(Value::Unspecified)
-            }
-            #[cfg(test)]
-            OutputPort::Buffer(_) => Ok(Value::Unspecified),
-        }
+        close_output_port_value(port);
+        Ok(Value::Unspecified)
     })
+}
+
+fn close_output_port_value(port: OutputPort) {
+    match port {
+        OutputPort::Stdout => {}
+        OutputPort::File(file) => file.borrow_mut().closed = true,
+        #[cfg(test)]
+        OutputPort::Buffer(_) => {}
+    }
 }
 
 fn output_value(args: Vec<Value>, span: SourceSpan, mode: OutputMode) -> Result<Value, EvalError> {
@@ -3795,6 +3857,17 @@ mod tests {
 
         assert_eq!(eval_one(&input), "((a 1) #\\z #t)");
         std::fs::remove_file(read_path).unwrap();
+
+        let call_path =
+            std::env::temp_dir().join(format!("lavu-call-input-{}.ss", std::process::id()));
+        std::fs::write(&call_path, "(ok 1)").unwrap();
+        let input = format!(
+            "(call-with-input-file \"{}\" (lambda (p) (read p)))",
+            call_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "(ok 1)");
+        std::fs::remove_file(call_path).unwrap();
     }
 
     #[test]
@@ -3858,6 +3931,17 @@ mod tests {
         assert_eq!(eval_one(&input), "#<unspecified>");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "x(a 1)");
         std::fs::remove_file(path).unwrap();
+
+        let call_path =
+            std::env::temp_dir().join(format!("lavu-call-output-{}.ss", std::process::id()));
+        let input = format!(
+            "(call-with-output-file \"{}\" (lambda (p) (display \"y\" p) (write '(b 2) p)))",
+            call_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "#<unspecified>");
+        assert_eq!(std::fs::read_to_string(&call_path).unwrap(), "y(b 2)");
+        std::fs::remove_file(call_path).unwrap();
     }
 
     #[test]
