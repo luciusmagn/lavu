@@ -638,6 +638,8 @@ Scheme value is valid.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.
+- Remove a stale lexer-test note after the active token tests had
+  already been converted.
 ** Apply Primitive
 - Add native R5RS =apply= evaluation with runtime enforcement of the
   final list argument and conservative =any?= type metadata until the

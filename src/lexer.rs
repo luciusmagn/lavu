@@ -1224,7 +1224,6 @@ mod tests {
         ));
     }
 
-    // TODO: convert the rest
     #[test]
     fn test_lists_and_vectors() {
         let input = "(define (square x) (* x x)) #(1 2 3)";
