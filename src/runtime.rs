@@ -20,7 +20,7 @@ pub enum Value {
     Complex(Complex<BigDecimal>),
     Boolean(bool),
     Character(char),
-    String(String),
+    String(Rc<RefCell<String>>),
     Symbol(String),
     List(Vec<Value>),
     Pair(Box<Value>, Box<Value>),
@@ -41,7 +41,7 @@ impl PartialEq for Value {
             (Value::Complex(left), Value::Complex(right)) => left == right,
             (Value::Boolean(left), Value::Boolean(right)) => left == right,
             (Value::Character(left), Value::Character(right)) => left == right,
-            (Value::String(left), Value::String(right)) => left == right,
+            (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
             (Value::Symbol(left), Value::Symbol(right)) => left == right,
             (Value::List(left), Value::List(right)) => left == right,
             (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
@@ -546,14 +546,14 @@ fn apply_primitive(
         "force" => force(args, span),
         "apply" => apply_procedure_argument(args, span),
         "symbol->string" => unary(args, span.clone(), |value| match value {
-            Value::Symbol(name) => Ok(Value::String(name)),
+            Value::Symbol(name) => Ok(string_value(name)),
             _ => Err(EvalError::TypeError {
                 expected: "symbol?",
                 span,
             }),
         }),
         "string->symbol" => unary(args, span.clone(), |value| match value {
-            Value::String(text) => Ok(Value::Symbol(text)),
+            Value::String(text) => Ok(Value::Symbol(text.borrow().clone())),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span,
@@ -575,7 +575,7 @@ fn apply_primitive(
         }),
         "number->string" => unary(args, span.clone(), |value| match value {
             Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_) => {
-                Ok(Value::String(value.to_string()))
+                Ok(string_value(value.to_string()))
             }
             _ => Err(EvalError::TypeError {
                 expected: "number?",
@@ -583,7 +583,7 @@ fn apply_primitive(
             }),
         }),
         "string->number" => unary(args, span.clone(), |value| match value {
-            Value::String(text) => Ok(string_to_number(&text)),
+            Value::String(text) => Ok(string_to_number(text.borrow().as_str())),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span,
@@ -615,7 +615,7 @@ fn apply_primitive(
         "map" => map_list(args, span),
         "for-each" => for_each(args, span),
         "string-length" => unary(args, span.clone(), |value| match value {
-            Value::String(text) => Ok(Value::Integer(BigInt::from(text.chars().count()))),
+            Value::String(text) => Ok(Value::Integer(BigInt::from(text.borrow().chars().count()))),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span,
@@ -1277,7 +1277,7 @@ fn string_compare(
     let strings = args
         .into_iter()
         .map(|value| match value {
-            Value::String(text) => Ok(text),
+            Value::String(text) => Ok(text.borrow().clone()),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span: span.clone(),
@@ -1308,7 +1308,7 @@ fn string_ci_compare(
     let strings = args
         .into_iter()
         .map(|value| match value {
-            Value::String(text) => Ok(text.to_lowercase()),
+            Value::String(text) => Ok(text.borrow().to_lowercase()),
             _ => Err(EvalError::TypeError {
                 expected: "string?",
                 span: span.clone(),
@@ -1450,7 +1450,7 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Decimal(left), Value::Decimal(right)) => left == right,
         (Value::Complex(left), Value::Complex(right)) => left == right,
         (Value::Character(left), Value::Character(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
+        (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
@@ -1974,7 +1974,7 @@ fn atom_to_value(atom: &Atom) -> Value {
         Atom::Decimal(n) => Value::Decimal(n.clone()),
         Atom::Real(n, d) => Value::Rational(BigRational::new(n.clone(), d.clone())),
         Atom::Complex(n) => Value::Complex(n.clone()),
-        Atom::String(text) => Value::String(text.clone()),
+        Atom::String(text) => string_value(text.clone()),
         Atom::Boolean(value) => Value::Boolean(*value),
         Atom::Character(value) => Value::Character(*value),
     }
@@ -2002,6 +2002,10 @@ fn cons_value(head: Value, tail: Value) -> Value {
     }
 }
 
+fn string_value(text: impl Into<String>) -> Value {
+    Value::String(Rc::new(RefCell::new(text.into())))
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -2020,7 +2024,7 @@ impl fmt::Display for Value {
             Value::Character(' ') => write!(f, "#\\space"),
             Value::Character('\n') => write!(f, "#\\newline"),
             Value::Character(c) => write!(f, "#\\{c}"),
-            Value::String(text) => write!(f, "\"{text}\""),
+            Value::String(text) => write!(f, "\"{}\"", text.borrow()),
             Value::Symbol(name) => write!(f, "{name}"),
             Value::List(items) => {
                 write!(f, "(")?;
