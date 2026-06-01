@@ -642,11 +642,17 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::new("append", Type::uniform_variadic(Type::Any, Type::Any)),
         Primitive::new(
             "list-ref",
-            Type::procedure(vec![Type::List, Type::Number], Type::Any),
+            Type::procedure(
+                vec![Type::ListOf(Box::new(a.clone())), Type::Number],
+                a.clone(),
+            ),
         ),
         Primitive::new(
             "list-tail",
-            Type::procedure(vec![Type::List, Type::Number], Type::List),
+            Type::procedure(
+                vec![Type::ListOf(Box::new(a.clone())), Type::Number],
+                Type::ListOf(Box::new(a.clone())),
+            ),
         ),
         Primitive::new(
             "memq",
@@ -974,11 +980,11 @@ mod tests {
     fn exposes_indexed_list_primitives() {
         assert_eq!(
             primitive("list-ref").unwrap().signature.to_string(),
-            "(-> list? number? any?)"
+            "(-> (listof a) number? a)"
         );
         assert_eq!(
             primitive("list-tail").unwrap().signature.to_string(),
-            "(-> list? number? list?)"
+            "(-> (listof a) number? (listof a))"
         );
     }
 

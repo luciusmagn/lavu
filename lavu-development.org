@@ -713,6 +713,8 @@ Scheme value is valid.
 ** Indexed List Primitives
 - Add typed and native =list-ref= and =list-tail= over proper lists with
   checked exact non-negative indexes.
+- Expose polymorphic =list-ref= and =list-tail= metadata so querying the
+  primitive values shows their element flow.
 - Infer =list-ref= and =list-tail= through =listof= element types so
   indexed list access can constrain upstream parameters.
 - Infer visible literal-index =list-ref=, =list-tail=, and =vector-ref=

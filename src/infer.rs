@@ -3320,6 +3320,11 @@ mod tests {
 
     #[test]
     fn infers_indexed_list_primitives() {
+        assert_eq!(infer_one("list-ref"), "(-> (listof t0) number? t0)");
+        assert_eq!(
+            infer_one("list-tail"),
+            "(-> (listof t0) number? (listof t0))"
+        );
         assert_eq!(infer_one("(list)"), "null?");
         assert_eq!(infer_one("(list 1 \"x\")"), "(listof (U number? string?))");
         assert_eq!(infer_one("(car (list 1 \"x\"))"), "number?");
