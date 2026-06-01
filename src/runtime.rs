@@ -30,6 +30,7 @@ pub enum Value {
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
+    Values(Vec<Value>),
     Unspecified,
     Uninitialized,
 }
@@ -55,6 +56,7 @@ impl PartialEq for Value {
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
+            (Value::Values(left), Value::Values(right)) => left == right,
             (Value::Unspecified, Value::Unspecified)
             | (Value::Uninitialized, Value::Uninitialized) => true,
             _ => false,
@@ -278,6 +280,8 @@ impl Env {
             "eq?",
             "equal?",
             "force",
+            "values",
+            "call-with-values",
             "apply",
             "symbol->string",
             "string->symbol",
@@ -670,6 +674,8 @@ fn apply_primitive(
         "eq?" => eq(args, span),
         "equal?" => equal(args, span),
         "force" => force(args, span),
+        "values" => Ok(Value::Values(args)),
+        "call-with-values" => call_with_values(args, span),
         "apply" => apply_procedure_argument(args, span),
         "symbol->string" => unary(args, span.clone(), |value| match value {
             Value::Symbol(name) => Ok(string_value(name)),
@@ -2044,6 +2050,23 @@ fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     })
 }
 
+fn call_with_values(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [producer, consumer]: [Value; 2] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 2,
+            actual,
+            span: span.clone(),
+        })?;
+
+    let produced = apply(producer, Vec::new(), span.clone())?;
+    let consumer_args = match produced {
+        Value::Values(values) => values,
+        value => vec![value],
+    };
+    apply(consumer, consumer_args, span)
+}
+
 fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if args.len() < 2 {
         return Err(EvalError::ArityMismatch {
@@ -2908,6 +2931,13 @@ impl fmt::Display for Value {
                 write!(f, ")")
             }
             Value::Promise(_) => write!(f, "#<promise>"),
+            Value::Values(values) => {
+                write!(f, "(values")?;
+                for value in values {
+                    write!(f, " {value}")?;
+                }
+                write!(f, ")")
+            }
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
@@ -3096,6 +3126,19 @@ mod tests {
             ),
             "1"
         );
+    }
+
+    #[test]
+    fn evaluates_multiple_values() {
+        assert_eq!(
+            eval_one("(call-with-values (lambda () (values 1 2)) +)"),
+            "3"
+        );
+        assert_eq!(
+            eval_one("(call-with-values (lambda () 4) (lambda (x) (+ x 1)))"),
+            "5"
+        );
+        assert_eq!(eval_one("(values 1 2)"), "(values 1 2)");
     }
 
     #[test]

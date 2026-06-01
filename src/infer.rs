@@ -1018,6 +1018,15 @@ mod tests {
     }
 
     #[test]
+    fn infers_multiple_values_conservatively() {
+        assert_eq!(infer_one("(values 1 2)"), "unknown?");
+        assert_eq!(
+            infer_one("(call-with-values (lambda () (values 1 2)) +)"),
+            "any?"
+        );
+    }
+
+    #[test]
     fn infers_quasiquote_conservatively() {
         assert_eq!(infer_one("`(1 ,(+ 1 2))"), "any?");
     }
