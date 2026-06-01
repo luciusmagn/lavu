@@ -571,6 +571,8 @@ Scheme value is valid.
 - Infer visible heterogeneous =list= and =vector= constructors as unions,
   and infer no-fill =make-vector= elements as =any?= instead of leaking
   unconstrained type variables.
+- Print circular mutable vectors with a diagnostic marker so the REPL
+  display path does not hang on self-referential vectors.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

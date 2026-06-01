@@ -4092,15 +4092,17 @@ fn string_value(text: impl Into<String>) -> Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_value(self, f, &mut HashSet::new())
+        write_value(self, f, &mut WriteStack::default())
     }
 }
 
-fn write_value(
-    value: &Value,
-    f: &mut fmt::Formatter<'_>,
-    stack: &mut HashSet<*const RefCell<PairValue>>,
-) -> fmt::Result {
+#[derive(Default)]
+struct WriteStack {
+    pairs: HashSet<*const RefCell<PairValue>>,
+    vectors: HashSet<*const RefCell<Vec<Value>>>,
+}
+
+fn write_value(value: &Value, f: &mut fmt::Formatter<'_>, stack: &mut WriteStack) -> fmt::Result {
     match value {
         Value::Integer(n) => write!(f, "{n}"),
         Value::Rational(n) => write!(f, "{}/{}", n.numer(), n.denom()),
@@ -4120,9 +4122,16 @@ fn write_value(
         Value::String(text) => write_string_literal(f, &text.borrow()),
         Value::Symbol(name) => write!(f, "{name}"),
         Value::List(items) => write_list_items(items, f, stack),
-        Value::Pair(pair) if stack.contains(&Rc::as_ptr(pair)) => write!(f, "#<circular-pair>"),
+        Value::Pair(pair) if stack.pairs.contains(&Rc::as_ptr(pair)) => {
+            write!(f, "#<circular-pair>")
+        }
         Value::Pair(pair) => write_pair_value(pair.clone(), f, stack),
+        Value::Vector(items) if stack.vectors.contains(&Rc::as_ptr(items)) => {
+            write!(f, "#<circular-vector>")
+        }
         Value::Vector(items) => {
+            let pointer = Rc::as_ptr(items);
+            stack.vectors.insert(pointer);
             write!(f, "#(")?;
             for (index, item) in items.borrow().iter().enumerate() {
                 if index > 0 {
@@ -4130,7 +4139,9 @@ fn write_value(
                 }
                 write_value(item, f, stack)?;
             }
-            write!(f, ")")
+            write!(f, ")")?;
+            stack.vectors.remove(&pointer);
+            Ok(())
         }
         Value::InputPort(_) => write!(f, "#<input-port>"),
         Value::OutputPort(_) => write!(f, "#<output-port>"),
@@ -4155,7 +4166,7 @@ fn write_value(
 fn write_list_items(
     items: &[Value],
     f: &mut fmt::Formatter<'_>,
-    stack: &mut HashSet<*const RefCell<PairValue>>,
+    stack: &mut WriteStack,
 ) -> fmt::Result {
     write!(f, "(")?;
     for (index, item) in items.iter().enumerate() {
@@ -4170,7 +4181,7 @@ fn write_list_items(
 fn write_pair_value(
     pair: Rc<RefCell<PairValue>>,
     f: &mut fmt::Formatter<'_>,
-    stack: &mut HashSet<*const RefCell<PairValue>>,
+    stack: &mut WriteStack,
 ) -> fmt::Result {
     let mut inserted = Vec::new();
     write!(f, "(")?;
@@ -4181,7 +4192,7 @@ fn write_pair_value(
         match tail {
             Value::Pair(pair) => {
                 let pointer = Rc::as_ptr(&pair);
-                if !stack.insert(pointer) {
+                if !stack.pairs.insert(pointer) {
                     write!(f, " . #<circular-pair>)")?;
                     remove_pair_stack_entries(stack, inserted);
                     return Ok(());
@@ -4226,12 +4237,9 @@ fn write_pair_value(
     }
 }
 
-fn remove_pair_stack_entries(
-    stack: &mut HashSet<*const RefCell<PairValue>>,
-    inserted: Vec<*const RefCell<PairValue>>,
-) {
+fn remove_pair_stack_entries(stack: &mut WriteStack, inserted: Vec<*const RefCell<PairValue>>) {
     for pointer in inserted {
-        stack.remove(&pointer);
+        stack.pairs.remove(&pointer);
     }
 }
 
@@ -5144,6 +5152,10 @@ mod tests {
         assert_eq!(
             eval_one("(define v (vector 1 2)) (vector-fill! v 'x) (vector->list v)"),
             "(x x)"
+        );
+        assert_eq!(
+            eval_one("(define v (vector 1)) (vector-set! v 0 v) v"),
+            "#(#<circular-vector>)"
         );
     }
 
