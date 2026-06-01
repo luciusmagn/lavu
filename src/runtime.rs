@@ -3298,11 +3298,19 @@ fn eq_value(left: &Value, right: &Value) -> bool {
 }
 
 fn equal_value(left: &Value, right: &Value) -> bool {
+    equal_value_seen(left, right, &mut HashSet::new())
+}
+
+fn equal_value_seen(
+    left: &Value,
+    right: &Value,
+    seen: &mut HashSet<(*const RefCell<PairValue>, *const RefCell<PairValue>)>,
+) -> bool {
     match (left, right) {
         (Value::List(left), Value::List(right)) => {
             left.iter()
                 .zip(right)
-                .all(|(left, right)| equal_value(left, right))
+                .all(|(left, right)| equal_value_seen(left, right, seen))
                 && left.len() == right.len()
         }
         (Value::List(_), Value::Pair(_)) | (Value::Pair(_), Value::List(_)) => {
@@ -3314,20 +3322,35 @@ fn equal_value(left: &Value, right: &Value) -> bool {
             };
             left.iter()
                 .zip(right.iter())
-                .all(|(left, right)| equal_value(left, right))
+                .all(|(left, right)| equal_value_seen(left, right, seen))
                 && left.len() == right.len()
         }
         (Value::Pair(left), Value::Pair(right)) => {
-            let left = left.borrow();
-            let right = right.borrow();
-            equal_value(&left.car, &right.car) && equal_value(&left.cdr, &right.cdr)
+            let key = (Rc::as_ptr(left), Rc::as_ptr(right));
+            if !seen.insert(key) {
+                return true;
+            }
+            let (left_car, left_cdr, right_car, right_cdr) = {
+                let left = left.borrow();
+                let right = right.borrow();
+                (
+                    left.car.clone(),
+                    left.cdr.clone(),
+                    right.car.clone(),
+                    right.cdr.clone(),
+                )
+            };
+            let equal = equal_value_seen(&left_car, &right_car, seen)
+                && equal_value_seen(&left_cdr, &right_cdr, seen);
+            seen.remove(&key);
+            equal
         }
         (Value::Vector(left), Value::Vector(right)) => {
             let left = left.borrow();
             let right = right.borrow();
             left.iter()
                 .zip(right.iter())
-                .all(|(left, right)| equal_value(left, right))
+                .all(|(left, right)| equal_value_seen(left, right, seen))
                 && left.len() == right.len()
         }
         _ => eqv_value(left, right),
@@ -4784,6 +4807,29 @@ mod tests {
         assert_eq!(eval_one("(equal? (vector 1 2) (vector 1 2))"), "#t");
         assert_eq!(eval_one("(eq? (vector 1 2) (vector 1 2))"), "#f");
         assert_eq!(eval_one("(define v (vector 1 2)) (eq? v v)"), "#t");
+        assert_eq!(
+            eval_one("(define p (cons 1 '())) (set-cdr! p p) (equal? p p)"),
+            "#t"
+        );
+        assert_eq!(
+            eval_one(
+                "(define p (cons 1 '()))
+                 (define q (cons 1 '()))
+                 (set-cdr! p p)
+                 (set-cdr! q q)
+                 (equal? p q)"
+            ),
+            "#t"
+        );
+        assert_eq!(
+            eval_one(
+                "(define p (cons 1 '()))
+                 (define q (cons 1 '()))
+                 (set-cdr! p p)
+                 (equal? p q)"
+            ),
+            "#f"
+        );
     }
 
     #[test]
