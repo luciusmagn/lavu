@@ -728,3 +728,6 @@ Scheme value is valid.
 - Give those higher-order combinators polymorphic standard-library
   metadata too, so querying the primitive value shows the callback result
   relationship directly.
+- Dispatch primitive-specific inference before inferring the primitive
+  operator as a value, avoiding unused fresh type variables in displayed
+  results.

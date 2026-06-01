@@ -327,7 +327,6 @@ impl Inferencer {
                     return self.infer_desugared_or(condition, alternate, env);
                 }
 
-                let operator_ty = self.infer_expr(operator, env)?;
                 let operand_tys = operands
                     .iter()
                     .map(|operand| self.infer_expr(operand, env))
@@ -343,6 +342,7 @@ impl Inferencer {
                     );
                 }
 
+                let operator_ty = self.infer_expr(operator, env)?;
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
             }
         }
@@ -2709,11 +2709,11 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-input-file \"x\" f))"),
-            "(-> (-> input-port? t1) t1)"
+            "(-> (-> input-port? t0) t0)"
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-output-file \"x\" f))"),
-            "(-> (-> output-port? t1) t1)"
+            "(-> (-> output-port? t0) t0)"
         );
         assert_eq!(infer_one("(with-input-from-file \"x\" read)"), "any?");
         assert_eq!(
@@ -2722,7 +2722,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (thunk) (with-output-to-file \"x\" thunk))"),
-            "(-> (-> t1) t1)"
+            "(-> (-> t0) t0)"
         );
         assert_eq!(infer_one("(load \"x\")"), "unknown?");
         assert_eq!(
@@ -2740,7 +2740,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
-            "(-> (-> any?) (-> t1) (-> any?) t1)"
+            "(-> (-> any?) (-> t0) (-> any?) t0)"
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "number?");
         assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");
