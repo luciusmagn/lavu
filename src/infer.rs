@@ -54,6 +54,14 @@ impl TypeEnv {
         self.bindings.insert(name.into(), TypeBinding::monotype(ty));
     }
 
+    fn define_inferred(&mut self, name: impl Into<String>, ty: Type) {
+        if has_type_var(&ty) {
+            self.define_scheme(name, ty);
+        } else {
+            self.define(name, ty);
+        }
+    }
+
     pub fn get(&self, name: &str) -> Option<&Type> {
         self.binding(name).map(|binding| &binding.ty)
     }
@@ -191,7 +199,7 @@ impl Inferencer {
             TopLevel::Define { name, value } => {
                 let ty = self.infer_expr(value, env)?;
                 let ty = self.resolve(ty);
-                env.define(name.node.clone(), ty.clone());
+                env.define_inferred(name.node.clone(), ty.clone());
                 Ok(ty)
             }
             TopLevel::Expr(expr) => self.infer_expr(
@@ -1366,6 +1374,27 @@ fn contains_var(ty: &Type, name: &str) -> bool {
     }
 }
 
+fn has_type_var(ty: &Type) -> bool {
+    match ty {
+        Type::Var(_) => true,
+        Type::Pair(car, cdr) => has_type_var(car) || has_type_var(cdr),
+        Type::ListOf(element) | Type::VectorOf(element) => has_type_var(element),
+        Type::Values(types) | Type::Union(types) => types.iter().any(has_type_var),
+        Type::Procedure(ProcedureType::Fixed { params, result }) => {
+            params.iter().any(has_type_var) || has_type_var(result)
+        }
+        Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+            has_type_var(param) || has_type_var(result)
+        }
+        Type::Procedure(ProcedureType::Rest {
+            required,
+            rest,
+            result,
+        }) => required.iter().any(has_type_var) || has_type_var(rest) || has_type_var(result),
+        _ => false,
+    }
+}
+
 fn type_of_atom(atom: &Atom) -> Type {
     match atom {
         Atom::Identifier(name) => primitive(name)
@@ -1545,11 +1574,20 @@ mod tests {
     use crate::types::Type;
 
     fn infer_one(input: &str) -> String {
+        infer_all(input)[0].clone()
+    }
+
+    fn infer_all(input: &str) -> Vec<String> {
         let datums = parse(input).unwrap();
         let program = classify_program(&datums).unwrap();
         let mut env = TypeEnv::new();
         let mut inferencer = Inferencer::new();
-        inferencer.infer_program(&program, &mut env).unwrap()[0].to_string()
+        inferencer
+            .infer_program(&program, &mut env)
+            .unwrap()
+            .into_iter()
+            .map(|ty| ty.to_string())
+            .collect()
     }
 
     fn infer_error(input: &str) -> TypeError {
@@ -1810,6 +1848,18 @@ mod tests {
         assert_eq!(
             infer_one("((lambda () (vector 1) (vector #\\a)))"),
             "(vectorof char?)"
+        );
+    }
+
+    #[test]
+    fn generalizes_top_level_inferred_schemes() {
+        assert_eq!(
+            infer_all("(define id (lambda (x) x)) (id 1) (id \"x\")"),
+            vec![
+                "(-> x x)".to_string(),
+                "number?".to_string(),
+                "string?".to_string(),
+            ]
         );
     }
 

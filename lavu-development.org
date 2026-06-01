@@ -566,3 +566,6 @@ Scheme value is valid.
 - Instantiate standard-library polymorphic type schemes per use so one
   primitive application cannot leak its element constraints into a later
   use of the same primitive.
+- Generalize top-level inferred definitions that still contain free type
+  variables, so simple definitions such as identity functions can be used
+  polymorphically across later forms.
