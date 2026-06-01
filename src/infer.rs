@@ -818,6 +818,18 @@ impl Inferencer {
 
         match self.resolve(receiver_ty) {
             Type::Procedure(receiver) => self.infer_call_cc_receiver(receiver, operands),
+            Type::Var(name) => {
+                let escape = self.fresh_type_var();
+                let direct = self.fresh_type_var();
+                self.substitutions.insert(
+                    name,
+                    Type::procedure(
+                        vec![Type::procedure(vec![escape.clone()], Type::Never)],
+                        direct.clone(),
+                    ),
+                );
+                Ok(Type::union(vec![escape, direct]))
+            }
             actual => {
                 self.unify(actual, call_cc_receiver_type(), operands[0].span.clone())?;
                 Ok(Type::Any)
@@ -1943,7 +1955,10 @@ fn type_of_atom(atom: &Atom) -> Type {
 }
 
 fn call_cc_receiver_type() -> Type {
-    Type::procedure(vec![Type::procedure(vec![Type::Any], Type::Any)], Type::Any)
+    Type::procedure(
+        vec![Type::procedure(vec![Type::Any], Type::Never)],
+        Type::Any,
+    )
 }
 
 fn same_type_var(left: &Type, right: &Type) -> bool {
@@ -2750,7 +2765,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (f) (call/cc f))"),
-            "(-> (-> (-> any? any?) any?) any?)"
+            "(-> (-> (-> t0 never?) t1) (U t0 t1))"
         );
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
