@@ -153,6 +153,11 @@ enum PrimitiveApplication {
     Values,
     CallWithValues,
     CallCc,
+    CallWithInputFile,
+    CallWithOutputFile,
+    WithInputFromFile,
+    WithOutputToFile,
+    DynamicWind,
     Map,
     ForEach,
     List,
@@ -183,6 +188,11 @@ impl PrimitiveApplication {
             "values" => Some(Self::Values),
             "call-with-values" => Some(Self::CallWithValues),
             "call/cc" | "call-with-current-continuation" => Some(Self::CallCc),
+            "call-with-input-file" => Some(Self::CallWithInputFile),
+            "call-with-output-file" => Some(Self::CallWithOutputFile),
+            "with-input-from-file" => Some(Self::WithInputFromFile),
+            "with-output-to-file" => Some(Self::WithOutputToFile),
+            "dynamic-wind" => Some(Self::DynamicWind),
             "map" => Some(Self::Map),
             "for-each" => Some(Self::ForEach),
             "list" => Some(Self::List),
@@ -374,6 +384,18 @@ impl Inferencer {
                 self.infer_call_with_values(operands, operand_tys, span)
             }
             PrimitiveApplication::CallCc => self.infer_call_cc(operands, operand_tys, span),
+            PrimitiveApplication::CallWithInputFile => {
+                self.infer_file_callback(operands, operand_tys, span, Type::InputPort)
+            }
+            PrimitiveApplication::CallWithOutputFile => {
+                self.infer_file_callback(operands, operand_tys, span, Type::OutputPort)
+            }
+            PrimitiveApplication::WithInputFromFile | PrimitiveApplication::WithOutputToFile => {
+                self.infer_file_thunk(operands, operand_tys, span)
+            }
+            PrimitiveApplication::DynamicWind => {
+                self.infer_dynamic_wind(operands, operand_tys, span)
+            }
             PrimitiveApplication::Map => self.infer_higher_order_list(
                 operands,
                 operand_tys,
@@ -823,6 +845,82 @@ impl Inferencer {
         } else {
             Type::union(vec![direct, escape])
         })
+    }
+
+    fn infer_file_callback(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        port_ty: Type,
+    ) -> Result<Type, TypeError> {
+        let [path_ty, callback_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        self.unify(path_ty, Type::String, operands[0].span.clone())?;
+        let callback_span = operands[1].span.clone();
+        let port_operand = synthetic_operand(callback_span.clone());
+        self.infer_application(callback_ty, &[port_operand], vec![port_ty], callback_span)
+    }
+
+    fn infer_file_thunk(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let [path_ty, thunk_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        self.unify(path_ty, Type::String, operands[0].span.clone())?;
+        self.infer_nullary_application(thunk_ty, operands[1].span.clone())
+    }
+
+    fn infer_dynamic_wind(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let [before_ty, thunk_ty, after_ty]: [Type; 3] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "3".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        self.infer_ignored_thunk(before_ty, operands[0].span.clone())?;
+        let result = self.infer_nullary_application(thunk_ty, operands[1].span.clone())?;
+        self.infer_ignored_thunk(after_ty, operands[2].span.clone())?;
+        Ok(result)
+    }
+
+    fn infer_ignored_thunk(&mut self, ty: Type, span: SourceSpan) -> Result<(), TypeError> {
+        self.unify(ty, Type::procedure(vec![], Type::Any), span)?;
+        Ok(())
+    }
+
+    fn infer_nullary_application(
+        &mut self,
+        procedure_ty: Type,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let operand_span = synthetic_operand(span.clone());
+        self.infer_application(procedure_ty, &[operand_span], Vec::new(), span)
     }
 
     fn infer_list_constructor(&self, operand_tys: Vec<Type>) -> Type {
@@ -1935,6 +2033,10 @@ fn span_for_operands(operands: &[Spanned<Expr>]) -> SourceSpan {
     }
 }
 
+fn synthetic_operand(span: SourceSpan) -> Spanned<Expr> {
+    Spanned::new(Expr::Literal(Atom::Boolean(true)), span)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RefinedBranch {
     Then,
@@ -2599,20 +2701,24 @@ mod tests {
         assert_eq!(infer_one("(call-with-input-file \"x\" read)"), "any?");
         assert_eq!(
             infer_one("(call-with-output-file \"x\" (lambda (p) (write \"x\" p)))"),
-            "any?"
+            "unknown?"
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-input-file \"x\" f))"),
-            "(-> (-> input-port? any?) any?)"
+            "(-> (-> input-port? t0) t0)"
+        );
+        assert_eq!(
+            infer_one("(lambda (f) (call-with-output-file \"x\" f))"),
+            "(-> (-> output-port? t0) t0)"
         );
         assert_eq!(infer_one("(with-input-from-file \"x\" read)"), "any?");
         assert_eq!(
             infer_one("(with-output-to-file \"x\" (lambda () (write \"x\")))"),
-            "any?"
+            "unknown?"
         );
         assert_eq!(
             infer_one("(lambda (thunk) (with-output-to-file \"x\" thunk))"),
-            "(-> (-> any?) any?)"
+            "(-> (-> t0) t0)"
         );
         assert_eq!(infer_one("(load \"x\")"), "unknown?");
         assert_eq!(
@@ -2622,11 +2728,11 @@ mod tests {
         assert_eq!(infer_one("(interaction-environment)"), "any?");
         assert_eq!(
             infer_one("(dynamic-wind (lambda () 1) (lambda () 2) (lambda () 3))"),
-            "any?"
+            "number?"
         );
         assert_eq!(
             infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
-            "(-> (-> any?) (-> any?) (-> any?) any?)"
+            "(-> (-> any?) (-> t0) (-> any?) t0)"
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "number?");
         assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");

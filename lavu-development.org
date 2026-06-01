@@ -711,3 +711,6 @@ Scheme value is valid.
 - Recognize occurrence-typing predicate refinements through the active
   type environment too, including =not=, so shadowed predicate names stay
   ordinary calls.
+- Infer callback and thunk result flow through file port combinators and
+  =dynamic-wind= instead of collapsing those higher-order results to
+  =any?=.
