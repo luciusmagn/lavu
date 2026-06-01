@@ -911,6 +911,7 @@ fn ensure_distinct_pattern_variables(
     literals: &BTreeSet<String>,
 ) -> Result<(), SurfaceError> {
     let keyword = syntax_rule_keyword(pattern)?;
+    validate_pattern_ellipsis(pattern)?;
     let mut seen = BTreeSet::new();
 
     match &pattern.node {
@@ -926,6 +927,53 @@ fn ensure_distinct_pattern_variables(
             collect_unique_pattern_variables(tail, literals, &keyword, &mut seen)?;
         }
         _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
+    }
+
+    Ok(())
+}
+
+fn validate_pattern_ellipsis(pattern: &Spanned<Datum>) -> Result<(), SurfaceError> {
+    match &pattern.node {
+        Datum::List(items) => validate_pattern_sequence(&items[1..]),
+        Datum::DottedList(items, tail) => {
+            validate_pattern_sequence(&items[1..])?;
+            validate_pattern_item(tail)
+        }
+        _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
+    }
+}
+
+fn validate_pattern_item(pattern: &Spanned<Datum>) -> Result<(), SurfaceError> {
+    match &pattern.node {
+        Datum::Atom(Atom::Identifier(name)) if name == "..." => {
+            Err(SurfaceError::UnsupportedMacroPattern {
+                span: pattern.span.clone(),
+            })
+        }
+        Datum::List(items) | Datum::Vector(items) => validate_pattern_sequence(items),
+        Datum::DottedList(items, tail) => {
+            validate_pattern_sequence(items)?;
+            validate_pattern_item(tail)
+        }
+        Datum::Quote(inner)
+        | Datum::Quasiquote(inner)
+        | Datum::Unquote(inner)
+        | Datum::UnquoteSplicing(inner) => validate_pattern_item(inner),
+        Datum::Atom(_) => Ok(()),
+    }
+}
+
+fn validate_pattern_sequence(items: &[Spanned<Datum>]) -> Result<(), SurfaceError> {
+    for (index, item) in items.iter().enumerate() {
+        if is_ellipsis(item) {
+            if index == 0 || items.get(index - 1).is_some_and(is_ellipsis) {
+                return Err(SurfaceError::UnsupportedMacroPattern {
+                    span: item.span.clone(),
+                });
+            }
+        } else {
+            validate_pattern_item(item)?;
+        }
     }
 
     Ok(())
@@ -3074,6 +3122,24 @@ mod tests {
             assert!(matches!(
                 classify_program(&datums),
                 Err(SurfaceError::DuplicateIdentifier { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_bad_syntax_rule_ellipsis_patterns() {
+        for input in [
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m ...) 1)))",
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m x ... ...) 1)))",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_program(&datums),
+                Err(SurfaceError::UnsupportedMacroPattern { .. })
             ));
         }
     }

@@ -314,6 +314,8 @@ Scheme value is valid.
 - Reject duplicate =syntax-rules= pattern variables at macro definition
   time, while leaving literals, the rule keyword, and ellipses out of the
   variable set.
+- Reject invalid =syntax-rules= pattern ellipses such as a body-leading
+  ellipsis or doubled ellipses while parsing the transformer.
 - Reject =cond= forms whose =else= clause is not last, matching the
   existing =case= clause validation.
 - Reject empty =cond= forms and empty =cond= =else= clauses while keeping
