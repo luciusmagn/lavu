@@ -81,7 +81,11 @@ fn surface_span(error: &SurfaceError) -> SourceSpan {
         | SurfaceError::ExpectedIdentifier { span, .. }
         | SurfaceError::ExpectedList { span, .. }
         | SurfaceError::EmptyApplication { span }
-        | SurfaceError::UnsupportedDatum { span } => span.clone(),
+        | SurfaceError::UnsupportedDatum { span }
+        | SurfaceError::UnsupportedMacroPattern { span }
+        | SurfaceError::InvalidMacroTemplate { span }
+        | SurfaceError::NoMatchingMacroRule { span, .. }
+        | SurfaceError::MacroExpansionLimit { span } => span.clone(),
     }
 }
 

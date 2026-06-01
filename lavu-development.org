@@ -284,6 +284,12 @@ Scheme value is valid.
 - Splice top-level =begin= forms during program classification so nested
   top-level definitions are evaluated and inferred as ordinary program
   forms.
+** Macro Expansion
+- Add a first native top-level =define-syntax= expander for
+  =syntax-rules= transformers before surface AST classification.
+- Support literal identifiers and simple list ellipses in macro patterns
+  and templates. Full R5RS hygiene and internal syntax definitions remain
+  future work.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

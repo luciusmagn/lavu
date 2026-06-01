@@ -3969,6 +3969,42 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_top_level_syntax_rules_macros() {
+        assert_eq!(
+            eval_one(
+                "(define-syntax when
+                   (syntax-rules ()
+                     ((when test body ...)
+                      (if test (begin body ...)))))
+                 (define x 0)
+                 (when #t (set! x 1) (set! x (+ x 1)))
+                 x"
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(define-syntax pick
+                   (syntax-rules (else)
+                     ((pick else value) value)
+                     ((pick other value) other)))
+                 (pick else 4)"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
+                "(define-syntax pick
+                   (syntax-rules (else)
+                     ((pick else value) value)
+                     ((pick other value) other)))
+                 (pick 3 4)"
+            ),
+            "3"
+        );
+    }
+
+    #[test]
     fn evaluates_primitive_arithmetic() {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
         assert_eq!(eval_one("(- 10 3 2)"), "5");

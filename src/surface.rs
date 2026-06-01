@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use thiserror::Error;
 
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
@@ -83,15 +85,648 @@ pub enum SurfaceError {
 
     #[error("unsupported datum in expression position")]
     UnsupportedDatum { span: SourceSpan },
+
+    #[error("unsupported macro pattern")]
+    UnsupportedMacroPattern { span: SourceSpan },
+
+    #[error("invalid macro template")]
+    InvalidMacroTemplate { span: SourceSpan },
+
+    #[error("no matching macro rule for {name}")]
+    NoMatchingMacroRule { name: String, span: SourceSpan },
+
+    #[error("macro expansion limit reached")]
+    MacroExpansionLimit { span: SourceSpan },
 }
 
 pub fn classify_program(datums: &[Spanned<Datum>]) -> Result<Program, SurfaceError> {
-    let forms = datums.iter().try_fold(Vec::new(), |mut forms, datum| {
-        forms.extend(classify_top_level_forms(datum)?);
-        Ok::<_, SurfaceError>(forms)
-    })?;
+    let mut expander = MacroExpander::default();
+    let mut forms = Vec::new();
+
+    for datum in datums {
+        if let Some((name, rules)) = parse_define_syntax(datum)? {
+            expander.define(name, rules);
+            continue;
+        }
+
+        let expanded = expander.expand(datum)?;
+        forms.extend(classify_top_level_forms(&expanded)?);
+    }
 
     Ok(Program { forms })
+}
+
+#[derive(Debug, Clone, Default)]
+struct MacroExpander {
+    bindings: BTreeMap<String, SyntaxRules>,
+}
+
+#[derive(Debug, Clone)]
+struct SyntaxRules {
+    literals: BTreeSet<String>,
+    rules: Vec<SyntaxRule>,
+}
+
+#[derive(Debug, Clone)]
+struct SyntaxRule {
+    pattern: Spanned<Datum>,
+    template: Spanned<Datum>,
+}
+
+#[derive(Debug, Clone)]
+enum Capture {
+    Single(Spanned<Datum>),
+    Repeated(Vec<Spanned<Datum>>),
+}
+
+impl MacroExpander {
+    fn define(&mut self, name: String, rules: SyntaxRules) {
+        self.bindings.insert(name, rules);
+    }
+
+    fn expand(&self, datum: &Spanned<Datum>) -> Result<Spanned<Datum>, SurfaceError> {
+        self.expand_with_depth(datum, 0)
+    }
+
+    fn expand_with_depth(
+        &self,
+        datum: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if depth > 256 {
+            return Err(SurfaceError::MacroExpansionLimit {
+                span: datum.span.clone(),
+            });
+        }
+
+        match &datum.node {
+            Datum::List(items) => {
+                if is_quoted_list(items) {
+                    return Ok(datum.clone());
+                }
+
+                if let Some(name) = items.first().and_then(identifier_name)
+                    && let Some(rules) = self.bindings.get(&name)
+                {
+                    let expanded = apply_syntax_rules(&name, rules, datum)?;
+                    return self.expand_with_depth(&expanded, depth + 1);
+                }
+
+                items
+                    .iter()
+                    .map(|item| self.expand_with_depth(item, depth))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|items| Spanned {
+                        node: Datum::List(items),
+                        span: datum.span.clone(),
+                        origin: datum.origin,
+                    })
+            }
+            Datum::DottedList(items, tail) => {
+                let items = items
+                    .iter()
+                    .map(|item| self.expand_with_depth(item, depth))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let tail = self.expand_with_depth(tail, depth)?;
+                Ok(Spanned {
+                    node: Datum::DottedList(items, Box::new(tail)),
+                    span: datum.span.clone(),
+                    origin: datum.origin,
+                })
+            }
+            Datum::Vector(items) => {
+                let items = items
+                    .iter()
+                    .map(|item| self.expand_with_depth(item, depth))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Spanned {
+                    node: Datum::Vector(items),
+                    span: datum.span.clone(),
+                    origin: datum.origin,
+                })
+            }
+            Datum::Atom(_)
+            | Datum::Quote(_)
+            | Datum::Quasiquote(_)
+            | Datum::Unquote(_)
+            | Datum::UnquoteSplicing(_) => Ok(datum.clone()),
+        }
+    }
+}
+
+fn parse_define_syntax(
+    datum: &Spanned<Datum>,
+) -> Result<Option<(String, SyntaxRules)>, SurfaceError> {
+    let Datum::List(items) = &datum.node else {
+        return Ok(None);
+    };
+    let Some((head, rest)) = items.split_first() else {
+        return Ok(None);
+    };
+    if identifier_name(head).as_deref() != Some("define-syntax") {
+        return Ok(None);
+    }
+    if rest.len() != 2 {
+        return Err(SurfaceError::BadArity {
+            form: "define-syntax",
+            expected: "a keyword and syntax-rules transformer",
+            span: datum.span.clone(),
+        });
+    }
+
+    let name = expect_identifier(&rest[0], "define-syntax")?.node;
+    let rules = parse_syntax_rules(&rest[1])?;
+    Ok(Some((name, rules)))
+}
+
+fn parse_syntax_rules(datum: &Spanned<Datum>) -> Result<SyntaxRules, SurfaceError> {
+    let Datum::List(items) = &datum.node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "syntax-rules",
+            span: datum.span.clone(),
+        });
+    };
+    let Some((head, rest)) = items.split_first() else {
+        return Err(SurfaceError::BadArity {
+            form: "syntax-rules",
+            expected: "literal identifiers and at least one rule",
+            span: datum.span.clone(),
+        });
+    };
+    if identifier_name(head).as_deref() != Some("syntax-rules") || rest.len() < 2 {
+        return Err(SurfaceError::BadArity {
+            form: "syntax-rules",
+            expected: "literal identifiers and at least one rule",
+            span: datum.span.clone(),
+        });
+    }
+
+    let literals = parse_literal_identifiers(&rest[0])?;
+    let rules = rest[1..]
+        .iter()
+        .map(parse_syntax_rule)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(SyntaxRules { literals, rules })
+}
+
+fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>, SurfaceError> {
+    let Datum::List(items) = &datum.node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "syntax-rules literals",
+            span: datum.span.clone(),
+        });
+    };
+
+    items
+        .iter()
+        .map(|item| expect_identifier(item, "syntax-rules literal").map(|name| name.node))
+        .collect()
+}
+
+fn parse_syntax_rule(datum: &Spanned<Datum>) -> Result<SyntaxRule, SurfaceError> {
+    let Datum::List(items) = &datum.node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "syntax-rules rule",
+            span: datum.span.clone(),
+        });
+    };
+    if items.len() != 2 {
+        return Err(SurfaceError::BadArity {
+            form: "syntax-rules rule",
+            expected: "a pattern and a template",
+            span: datum.span.clone(),
+        });
+    }
+
+    Ok(SyntaxRule {
+        pattern: items[0].clone(),
+        template: items[1].clone(),
+    })
+}
+
+fn apply_syntax_rules(
+    name: &str,
+    rules: &SyntaxRules,
+    datum: &Spanned<Datum>,
+) -> Result<Spanned<Datum>, SurfaceError> {
+    for rule in &rules.rules {
+        let mut captures = BTreeMap::new();
+        if match_pattern(&rule.pattern, datum, &rules.literals, name, &mut captures)? {
+            let mut expanded = expand_template(&rule.template, &captures)?;
+            expanded.span = datum.span.clone();
+            return Ok(expanded);
+        }
+    }
+
+    Err(SurfaceError::NoMatchingMacroRule {
+        name: name.to_string(),
+        span: datum.span.clone(),
+    })
+}
+
+fn match_pattern(
+    pattern: &Spanned<Datum>,
+    datum: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    match &pattern.node {
+        Datum::Atom(Atom::Identifier(name)) if name == "_" => Ok(true),
+        Datum::Atom(Atom::Identifier(name)) if name == "..." => {
+            Err(SurfaceError::UnsupportedMacroPattern {
+                span: pattern.span.clone(),
+            })
+        }
+        Datum::Atom(Atom::Identifier(name)) if name == keyword || literals.contains(name) => {
+            Ok(identifier_name(datum).as_deref() == Some(name.as_str()))
+        }
+        Datum::Atom(Atom::Identifier(name)) => bind_capture(name, datum.clone(), captures),
+        Datum::Atom(atom) => Ok(matches!(&datum.node, Datum::Atom(actual) if actual == atom)),
+        Datum::List(pattern_items) => {
+            let Datum::List(datum_items) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern_list(pattern_items, datum_items, literals, keyword, captures)
+        }
+        Datum::Vector(pattern_items) => {
+            let Datum::Vector(datum_items) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern_list(pattern_items, datum_items, literals, keyword, captures)
+        }
+        Datum::Quote(pattern_inner) => {
+            let Datum::Quote(datum_inner) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern(pattern_inner, datum_inner, literals, keyword, captures)
+        }
+        Datum::Quasiquote(pattern_inner) => {
+            let Datum::Quasiquote(datum_inner) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern(pattern_inner, datum_inner, literals, keyword, captures)
+        }
+        Datum::Unquote(pattern_inner) => {
+            let Datum::Unquote(datum_inner) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern(pattern_inner, datum_inner, literals, keyword, captures)
+        }
+        Datum::UnquoteSplicing(pattern_inner) => {
+            let Datum::UnquoteSplicing(datum_inner) = &datum.node else {
+                return Ok(false);
+            };
+            match_pattern(pattern_inner, datum_inner, literals, keyword, captures)
+        }
+        Datum::DottedList(_, _) => Err(SurfaceError::UnsupportedMacroPattern {
+            span: pattern.span.clone(),
+        }),
+    }
+}
+
+fn match_pattern_list(
+    pattern_items: &[Spanned<Datum>],
+    datum_items: &[Spanned<Datum>],
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    let mut pattern_index = 0;
+    let mut datum_index = 0;
+
+    while pattern_index < pattern_items.len() {
+        let pattern = &pattern_items[pattern_index];
+        let repeated = pattern_items
+            .get(pattern_index + 1)
+            .is_some_and(is_ellipsis);
+
+        if repeated {
+            let rest = &pattern_items[pattern_index + 2..];
+            let minimum_rest = minimum_pattern_items(rest);
+            if datum_items.len() < datum_index + minimum_rest {
+                return Ok(false);
+            }
+
+            let repeat_count = datum_items.len() - datum_index - minimum_rest;
+            seed_repeated_captures(pattern, literals, keyword, captures)?;
+            for datum in &datum_items[datum_index..datum_index + repeat_count] {
+                let mut local = BTreeMap::new();
+                if !match_pattern(pattern, datum, literals, keyword, &mut local)? {
+                    return Ok(false);
+                }
+                merge_repeated_captures(captures, local, pattern.span.clone())?;
+            }
+            datum_index += repeat_count;
+            pattern_index += 2;
+            continue;
+        }
+
+        let Some(datum) = datum_items.get(datum_index) else {
+            return Ok(false);
+        };
+        if !match_pattern(pattern, datum, literals, keyword, captures)? {
+            return Ok(false);
+        }
+        datum_index += 1;
+        pattern_index += 1;
+    }
+
+    Ok(datum_index == datum_items.len())
+}
+
+fn minimum_pattern_items(patterns: &[Spanned<Datum>]) -> usize {
+    let mut count = 0;
+    let mut index = 0;
+    while index < patterns.len() {
+        if patterns.get(index + 1).is_some_and(is_ellipsis) {
+            index += 2;
+        } else {
+            count += 1;
+            index += 1;
+        }
+    }
+    count
+}
+
+fn seed_repeated_captures(
+    pattern: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<(), SurfaceError> {
+    for name in pattern_variables(pattern, literals, keyword) {
+        match captures.entry(name) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(Capture::Repeated(Vec::new()));
+            }
+            std::collections::btree_map::Entry::Occupied(entry) => {
+                if !matches!(entry.get(), Capture::Repeated(_)) {
+                    return Err(SurfaceError::UnsupportedMacroPattern {
+                        span: pattern.span.clone(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn pattern_variables(
+    pattern: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+) -> BTreeSet<String> {
+    let mut variables = BTreeSet::new();
+    collect_pattern_variables(pattern, literals, keyword, &mut variables);
+    variables
+}
+
+fn collect_pattern_variables(
+    pattern: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    variables: &mut BTreeSet<String>,
+) {
+    match &pattern.node {
+        Datum::Atom(Atom::Identifier(name))
+            if name != "_" && name != "..." && name != keyword && !literals.contains(name) =>
+        {
+            variables.insert(name.clone());
+        }
+        Datum::List(items) | Datum::Vector(items) => {
+            for item in items {
+                collect_pattern_variables(item, literals, keyword, variables);
+            }
+        }
+        Datum::DottedList(items, tail) => {
+            for item in items {
+                collect_pattern_variables(item, literals, keyword, variables);
+            }
+            collect_pattern_variables(tail, literals, keyword, variables);
+        }
+        Datum::Quote(inner)
+        | Datum::Quasiquote(inner)
+        | Datum::Unquote(inner)
+        | Datum::UnquoteSplicing(inner) => {
+            collect_pattern_variables(inner, literals, keyword, variables);
+        }
+        Datum::Atom(_) => {}
+    }
+}
+
+fn bind_capture(
+    name: &str,
+    datum: Spanned<Datum>,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    match captures.get(name) {
+        Some(Capture::Single(existing)) => Ok(existing.node == datum.node),
+        Some(Capture::Repeated(_)) => Err(SurfaceError::UnsupportedMacroPattern {
+            span: datum.span.clone(),
+        }),
+        None => {
+            captures.insert(name.to_string(), Capture::Single(datum));
+            Ok(true)
+        }
+    }
+}
+
+fn merge_repeated_captures(
+    captures: &mut BTreeMap<String, Capture>,
+    local: BTreeMap<String, Capture>,
+    span: SourceSpan,
+) -> Result<(), SurfaceError> {
+    for (name, capture) in local {
+        let Capture::Single(value) = capture else {
+            return Err(SurfaceError::UnsupportedMacroPattern { span });
+        };
+        match captures.entry(name) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(Capture::Repeated(vec![value]));
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let Capture::Repeated(values) = entry.get_mut() else {
+                    return Err(SurfaceError::UnsupportedMacroPattern { span });
+                };
+                values.push(value);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expand_template(
+    template: &Spanned<Datum>,
+    captures: &BTreeMap<String, Capture>,
+) -> Result<Spanned<Datum>, SurfaceError> {
+    expand_template_at(template, captures, None)
+}
+
+fn expand_template_at(
+    template: &Spanned<Datum>,
+    captures: &BTreeMap<String, Capture>,
+    repetition: Option<usize>,
+) -> Result<Spanned<Datum>, SurfaceError> {
+    match &template.node {
+        Datum::Atom(Atom::Identifier(name)) => match captures.get(name) {
+            Some(Capture::Single(value)) => Ok(value.clone()),
+            Some(Capture::Repeated(values)) => {
+                let Some(index) = repetition else {
+                    return Err(SurfaceError::InvalidMacroTemplate {
+                        span: template.span.clone(),
+                    });
+                };
+                values
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| SurfaceError::InvalidMacroTemplate {
+                        span: template.span.clone(),
+                    })
+            }
+            None => Ok(template.clone()),
+        },
+        Datum::List(items) => {
+            expand_template_list(items, captures, repetition).map(|items| Spanned {
+                node: Datum::List(items),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::Vector(items) => {
+            expand_template_list(items, captures, repetition).map(|items| Spanned {
+                node: Datum::Vector(items),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::DottedList(items, tail) => {
+            let items = expand_template_list(items, captures, repetition)?;
+            let tail = expand_template_at(tail, captures, repetition)?;
+            Ok(Spanned {
+                node: Datum::DottedList(items, Box::new(tail)),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::Quote(inner) => {
+            let inner = expand_template_at(inner, captures, repetition)?;
+            Ok(Spanned {
+                node: Datum::Quote(Box::new(inner)),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::Quasiquote(inner) => {
+            let inner = expand_template_at(inner, captures, repetition)?;
+            Ok(Spanned {
+                node: Datum::Quasiquote(Box::new(inner)),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::Unquote(inner) => {
+            let inner = expand_template_at(inner, captures, repetition)?;
+            Ok(Spanned {
+                node: Datum::Unquote(Box::new(inner)),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::UnquoteSplicing(inner) => {
+            let inner = expand_template_at(inner, captures, repetition)?;
+            Ok(Spanned {
+                node: Datum::UnquoteSplicing(Box::new(inner)),
+                span: template.span.clone(),
+                origin: template.origin,
+            })
+        }
+        Datum::Atom(_) => Ok(template.clone()),
+    }
+}
+
+fn expand_template_list(
+    items: &[Spanned<Datum>],
+    captures: &BTreeMap<String, Capture>,
+    repetition: Option<usize>,
+) -> Result<Vec<Spanned<Datum>>, SurfaceError> {
+    let mut expanded = Vec::new();
+    let mut index = 0;
+
+    while index < items.len() {
+        let item = &items[index];
+        if items.get(index + 1).is_some_and(is_ellipsis) {
+            let count = repeated_template_count(item, captures)?;
+            for repetition in 0..count {
+                expanded.push(expand_template_at(item, captures, Some(repetition))?);
+            }
+            index += 2;
+        } else {
+            expanded.push(expand_template_at(item, captures, repetition)?);
+            index += 1;
+        }
+    }
+
+    Ok(expanded)
+}
+
+fn repeated_template_count(
+    template: &Spanned<Datum>,
+    captures: &BTreeMap<String, Capture>,
+) -> Result<usize, SurfaceError> {
+    let mut counts = BTreeSet::new();
+    collect_repeated_template_counts(template, captures, &mut counts);
+
+    match counts.len() {
+        1 => Ok(*counts.iter().next().expect("one count is present")),
+        _ => Err(SurfaceError::InvalidMacroTemplate {
+            span: template.span.clone(),
+        }),
+    }
+}
+
+fn collect_repeated_template_counts(
+    template: &Spanned<Datum>,
+    captures: &BTreeMap<String, Capture>,
+    counts: &mut BTreeSet<usize>,
+) {
+    match &template.node {
+        Datum::Atom(Atom::Identifier(name)) => {
+            if let Some(Capture::Repeated(values)) = captures.get(name) {
+                counts.insert(values.len());
+            }
+        }
+        Datum::List(items) | Datum::Vector(items) => {
+            for item in items {
+                collect_repeated_template_counts(item, captures, counts);
+            }
+        }
+        Datum::DottedList(items, tail) => {
+            for item in items {
+                collect_repeated_template_counts(item, captures, counts);
+            }
+            collect_repeated_template_counts(tail, captures, counts);
+        }
+        Datum::Quote(inner)
+        | Datum::Quasiquote(inner)
+        | Datum::Unquote(inner)
+        | Datum::UnquoteSplicing(inner) => {
+            collect_repeated_template_counts(inner, captures, counts);
+        }
+        Datum::Atom(_) => {}
+    }
+}
+
+fn is_ellipsis(datum: &Spanned<Datum>) -> bool {
+    identifier_name(datum).as_deref() == Some("...")
+}
+
+fn is_quoted_list(items: &[Spanned<Datum>]) -> bool {
+    items
+        .first()
+        .and_then(identifier_name)
+        .is_some_and(|name| matches!(name.as_str(), "quote" | "quasiquote"))
 }
 
 fn classify_top_level_forms(

@@ -912,6 +912,19 @@ mod tests {
     }
 
     #[test]
+    fn infers_macro_expanded_expression() {
+        assert_eq!(
+            infer_one(
+                "(define-syntax id
+                   (syntax-rules ()
+                     ((id x) x)))
+                 (id (+ 1 2))"
+            ),
+            "number?"
+        );
+    }
+
+    #[test]
     fn infers_rest_lambda_formals() {
         assert_eq!(infer_one("(lambda args args)"), "(-> args * (listof args))");
         assert_eq!(
