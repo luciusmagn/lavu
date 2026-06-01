@@ -536,6 +536,9 @@ Scheme value is valid.
 - Add EOF objects, current/file input ports, =read=, =read-char=,
   =peek-char=, =char-ready?=, and =close-input-port= with conservative
   typed metadata.
+- Make =read= parse and consume only one datum from the current port, so
+  malformed following data is left for a later read instead of rejecting
+  the first object.
 - Add =call-with-input-file= around file-backed input ports.
 - Add dynamic default input rebinding with =with-input-from-file=.
 - Type input-file combinator callbacks as input-port procedures or

@@ -12,7 +12,7 @@ use num::{
 };
 use thiserror::Error;
 
-use crate::datum_parser::parse as parse_datums;
+use crate::datum_parser::{parse as parse_datums, parse_one as parse_one_datum};
 use crate::lexer::{Token, tokenize_checked};
 use crate::stdlib::primitive as primitive_metadata;
 use crate::surface::{Expr, Program, TopLevel, classify_expr, classify_program};
@@ -2548,11 +2548,11 @@ fn read_datum(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     }
 
     let remaining = state.chars[state.index..].iter().collect::<String>();
-    let datums = parse_datums(&remaining).map_err(|error| EvalError::ReadError {
+    let datum = parse_one_datum(&remaining).map_err(|error| EvalError::ReadError {
         message: error.to_string(),
         span: span.clone(),
     })?;
-    let Some(datum) = datums.into_iter().next() else {
+    let Some(datum) = datum else {
         state.index = state.chars.len();
         return Ok(Value::EofObject);
     };
@@ -5103,6 +5103,18 @@ mod tests {
 
         assert_eq!(eval_one(&input), "((a 1) #\\z #t)");
         std::fs::remove_file(read_path).unwrap();
+
+        let prefix_path =
+            std::env::temp_dir().join(format!("lavu-read-prefix-{}.ss", std::process::id()));
+        std::fs::write(&prefix_path, "1 )").unwrap();
+        let input = format!(
+            "(define p (open-input-file \"{}\"))
+             (read p)",
+            prefix_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "1");
+        std::fs::remove_file(prefix_path).unwrap();
 
         let call_path =
             std::env::temp_dir().join(format!("lavu-call-input-{}.ss", std::process::id()));

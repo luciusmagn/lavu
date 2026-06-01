@@ -1,4 +1,4 @@
-use logos::Span as LogosSpan;
+use logos::{Logos, Span as LogosSpan};
 use thiserror::Error;
 
 use crate::lexer::{LexerError, Token, tokenize_checked};
@@ -39,10 +39,45 @@ pub fn parse(input: &str) -> Result<Vec<Spanned<Datum>>, DatumParseError> {
     parse_tokens(&tokens)
 }
 
+pub fn parse_one(input: &str) -> Result<Option<Spanned<Datum>>, DatumParseError> {
+    let mut lexer = Token::lexer(input);
+    let mut tokens = Vec::new();
+
+    while let Some(token) = lexer.next() {
+        let span = lexer.span();
+        let token = token.map_err(|error| DatumParseError::Lexer {
+            error,
+            span: span.clone(),
+        })?;
+        tokens.push((token, &input[span.clone()], span));
+
+        let mut parser = Parser::new(&tokens);
+        match parser.parse_datum() {
+            Ok(datum) => return Ok(Some(datum)),
+            Err(error) if is_incomplete_prefix(&error) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut parser = Parser::new(&tokens);
+    if parser.is_done() {
+        Ok(None)
+    } else {
+        parser.parse_datum().map(Some)
+    }
+}
+
 pub fn parse_tokens(
     tokens: &[(Token, &str, LogosSpan)],
 ) -> Result<Vec<Spanned<Datum>>, DatumParseError> {
     Parser::new(tokens).parse_program()
+}
+
+fn is_incomplete_prefix(error: &DatumParseError) -> bool {
+    matches!(
+        error,
+        DatumParseError::UnexpectedEnd { .. } | DatumParseError::UnclosedDelimiter { .. }
+    )
 }
 
 struct Parser {
@@ -260,7 +295,7 @@ fn unescape_string_token(token: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DatumParseError, parse};
+    use super::{DatumParseError, parse, parse_one};
     use crate::lexer::LexerError;
     use crate::syntax::{Atom, Datum};
 
@@ -322,6 +357,19 @@ mod tests {
 
         assert_eq!(items.len(), 2);
         assert_eq!(tail.node, Datum::Atom(Atom::Identifier("tail".to_string())));
+    }
+
+    #[test]
+    fn parses_one_datum_without_requiring_valid_following_data() {
+        let datum = parse_one("1 )").unwrap().unwrap();
+        assert_eq!(datum.node, Datum::Atom(Atom::Integer(1.into())));
+        assert_eq!(datum.span, 0..1);
+
+        let datum = parse_one("  ; skip\n 2 \"unterminated").unwrap().unwrap();
+        assert_eq!(datum.node, Datum::Atom(Atom::Integer(2.into())));
+        assert_eq!(datum.span, 10..11);
+
+        assert!(parse_one(" ; only trivia\n").unwrap().is_none());
     }
 
     #[test]
