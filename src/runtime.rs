@@ -1388,16 +1388,71 @@ fn exact_integer_binary(
         actual,
         span: span.clone(),
     })?;
-    let left = exact_integer(&left, span.clone())?;
-    let right = exact_integer(&right, span.clone())?;
-    if right.is_zero() {
+    let left = integer_argument(&left, span.clone())?;
+    let right = integer_argument(&right, span.clone())?;
+    if right.value.is_zero() {
         return Err(EvalError::TypeError {
             expected: zero_expected,
             span,
         });
     }
 
-    Ok(Value::Integer(f(left, right)))
+    let inexact = left.inexact || right.inexact;
+    let result = f(left.value, right.value);
+    if inexact {
+        Ok(Value::Decimal(BigDecimal::from(result)))
+    } else {
+        Ok(Value::Integer(result))
+    }
+}
+
+struct IntegerArgument {
+    value: BigInt,
+    inexact: bool,
+}
+
+fn integer_argument(value: &Value, span: SourceSpan) -> Result<IntegerArgument, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(exact_integer_argument(n.clone())),
+        Value::Rational(n) if n.is_integer() => Ok(exact_integer_argument(n.to_integer())),
+        Value::ExactComplex(n) if n.im.is_zero() && n.re.is_integer() => {
+            Ok(exact_integer_argument(n.re.to_integer()))
+        }
+        Value::Decimal(n) => decimal_integer(n, span).map(inexact_integer_argument),
+        Value::Complex(n) if n.im.is_zero() => {
+            decimal_integer(&n.re, span).map(inexact_integer_argument)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "integer?",
+            span,
+        }),
+    }
+}
+
+fn exact_integer_argument(value: BigInt) -> IntegerArgument {
+    IntegerArgument {
+        value,
+        inexact: false,
+    }
+}
+
+fn inexact_integer_argument(value: BigInt) -> IntegerArgument {
+    IntegerArgument {
+        value,
+        inexact: true,
+    }
+}
+
+fn decimal_integer(number: &BigDecimal, span: SourceSpan) -> Result<BigInt, EvalError> {
+    let number = decimal_to_rational(number, span.clone())?;
+    if number.is_integer() {
+        Ok(number.to_integer())
+    } else {
+        Err(EvalError::TypeError {
+            expected: "integer?",
+            span,
+        })
+    }
 }
 
 fn exact_integer_fold(
@@ -5002,6 +5057,10 @@ mod tests {
         assert_eq!(eval_one("(quotient 13 5)"), "2");
         assert_eq!(eval_one("(remainder -13 5)"), "-3");
         assert_eq!(eval_one("(modulo -13 5)"), "2");
+        assert_eq!(eval_one("(quotient 13.0 5.0)"), "2");
+        assert_eq!(eval_one("(inexact? (quotient 13.0 5))"), "#t");
+        assert_eq!(eval_one("(remainder -13.0 5)"), "-3");
+        assert_eq!(eval_one("(modulo -13 5.0)"), "2");
         assert_eq!(eval_one("(gcd 32 -36)"), "4");
         assert_eq!(eval_one("(lcm 4 6)"), "12");
         assert_eq!(eval_one("(numerator 6/8)"), "3");

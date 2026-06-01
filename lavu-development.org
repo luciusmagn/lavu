@@ -279,6 +279,8 @@ and output procedures. =any?= means any Scheme value is valid.
   host complex =f64= operations.
 - Add =rationalize= with the standard simplest-rational interval
   algorithm over exact rationals and finite decimals.
+- Accept inexact integer inputs for =quotient=, =remainder=, and
+  =modulo= while preserving exact results when both arguments are exact.
 - Extend =sqrt= to non-real complex inputs through decimal complex
   results, and preserve exactness for exact real perfect-square roots.
 - Add =expt= for exact integer exponents across exact rationals,
