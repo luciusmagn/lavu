@@ -197,7 +197,16 @@ impl Inferencer {
     ) -> Result<Type, TypeError> {
         match &form.node {
             TopLevel::Define { name, value } => {
+                let recursive_seed = matches!(value.node, Expr::Lambda { .. }).then(|| {
+                    let seed = self.fresh_type_var();
+                    env.define(name.node.clone(), seed.clone());
+                    seed
+                });
                 let ty = self.infer_expr(value, env)?;
+                let ty = match recursive_seed {
+                    Some(seed) => self.unify(ty, seed, value.span.clone())?,
+                    None => ty,
+                };
                 let ty = self.resolve(ty);
                 env.define_inferred(name.node.clone(), ty.clone());
                 Ok(ty)
@@ -1783,6 +1792,14 @@ mod tests {
         assert_eq!(
             infer_one("((lambda () (define (add1 x) (+ x 1)) (add1 4)))"),
             "number?"
+        );
+    }
+
+    #[test]
+    fn infers_recursive_top_level_procedures() {
+        assert_eq!(
+            infer_all("(define (count n) (if (= n 0) n (count (- n 1)))) (count 5)"),
+            vec!["(-> number? number?)".to_string(), "number?".to_string()]
         );
     }
 

@@ -411,6 +411,8 @@ Scheme value is valid.
 ** Recursive Native Definitions
 - Cover recursive top-level procedure definitions through the native
   evaluator.
+- Seed top-level lambda definitions during inference so recursive
+  procedure definitions can constrain and call themselves.
 ** Proper Tail Calls
 - Evaluate runtime tail positions through an iterative loop for
   conditionals, body sequences, =letrec= bodies, and procedure calls, so
