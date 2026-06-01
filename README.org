@@ -7,7 +7,7 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Excellent REPL experience with advanced inspection features
   - we reedline maxing up in this bitch
 - Support for type inference and analysis
-- Ability to query procedures and values for their types (similar to Idris's :t feature)
+- Ability to query procedures and values for their types with =? expr...=
 - Support the whole R5RS standard
 - Ideally, it should also be trivial to bind Rust stuff into the Scheme
 
@@ -19,13 +19,18 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 - Create a learning tool rather than a production compiler
 
 ** Architecture
-- AST-based interpreter with multiple small transformation passes
-- Symbol table with rich metadata
-- Type inference via flow typing and constraints
+- Stable datum parser and surface classifier with small, inspectable
+  normalization steps
+- Native Rust evaluator and standard library
+- Primitive metadata with predicate refinements for occurrence typing
+- Type inference via constraints, branch-sensitive unions, and
+  predicate-based refinements
 
 ** Compiler Passes
-Outstandinng issues:
-**** TODO Reduce the massive amount of code duplication that we have, but not really (since the code is same, but types are different)
+The old numbered parser/AST files explored tiny pass boundaries but led
+to repeated whole-tree enum duplication. The active implementation now
+uses stable =Datum= and surface expression types, with tiny lowering
+steps over shared data structures.
 
 *** Identification Passes
 1. (x) Identify symbol literals (Quote + Identifier)
@@ -53,19 +58,20 @@ Outstandinng issues:
 21. Handle internal defines
 
 ** Type System
-- (Planned) Flow typing with constraints
-- (Planned) Type inference for procedure parameters and return values
-- (Planned) Type queries in the REPL
-- (Planned) Support for union types (e.g., (number? | string?))
+- (Done, growing) Occurrence typing with constraints
+- (Done, growing) Type inference for procedure parameters and return values
+- (Done) Type queries in the REPL via =? expr...=
+- (Done) Predicate-shaped displayed types and unions, for example
+  =(U number? string?)=
 - (Planned) Special handling for set! to maintain type safety
 
 ** REPL Features
-- (Planned) :t command to show inferred types for expressions and procedures
+- (Done) =?= query prefix to show inferred types for expressions and procedures
 - (Done) Syntax highlighting and enhanced UI via reedline
-- (Planned) Rich error messages with source locations
+- (Done, growing) Rich error messages with source locations via Ariadne
 - (Planned) Inspection of evaluation steps
 
 ** R5RS Compliance
-- (Planned) Full support for R5RS special and derived forms
+- (In progress) Full support for R5RS special and derived forms
 - (Planned) Implementation of macros via define-syntax and syntax-rules
-- (Planned) Standard library with proper type annotations
+- (In progress) Native Rust standard library with type metadata
