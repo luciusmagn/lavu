@@ -196,6 +196,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::Number, Type::Number], Type::Number),
         ),
         Primitive::new(
+            "make-polar",
+            Type::procedure(vec![Type::Number, Type::Number], Type::Number),
+        ),
+        Primitive::new(
             "real-part",
             Type::procedure(vec![Type::Number], Type::Number),
         ),
@@ -203,6 +207,11 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "imag-part",
             Type::procedure(vec![Type::Number], Type::Number),
         ),
+        Primitive::new(
+            "magnitude",
+            Type::procedure(vec![Type::Number], Type::Number),
+        ),
+        Primitive::new("angle", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new("sqrt", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
             "expt",
@@ -610,7 +619,19 @@ mod tests {
             "(-> number? number? number?)"
         );
         assert_eq!(
+            primitive("make-polar").unwrap().signature.to_string(),
+            "(-> number? number? number?)"
+        );
+        assert_eq!(
             primitive("sqrt").unwrap().signature.to_string(),
+            "(-> number? number?)"
+        );
+        assert_eq!(
+            primitive("magnitude").unwrap().signature.to_string(),
+            "(-> number? number?)"
+        );
+        assert_eq!(
+            primitive("angle").unwrap().signature.to_string(),
             "(-> number? number?)"
         );
         assert_eq!(

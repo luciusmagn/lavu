@@ -1094,7 +1094,9 @@ mod tests {
         assert_eq!(infer_one("(floor 3/2)"), "number?");
         assert_eq!(infer_one("(exact->inexact 1/2)"), "number?");
         assert_eq!(infer_one("(make-rectangular 1 2)"), "number?");
+        assert_eq!(infer_one("(make-polar 2 0)"), "number?");
         assert_eq!(infer_one("(real-part 1+2i)"), "number?");
+        assert_eq!(infer_one("(magnitude 3+4i)"), "number?");
         assert_eq!(infer_one("(sqrt 4)"), "number?");
         assert_eq!(infer_one("(expt 2 3)"), "number?");
         assert_eq!(

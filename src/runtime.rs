@@ -5,7 +5,9 @@ use std::fmt;
 use std::rc::Rc;
 
 use bigdecimal::{BigDecimal, RoundingMode};
-use num::{BigInt, BigRational, Complex, Integer, Num, One, Signed, ToPrimitive, Zero};
+use num::{
+    BigInt, BigRational, Complex, FromPrimitive, Integer, Num, One, Signed, ToPrimitive, Zero,
+};
 use thiserror::Error;
 
 use crate::lexer::{Token, tokenize};
@@ -219,8 +221,11 @@ impl Env {
             "exact->inexact",
             "inexact->exact",
             "make-rectangular",
+            "make-polar",
             "real-part",
             "imag-part",
+            "magnitude",
+            "angle",
             "sqrt",
             "expt",
             "char?",
@@ -567,8 +572,11 @@ fn apply_primitive(
         "exact->inexact" => exact_to_inexact(args, span),
         "inexact->exact" => inexact_to_exact(args, span),
         "make-rectangular" => make_rectangular(args, span),
+        "make-polar" => make_polar(args, span),
         "real-part" => real_part(args, span),
         "imag-part" => imag_part(args, span),
+        "magnitude" => magnitude(args, span),
+        "angle" => angle(args, span),
         "sqrt" => numeric_sqrt(args, span),
         "expt" => numeric_expt(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
@@ -1236,6 +1244,22 @@ fn make_rectangular(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     )))
 }
 
+fn make_polar(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [magnitude, angle]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+
+    let magnitude = decimal_to_f64(&real_to_decimal(magnitude, span.clone())?, span.clone())?;
+    let angle = decimal_to_f64(&real_to_decimal(angle, span.clone())?, span.clone())?;
+    Ok(Value::Complex(Complex::new(
+        f64_to_decimal(magnitude * angle.cos(), span.clone())?,
+        f64_to_decimal(magnitude * angle.sin(), span)?,
+    )))
+}
+
 fn real_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => Ok(value),
@@ -1256,6 +1280,23 @@ fn imag_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             expected: "number?",
             span,
         }),
+    })
+}
+
+fn magnitude(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let number = number_to_complex_decimal(value, span.clone())?;
+        let squared = number.re.clone() * number.re + number.im.clone() * number.im;
+        decimal_sqrt(squared, span).map(Value::Decimal)
+    })
+}
+
+fn angle(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let number = number_to_complex_decimal(value, span.clone())?;
+        let real = decimal_to_f64(&number.re, span.clone())?;
+        let imaginary = decimal_to_f64(&number.im, span.clone())?;
+        f64_to_decimal(imaginary.atan2(real), span).map(Value::Decimal)
     })
 }
 
@@ -1355,6 +1396,22 @@ fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalErr
     }
 }
 
+fn number_to_complex_decimal(
+    value: Value,
+    span: SourceSpan,
+) -> Result<Complex<BigDecimal>, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(Complex::new(BigDecimal::from(n), decimal_zero())),
+        Value::Rational(n) => Ok(Complex::new(rational_to_decimal(&n), decimal_zero())),
+        Value::Decimal(n) => Ok(Complex::new(n, decimal_zero())),
+        Value::Complex(n) => Ok(n),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
+}
+
 fn decimal_to_rational(number: &BigDecimal, span: SourceSpan) -> Result<BigRational, EvalError> {
     let (digits, scale) = number.as_bigint_and_exponent();
     if scale >= 0 {
@@ -1368,6 +1425,22 @@ fn decimal_to_rational(number: &BigDecimal, span: SourceSpan) -> Result<BigRatio
             digits * power_of_ten(scale, span)?,
         ))
     }
+}
+
+fn decimal_to_f64(number: &BigDecimal, span: SourceSpan) -> Result<f64, EvalError> {
+    number.to_f64().ok_or(EvalError::TypeError {
+        expected: "finite decimal?",
+        span,
+    })
+}
+
+fn f64_to_decimal(number: f64, span: SourceSpan) -> Result<BigDecimal, EvalError> {
+    BigDecimal::from_f64(number)
+        .map(|number| number.normalized())
+        .ok_or(EvalError::TypeError {
+            expected: "finite decimal?",
+            span,
+        })
 }
 
 fn power_of_ten(exponent: i64, span: SourceSpan) -> Result<BigInt, EvalError> {
@@ -2847,9 +2920,12 @@ mod tests {
         assert_eq!(eval_one("(inexact? (exact->inexact 1))"), "#t");
         assert_eq!(eval_one("(exact? (inexact->exact 1.25))"), "#t");
         assert_eq!(eval_one("(make-rectangular 1 2)"), "1+2i");
+        assert_eq!(eval_one("(make-polar 2 0)"), "2+0i");
         assert_eq!(eval_one("(real-part 1+2i)"), "1");
         assert_eq!(eval_one("(imag-part 1+2i)"), "2");
         assert_eq!(eval_one("(imag-part 5)"), "0");
+        assert_eq!(eval_one("(magnitude 3+4i)"), "5");
+        assert_eq!(eval_one("(angle 1+0i)"), "0");
         assert_eq!(
             eval_one("(+ (make-rectangular 1 2) (make-rectangular 3 4))"),
             "4+6i"
