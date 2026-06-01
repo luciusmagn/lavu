@@ -635,14 +635,67 @@ fn parse_cond(
         }
 
         let condition = classify_expr(test)?;
-        let consequent = if body.is_empty() {
-            condition.clone()
-        } else {
-            Spanned {
-                node: body_expr(body, clause.span.clone(), origin)?,
+        let arrow_recipient = body
+            .first()
+            .filter(|datum| identifier_name(datum).as_deref() == Some("=>"));
+        if arrow_recipient.is_some() && body.len() != 2 {
+            return Err(SurfaceError::BadArity {
+                form: "cond => clause",
+                expected: "a test, =>, and a receiver expression",
+                span: clause.span.clone(),
+            });
+        }
+        if body.is_empty() || arrow_recipient.is_some() {
+            let temp = Spanned {
+                node: format!("__lavu_cond_value_{}", clause.span.start),
+                span: test.span.clone(),
+                origin,
+            };
+            let condition_value = variable_expr(&temp);
+            let consequent = match arrow_recipient {
+                Some(_) => Spanned {
+                    node: Expr::Apply {
+                        operator: Box::new(classify_expr(&body[1])?),
+                        operands: vec![condition_value.clone()],
+                    },
+                    span: clause.span.clone(),
+                    origin,
+                },
+                None => condition_value.clone(),
+            };
+            let branch = Spanned {
+                node: Expr::If {
+                    condition: Box::new(condition_value),
+                    consequent: Box::new(consequent),
+                    alternate: Some(Box::new(result)),
+                },
                 span: clause.span.clone(),
                 origin,
-            }
+            };
+
+            result = Spanned {
+                node: Expr::Apply {
+                    operator: Box::new(Spanned {
+                        node: Expr::Lambda {
+                            params: vec![temp],
+                            rest: None,
+                            body: vec![branch],
+                        },
+                        span: clause.span.clone(),
+                        origin,
+                    }),
+                    operands: vec![condition],
+                },
+                span: clause.span.clone(),
+                origin,
+            };
+            continue;
+        }
+
+        let consequent = Spanned {
+            node: body_expr(body, clause.span.clone(), origin)?,
+            span: clause.span.clone(),
+            origin,
         };
 
         result = Spanned {
@@ -1322,6 +1375,14 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::If { .. })));
+    }
+
+    #[test]
+    fn desugars_cond_arrow_to_single_value_application() {
+        let datums = parse("(cond ((number? x) => f) (else 0))").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        assert!(matches!(form.node, TopLevel::Expr(Expr::Apply { .. })));
     }
 
     #[test]

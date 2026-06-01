@@ -261,6 +261,9 @@ Scheme value is valid.
 - Lower leading internal =define= forms in body contexts to =letrec= so
   lambda, let, let*, and letrec bodies can use R5RS-style local
   definitions without adding another AST variant.
+** Derived Forms
+- Add R5RS =cond= arrow clauses and preserve single evaluation of
+  test-only =cond= clauses by lowering through generated lambda bindings.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

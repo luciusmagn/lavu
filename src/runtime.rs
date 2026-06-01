@@ -2881,6 +2881,18 @@ mod tests {
             eval_one("(cond ((string? 1) 10) ((number? 1) 20) (else 30))"),
             "20"
         );
+        assert_eq!(
+            eval_one("(cond ((+ 1 2) => (lambda (x) (+ x 10))) (else 0))"),
+            "13"
+        );
+        assert_eq!(
+            eval_one("(define x 0) (cond ((begin (set! x (+ x 1)) x)) (else 0)) x"),
+            "1"
+        );
+        assert_eq!(
+            eval_one("(define x 0) (cond ((begin (set! x (+ x 1)) x) => (lambda (v) x)) (else 0))"),
+            "1"
+        );
     }
 
     #[test]

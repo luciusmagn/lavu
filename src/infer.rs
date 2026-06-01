@@ -906,6 +906,14 @@ mod tests {
     }
 
     #[test]
+    fn infers_cond_arrow_result_type() {
+        assert_eq!(
+            infer_one("(cond (1 => (lambda (x) (+ x 10))) (else 0))"),
+            "number?"
+        );
+    }
+
+    #[test]
     fn infers_do_result_type() {
         assert_eq!(
             infer_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
