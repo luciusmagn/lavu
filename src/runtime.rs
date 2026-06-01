@@ -3359,8 +3359,13 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Decimal(left), Value::Decimal(right)) => left == right,
         (Value::Complex(left), Value::Complex(right)) => left == right,
         (Value::Character(left), Value::Character(right)) => left == right,
-        (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
+        (Value::String(left), Value::String(right)) => Rc::ptr_eq(left, right),
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
+        (Value::Pair(left), Value::Pair(right)) => Rc::ptr_eq(left, right),
+        (Value::Vector(left), Value::Vector(right)) => Rc::ptr_eq(left, right),
+        (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
+        (Value::Primitive(left), Value::Primitive(right)) => left == right,
+        (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
         (Value::InputPort(left), Value::InputPort(right)) => left == right,
         (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
         (Value::Environment(left), Value::Environment(right)) => Rc::ptr_eq(&left.0, &right.0),
@@ -3393,6 +3398,7 @@ struct EqualitySeen {
 
 fn equal_value_seen(left: &Value, right: &Value, seen: &mut EqualitySeen) -> bool {
     match (left, right) {
+        (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
         (Value::List(left), Value::List(right)) => {
             left.iter()
                 .zip(right)
@@ -4980,6 +4986,15 @@ mod tests {
         assert_eq!(eval_one("(equal? (vector 1 2) (vector 1 2))"), "#t");
         assert_eq!(eval_one("(eq? (vector 1 2) (vector 1 2))"), "#f");
         assert_eq!(eval_one("(define v (vector 1 2)) (eq? v v)"), "#t");
+        assert_eq!(eval_one("(define v (vector 1 2)) (eqv? v v)"), "#t");
+        assert_eq!(eval_one("(eqv? (vector 1 2) (vector 1 2))"), "#f");
+        assert_eq!(eval_one("(define p (cons 1 2)) (eqv? p p)"), "#t");
+        assert_eq!(eval_one("(eqv? (cons 1 2) (cons 1 2))"), "#f");
+        assert_eq!(eval_one("(define s (string #\\a)) (eqv? s s)"), "#t");
+        assert_eq!(eval_one("(eqv? (string #\\a) (string #\\a))"), "#f");
+        assert_eq!(eval_one("(equal? (string #\\a) (string #\\a))"), "#t");
+        assert_eq!(eval_one("(define f (lambda () 1)) (eqv? f f)"), "#t");
+        assert_eq!(eval_one("(eqv? + +)"), "#t");
         assert_eq!(
             eval_one("(define p (cons 1 '())) (set-cdr! p p) (equal? p p)"),
             "#t"

@@ -611,6 +611,9 @@ Scheme value is valid.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
+- Make =eqv?= location-sensitive for mutable strings, pairs, vectors,
+  closures, promises, and primitive procedure values instead of comparing
+  compound contents.
 - Make =equal?= terminate on circular mutable pair/vector structures by
   tracking compound comparisons during structural recursion.
 ** Indexed List Primitives
