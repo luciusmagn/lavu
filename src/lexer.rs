@@ -69,8 +69,9 @@ pub enum Token {
     Complex(Complex<BigDecimal>),
 
     #[regex(
-        r"[+-]?[0-9]+\.[0-9]+",
-        |lex| BigDecimal::from_str(lex.slice())
+        r"[+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 4,
+        callback = |lex| BigDecimal::from_str(lex.slice())
     )]
     Decimal(BigDecimal),
 
@@ -357,6 +358,14 @@ mod tests {
         assert!(tokens[4].0.is_binary());
         assert!(tokens[6].0.is_octal());
         assert!(tokens[8].0.is_hex());
+
+        let decimals = tokenize(".5 1. -0.");
+        assert!(decimals[0].0.is_decimal());
+        assert_eq!(decimals[0].1, ".5");
+        assert!(decimals[2].0.is_decimal());
+        assert_eq!(decimals[2].1, "1.");
+        assert!(decimals[4].0.is_decimal());
+        assert_eq!(decimals[4].1, "-0.");
 
         let signed = tokenize("#b-1010 #o+10 #x-ff #d-12");
         assert_eq!(signed[0].0, Token::Binary(BigInt::from(-10)));
