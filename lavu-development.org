@@ -288,8 +288,7 @@ Scheme value is valid.
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.
 - Support literal identifiers and simple list ellipses in macro patterns
-  and templates. Full R5RS hygiene and internal syntax definitions remain
-  future work.
+  and templates. Full R5RS hygiene remains future work.
 - Process top-level =begin= forms in macro-expansion order so syntax
   definitions can affect later forms in the same top-level sequence.
 - Expand =let-syntax= and =letrec-syntax= with scoped local
@@ -299,6 +298,8 @@ Scheme value is valid.
 - Add a reusable surface classification context so the REPL can keep
   syntax bindings across submitted inputs, while type queries clone that
   context instead of mutating it.
+- Expand body-leading internal =define-syntax= forms before parsing
+  internal value definitions and body expressions.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

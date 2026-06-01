@@ -207,6 +207,18 @@ impl MacroExpander {
                 }
                 if let Some(form) = items.first().and_then(identifier_name) {
                     match form.as_str() {
+                        "lambda" => {
+                            return self.expand_literal_prefixed_body_form(datum, 2, depth);
+                        }
+                        "define" => {
+                            return self.expand_define_form(datum, items, depth);
+                        }
+                        "let" => {
+                            return self.expand_let_form(datum, items, depth);
+                        }
+                        "let*" | "letrec" => {
+                            return self.expand_prefixed_body_form(datum, 2, depth);
+                        }
                         "let-syntax" => {
                             return self.expand_local_syntax("let-syntax", datum, items, depth);
                         }
@@ -285,10 +297,7 @@ impl MacroExpander {
             local.define(name, rules);
         }
 
-        let body = items[2..]
-            .iter()
-            .map(|item| local.expand_with_depth(item, depth + 1))
-            .collect::<Result<Vec<_>, _>>()?;
+        let body = local.expand_body_items(&items[2..], depth + 1)?;
         Ok(Spanned {
             node: Datum::List(
                 std::iter::once(Spanned {
@@ -302,6 +311,145 @@ impl MacroExpander {
             span: datum.span.clone(),
             origin: datum.origin,
         })
+    }
+
+    fn expand_define_form(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if matches!(
+            items.get(1).map(|item| &item.node),
+            Some(Datum::List(_) | Datum::DottedList(_, _))
+        ) {
+            return self.expand_literal_prefixed_body_form(datum, 2, depth);
+        }
+
+        self.expand_ordinary_list(datum, items, depth)
+    }
+
+    fn expand_let_form(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let body_start = if items
+            .get(1)
+            .is_some_and(|item| identifier_name(item).is_some())
+        {
+            3
+        } else {
+            2
+        };
+        self.expand_prefixed_body_form(datum, body_start, depth)
+    }
+
+    fn expand_literal_prefixed_body_form(
+        &self,
+        datum: &Spanned<Datum>,
+        body_start: usize,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(items) = &datum.node else {
+            return Ok(datum.clone());
+        };
+        if items.len() <= body_start {
+            return self.expand_ordinary_list(datum, items, depth);
+        }
+
+        let prefix = items[..body_start].to_vec();
+        let body = self.expand_body_items(&items[body_start..], depth + 1)?;
+
+        Ok(Spanned {
+            node: Datum::List(prefix.into_iter().chain(body).collect()),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
+    }
+
+    fn expand_prefixed_body_form(
+        &self,
+        datum: &Spanned<Datum>,
+        body_start: usize,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(items) = &datum.node else {
+            return Ok(datum.clone());
+        };
+        self.expand_prefixed_body_form_from_items(datum, items, body_start, depth)
+    }
+
+    fn expand_prefixed_body_form_from_items(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        body_start: usize,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if items.len() <= body_start {
+            return self.expand_ordinary_list(datum, items, depth);
+        }
+
+        let prefix = items[..body_start]
+            .iter()
+            .map(|item| self.expand_with_depth(item, depth))
+            .collect::<Result<Vec<_>, _>>()?;
+        let body = self.expand_body_items(&items[body_start..], depth + 1)?;
+
+        Ok(Spanned {
+            node: Datum::List(prefix.into_iter().chain(body).collect()),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
+    }
+
+    fn expand_body_items(
+        &self,
+        body: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Vec<Spanned<Datum>>, SurfaceError> {
+        let mut local = self.clone();
+        let mut expanded = Vec::new();
+        let mut index = 0;
+
+        while index < body.len() {
+            if let Some((name, rules)) = parse_define_syntax(&body[index])? {
+                local.define(name, rules);
+                index += 1;
+                continue;
+            }
+            if !is_definition_form(&body[index]) {
+                break;
+            }
+
+            expanded.push(local.expand_with_depth(&body[index], depth)?);
+            index += 1;
+        }
+
+        for item in &body[index..] {
+            expanded.push(local.expand_with_depth(item, depth)?);
+        }
+
+        Ok(expanded)
+    }
+
+    fn expand_ordinary_list(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        items
+            .iter()
+            .map(|item| self.expand_with_depth(item, depth))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|items| Spanned {
+                node: Datum::List(items),
+                span: datum.span.clone(),
+                origin: datum.origin,
+            })
     }
 }
 
@@ -853,6 +1001,17 @@ fn is_quoted_list(items: &[Spanned<Datum>]) -> bool {
         .first()
         .and_then(identifier_name)
         .is_some_and(|name| matches!(name.as_str(), "quote" | "quasiquote"))
+}
+
+fn is_definition_form(datum: &Spanned<Datum>) -> bool {
+    let Datum::List(items) = &datum.node else {
+        return false;
+    };
+
+    items
+        .first()
+        .and_then(identifier_name)
+        .is_some_and(|name| matches!(name.as_str(), "define" | "define-syntax"))
 }
 
 fn top_level_begin_body(datum: &Spanned<Datum>) -> Option<&[Spanned<Datum>]> {

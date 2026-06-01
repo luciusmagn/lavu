@@ -925,6 +925,20 @@ mod tests {
     }
 
     #[test]
+    fn infers_internal_syntax_definitions() {
+        assert_eq!(
+            infer_one(
+                "(lambda ()
+                   (define-syntax id
+                     (syntax-rules ()
+                       ((id x) x)))
+                   (id (+ 1 2)))"
+            ),
+            "(-> number?)"
+        );
+    }
+
+    #[test]
     fn infers_rest_lambda_formals() {
         assert_eq!(infer_one("(lambda args args)"), "(-> args * (listof args))");
         assert_eq!(

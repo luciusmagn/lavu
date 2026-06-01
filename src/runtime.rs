@@ -4067,6 +4067,60 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_internal_syntax_definitions() {
+        assert_eq!(
+            eval_one(
+                "((lambda ()
+                    (define-syntax id
+                      (syntax-rules ()
+                        ((id x) x)))
+                    (id 5)))"
+            ),
+            "5"
+        );
+        assert_eq!(
+            eval_one(
+                "(define (use-id)
+                   (define-syntax id
+                     (syntax-rules ()
+                       ((id x) x)))
+                   (id 7))
+                 (use-id)"
+            ),
+            "7"
+        );
+        assert_eq!(
+            eval_one(
+                "(let ()
+                   (define-syntax twice
+                     (syntax-rules ()
+                       ((twice expr) (begin expr expr))))
+                   (define x 0)
+                   (twice (set! x (+ x 1)))
+                   x)"
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((x (syntax-rules () ((x) 9))))
+                   ((lambda (x) x) 4))"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((x (syntax-rules () ((x) 9))))
+                   (define (f x) x)
+                   (f 4))"
+            ),
+            "4"
+        );
+    }
+
+    #[test]
     fn evaluates_primitive_arithmetic() {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
         assert_eq!(eval_one("(- 10 3 2)"), "5");
