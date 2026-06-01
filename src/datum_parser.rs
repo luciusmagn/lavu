@@ -23,6 +23,12 @@ pub enum DatumParseError {
 
     #[error("unclosed delimiter")]
     UnclosedDelimiter { span: SourceSpan },
+
+    #[error("unsupported reader syntax: {syntax}")]
+    UnsupportedReaderSyntax {
+        syntax: &'static str,
+        span: SourceSpan,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -121,12 +127,7 @@ impl Parser {
     fn new(tokens: &[(Token, &str, LogosSpan)]) -> Self {
         let tokens = tokens
             .iter()
-            .filter(|(token, _, _)| {
-                !matches!(
-                    token,
-                    Token::Whitespace(_) | Token::LineComment | Token::BlockComment
-                )
-            })
+            .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_) | Token::LineComment))
             .map(|(token, _, span)| Lexeme {
                 token: token.clone(),
                 span: span.clone(),
@@ -157,6 +158,14 @@ impl Parser {
             Token::Unquote => self.parse_prefixed(lexeme.span, Datum::Unquote, "unquote"),
             Token::UnquoteSplicing => {
                 self.parse_prefixed(lexeme.span, Datum::UnquoteSplicing, "unquote-splicing")
+            }
+            Token::BlockComment => {
+                unsupported_reader_syntax("#| ... |# block comment", lexeme.span)
+            }
+            Token::SyntaxQuote => unsupported_reader_syntax("#' syntax quote", lexeme.span),
+            Token::DatumComment => unsupported_reader_syntax("#; datum comment", lexeme.span),
+            Token::LBracket | Token::RBracket => {
+                unsupported_reader_syntax("square bracket delimiter", lexeme.span)
             }
             token => atom_from_token(token)
                 .map(|atom| Spanned::new(Datum::Atom(atom), lexeme.span.clone()))
@@ -277,6 +286,13 @@ impl Parser {
     }
 }
 
+fn unsupported_reader_syntax<T>(
+    syntax: &'static str,
+    span: SourceSpan,
+) -> Result<T, DatumParseError> {
+    Err(DatumParseError::UnsupportedReaderSyntax { syntax, span })
+}
+
 fn atom_from_token(token: Token) -> Option<Atom> {
     match token {
         Token::Identifier(name) => Some(Atom::Identifier(name)),
@@ -347,12 +363,28 @@ mod tests {
     }
 
     #[test]
-    fn skips_line_and_block_comments() {
-        let datums = parse("1 ; line\n #| outer #| inner |# done |# 2").unwrap();
+    fn skips_line_comments() {
+        let datums = parse("1 ; line\n 2").unwrap();
 
         assert_eq!(datums.len(), 2);
         assert_eq!(datums[0].span, 0..1);
-        assert_eq!(datums[1].span, 39..40);
+        assert_eq!(datums[1].span, 10..11);
+    }
+
+    #[test]
+    fn rejects_non_r5rs_reader_extensions() {
+        for (input, syntax, span) in [
+            ("#| comment |#", "#| ... |# block comment", 0..13),
+            ("#;1", "#; datum comment", 0..2),
+            ("#'x", "#' syntax quote", 0..2),
+            ("[1]", "square bracket delimiter", 0..1),
+        ] {
+            assert_eq!(
+                parse(input).unwrap_err(),
+                DatumParseError::UnsupportedReaderSyntax { syntax, span },
+                "{input}"
+            );
+        }
     }
 
     #[test]

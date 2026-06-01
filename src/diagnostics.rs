@@ -72,7 +72,8 @@ fn datum_span(error: &DatumParseError) -> SourceSpan {
         DatumParseError::Lexer { span, .. }
         | DatumParseError::UnexpectedEnd { span, .. }
         | DatumParseError::UnexpectedToken { span, .. }
-        | DatumParseError::UnclosedDelimiter { span } => span.clone(),
+        | DatumParseError::UnclosedDelimiter { span }
+        | DatumParseError::UnsupportedReaderSyntax { span, .. } => span.clone(),
     }
 }
 

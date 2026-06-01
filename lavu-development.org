@@ -432,6 +432,10 @@ Scheme value is valid.
   highlighter tokenization permissive.
 - Keep named character parsing to R5RS =#\space= and =#\newline=,
   rejecting extension names such as =#\tab= and =#\return=.
+- Reject non-R5RS reader extensions such as =#| ... |#= block
+  comments, =#;= datum comments, =#'= syntax quote, and square-bracket
+  delimiters in the datum parser while keeping tokenizer support for
+  highlighting and precise diagnostics.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.
