@@ -1750,11 +1750,22 @@ fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
         actual,
         span: span.clone(),
     })?;
-    let exponent = exact_integer(&exponent, span.clone())?;
-    let exponent = exponent.to_i32().ok_or(EvalError::TypeError {
-        expected: "small integer exponent?",
-        span: span.clone(),
-    })?;
+    if let Some(exponent) = exact_integer(&exponent, span.clone())
+        .ok()
+        .and_then(|exponent| exponent.to_i32())
+    {
+        return exact_integer_expt(base, exponent, span);
+    }
+    if let Some(exponent) = inexact_integer_exponent(&exponent, span.clone()) {
+        return inexact_integer_expt(base, exponent, span);
+    }
+
+    let base = number_to_complex_f64(base, span.clone())?;
+    let exponent = number_to_complex_f64(exponent, span.clone())?;
+    complex_f64_to_value(base.powc(exponent), span)
+}
+
+fn exact_integer_expt(base: Value, exponent: i32, span: SourceSpan) -> Result<Value, EvalError> {
     if exponent.is_negative() && value_is_numeric_zero(&base) {
         return Err(EvalError::TypeError {
             expected: "non-zero number?",
@@ -1775,6 +1786,53 @@ fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
     }
 }
 
+fn inexact_integer_exponent(value: &Value, span: SourceSpan) -> Option<i32> {
+    match value {
+        Value::Decimal(_) | Value::Complex(_) => real_to_rational(value.clone(), span)
+            .ok()
+            .filter(BigRational::is_integer)
+            .and_then(|number| number.to_integer().to_i32()),
+        _ => None,
+    }
+}
+
+fn inexact_integer_expt(base: Value, exponent: i32, span: SourceSpan) -> Result<Value, EvalError> {
+    if exponent.is_negative() && value_is_numeric_zero(&base) {
+        return Err(EvalError::TypeError {
+            expected: "non-zero number?",
+            span,
+        });
+    }
+
+    match base {
+        Value::Integer(n) => Ok(Value::Decimal(decimal_pow(BigDecimal::from(n), exponent))),
+        Value::Rational(n) => Ok(Value::Decimal(decimal_pow(
+            rational_to_decimal(&n),
+            exponent,
+        ))),
+        Value::ExactComplex(n) => Ok(complex_decimal_value(complex_pow(
+            exact_complex_to_decimal(&n),
+            exponent,
+        ))),
+        Value::Decimal(n) => Ok(Value::Decimal(decimal_pow(n, exponent))),
+        Value::Complex(n) => Ok(complex_decimal_value(complex_pow(n, exponent))),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
+}
+
+fn complex_decimal_value(number: Complex<BigDecimal>) -> Value {
+    let real = number.re.normalized();
+    let imaginary = number.im.normalized();
+    if imaginary == decimal_zero() {
+        Value::Decimal(real)
+    } else {
+        Value::Complex(Complex::new(real, imaginary))
+    }
+}
+
 fn value_is_numeric_zero(value: &Value) -> bool {
     match value {
         Value::Integer(n) => n.is_zero(),
@@ -1788,11 +1846,12 @@ fn value_is_numeric_zero(value: &Value) -> bool {
 
 fn decimal_pow(base: BigDecimal, exponent: i32) -> BigDecimal {
     let power = pow_nonnegative(base, exponent.unsigned_abs(), decimal_one());
-    if exponent.is_negative() {
+    let result = if exponent.is_negative() {
         decimal_one() / power
     } else {
         power
-    }
+    };
+    result.normalized()
 }
 
 fn exact_complex_pow(base: Complex<BigRational>, exponent: i32) -> Complex<BigRational> {
@@ -5002,9 +5061,14 @@ mod tests {
         assert_eq!(eval_one("(inexact? (sqrt 2))"), "#t");
         assert_eq!(eval_one("(sqrt 3+4i)"), "2+1i");
         assert_eq!(eval_one("(expt 2 3)"), "8");
+        assert_eq!(eval_one("(exact? (expt 2 3))"), "#t");
         assert_eq!(eval_one("(expt 2 -1)"), "1/2");
         assert_eq!(eval_one("(expt 1.5 2)"), "2.25");
         assert_eq!(eval_one("(expt 1+2i 2)"), "-3+4i");
+        assert_eq!(eval_one("(expt 4 1/2)"), "2");
+        assert_eq!(eval_one("(expt -1 1/2)"), "0+1i");
+        assert_eq!(eval_one("(expt 2.0 3.0)"), "8");
+        assert_eq!(eval_one("(inexact? (expt 2 3.0))"), "#t");
         for input in ["(expt 0 -1)", "(expt 0.0 -1)", "(expt 0+0i -1)"] {
             assert!(matches!(
                 eval_error(input),

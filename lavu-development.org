@@ -281,8 +281,9 @@ and output procedures. =any?= means any Scheme value is valid.
   algorithm over exact rationals and finite decimals.
 - Extend =sqrt= to non-real complex inputs through decimal complex
   results, and preserve exactness for exact real perfect-square roots.
-- Add conservative =expt= for exact integer exponents across exact
-  rationals, decimals, and the current decimal complex representation.
+- Add =expt= for exact integer exponents across exact rationals,
+  decimals, and the current decimal complex representation, with an
+  inexact complex fallback for non-integer exponents.
 - Allow numeric === to compare complex values while keeping ordered
   comparisons restricted to real numbers.
 - Treat decimal complex values with a zero imaginary component as real
