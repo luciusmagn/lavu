@@ -1604,6 +1604,12 @@ fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
         expected: "small integer exponent?",
         span: span.clone(),
     })?;
+    if exponent.is_negative() && value_is_numeric_zero(&base) {
+        return Err(EvalError::TypeError {
+            expected: "non-zero number?",
+            span,
+        });
+    }
 
     match base {
         Value::Integer(n) => Ok(exact_number(BigRational::from_integer(n).pow(exponent))),
@@ -1614,6 +1620,16 @@ fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
             expected: "number?",
             span,
         }),
+    }
+}
+
+fn value_is_numeric_zero(value: &Value) -> bool {
+    match value {
+        Value::Integer(n) => n.is_zero(),
+        Value::Rational(n) => n.is_zero(),
+        Value::Decimal(n) => n.is_zero(),
+        Value::Complex(n) => n.re.is_zero() && n.im.is_zero(),
+        _ => false,
     }
 }
 
@@ -4626,6 +4642,15 @@ mod tests {
         assert_eq!(eval_one("(expt 2 -1)"), "1/2");
         assert_eq!(eval_one("(expt 1.5 2)"), "2.25");
         assert_eq!(eval_one("(expt 1+2i 2)"), "-3+4i");
+        for input in ["(expt 0 -1)", "(expt 0.0 -1)", "(expt 0+0i -1)"] {
+            assert!(matches!(
+                eval_error(input),
+                EvalError::TypeError {
+                    expected: "non-zero number?",
+                    ..
+                }
+            ));
+        }
         for input in ["(/ 1 0)", "(/ 0)", "(/ 1 0+0i)"] {
             assert!(matches!(
                 eval_error(input),
