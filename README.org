@@ -65,7 +65,7 @@ are recorded here instead.
 - (Done) Type queries in the REPL via =? expr...=
 - (Done) Predicate-shaped displayed types and unions, for example
   =(U number? string?)=
-- (Planned) Special handling for set! to maintain type safety
+- (Done) =set!= assignment constraints maintain type safety
 
 ** REPL Features
 - (Done) =?= query prefix to show inferred types for expressions and procedures

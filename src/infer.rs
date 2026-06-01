@@ -886,8 +886,9 @@ fn expr_mentions_variable(expr: &Spanned<Expr>, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
-    use crate::infer::{Inferencer, TypeEnv};
+    use crate::infer::{Inferencer, TypeEnv, TypeError};
     use crate::surface::classify_program;
+    use crate::types::Type;
 
     fn infer_one(input: &str) -> String {
         let datums = parse(input).unwrap();
@@ -895,6 +896,14 @@ mod tests {
         let mut env = TypeEnv::new();
         let mut inferencer = Inferencer::new();
         inferencer.infer_program(&program, &mut env).unwrap()[0].to_string()
+    }
+
+    fn infer_error(input: &str) -> TypeError {
+        let datums = parse(input).unwrap();
+        let program = classify_program(&datums).unwrap();
+        let mut env = TypeEnv::new();
+        let mut inferencer = Inferencer::new();
+        inferencer.infer_program(&program, &mut env).unwrap_err()
     }
 
     #[test]
@@ -918,6 +927,23 @@ mod tests {
             infer_one("((lambda () (define (add1 x) (+ x 1)) (add1 4)))"),
             "number?"
         );
+    }
+
+    #[test]
+    fn checks_set_assignment_types() {
+        assert_eq!(
+            infer_one("(lambda (x) (set! x (+ x 1)) x)"),
+            "(-> number? number?)"
+        );
+
+        let TypeError::Mismatch {
+            expected, actual, ..
+        } = infer_error("(define x 1) (set! x \"bad\")")
+        else {
+            panic!("expected mismatch");
+        };
+        assert_eq!(expected, Type::Number);
+        assert_eq!(actual, Type::String);
     }
 
     #[test]

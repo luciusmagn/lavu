@@ -291,6 +291,8 @@ Scheme value is valid.
   branch.
 - Infer simple =apply= calls for uniform variadic and rest procedures
   when the final argument has a known list element type.
+- Cover =set!= assignment inference so reassignment is checked against
+  the existing binding type and mismatches are reported.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
