@@ -259,6 +259,8 @@ Scheme value is valid.
 - Parse inexact radix-prefixed rectangular and pure-imaginary complex
   literals, including exactness/radix prefix compositions such as
   =#i#b101+10i= and =#b#i101/10+1/10i=.
+- Parse decimal-radix complex literals and exactness compositions such
+  as =#d1+2i=, =#e#d1.5+2.25i=, and =#i#d1/2+3/4i=.
 - Route exact complex tokens through =string->number= so parsed strings
   preserve exact complex values too.
 - Respect the explicit radix argument for unprefixed complex strings in

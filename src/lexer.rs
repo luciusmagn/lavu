@@ -177,6 +177,16 @@ pub enum Token {
         callback = |lex| parse_exact_rectangular_complex(&lex.slice()[2..])
     )]
     #[regex(
+        r"#[dD][+-]?([0-9]+(/[0-9]+)?)[+-]([0-9]+(/[0-9]+)?)i",
+        priority = 11,
+        callback = |lex| parse_exact_rectangular_complex(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"(#[eE]#[dD]|#[dD]#[eE])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 14,
+        callback = |lex| parse_exact_rectangular_complex(&lex.slice()[4..])
+    )]
+    #[regex(
         r"[+-]i",
         priority = 7,
         callback = |lex| parse_exact_imaginary_unit(lex.slice())
@@ -185,6 +195,11 @@ pub enum Token {
         r"#[eE][+-]i",
         priority = 9,
         callback = |lex| parse_exact_imaginary_unit(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"(#[dD]|#[eE]#[dD]|#[dD]#[eE])[+-]i",
+        priority = 11,
+        callback = |lex| parse_exact_imaginary_unit(strip_number_prefixes(lex.slice()))
     )]
     #[regex(
         r"[+-]?([0-9]+(/[0-9]+)?)i",
@@ -197,6 +212,16 @@ pub enum Token {
         callback = |lex| parse_exact_pure_imaginary(&lex.slice()[2..])
     )]
     #[regex(
+        r"#[dD][+-]?([0-9]+(/[0-9]+)?)i",
+        priority = 9,
+        callback = |lex| parse_exact_pure_imaginary(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"(#[eE]#[dD]|#[dD]#[eE])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 12,
+        callback = |lex| parse_exact_pure_imaginary(&lex.slice()[4..])
+    )]
+    #[regex(
         r"[+-]?([0-9]+(/[0-9]+)?)[+-]i",
         priority = 7,
         callback = |lex| parse_exact_unit_imaginary_complex(lex.slice())
@@ -205,6 +230,16 @@ pub enum Token {
         r"#[eE][+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]i",
         priority = 10,
         callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[dD][+-]?([0-9]+(/[0-9]+)?)[+-]i",
+        priority = 9,
+        callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"(#[eE]#[dD]|#[dD]#[eE])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]i",
+        priority = 12,
+        callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[4..])
     )]
     #[regex(
         r"(#[bBoOxX]|#[eE]#[bBoOxX]|#[bBoOxX]#[eE])[+-]?[0-9a-fA-F]+(/[0-9a-fA-F]+)?[+-][0-9a-fA-F]+(/[0-9a-fA-F]+)?i",
@@ -267,6 +302,26 @@ pub enum Token {
         r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-]i",
         priority = 8,
         callback = |lex| parse_unit_imaginary_complex(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"(#[dD]|#[iI]#[dD]|#[dD]#[iI])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 8,
+        callback = |lex| parse_inexact_decimal_radix_rectangular_complex(lex.slice())
+    )]
+    #[regex(
+        r"(#[iI]#[dD]|#[dD]#[iI])[+-]i",
+        priority = 10,
+        callback = |lex| parse_inexact_decimal_radix_imaginary_unit(lex.slice())
+    )]
+    #[regex(
+        r"(#[dD]|#[iI]#[dD]|#[dD]#[iI])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 8,
+        callback = |lex| parse_inexact_decimal_radix_pure_imaginary(lex.slice())
+    )]
+    #[regex(
+        r"(#[dD]|#[iI]#[dD]|#[dD]#[iI])[+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]i",
+        priority = 8,
+        callback = |lex| parse_inexact_decimal_radix_unit_imaginary_complex(lex.slice())
     )]
     #[regex(
         r"(#[iI]#[bBoOxX]|#[bBoOxX]#[iI])[+-]?[0-9a-fA-F]+(/[0-9a-fA-F]+)?[+-][0-9a-fA-F]+(/[0-9a-fA-F]+)?i",
@@ -959,9 +1014,118 @@ fn parse_unit_imaginary_complex(slice: &str) -> Result<Complex<BigDecimal>, Lexe
     Ok(Complex::new(real, BigDecimal::from(imaginary)))
 }
 
-fn parse_inexact_radix_rectangular_complex(
+fn parse_inexact_decimal_radix_rectangular_complex(
     slice: &str,
 ) -> Result<Complex<BigDecimal>, LexerError> {
+    let body = strip_decimal_radix_prefixes(slice)?;
+    let sign_index = body
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_inexact_decimal_radix_component(&body[..sign_index])?;
+    let imaginary = parse_inexact_decimal_radix_component(
+        body[sign_index..]
+            .strip_suffix('i')
+            .ok_or(LexerError::DefaultError)?,
+    )?;
+
+    Ok(Complex::new(real, imaginary))
+}
+
+fn parse_inexact_decimal_radix_imaginary_unit(
+    slice: &str,
+) -> Result<Complex<BigDecimal>, LexerError> {
+    let body = strip_decimal_radix_prefixes(slice)?;
+    Ok(parse_imaginary_unit(body))
+}
+
+fn parse_inexact_decimal_radix_pure_imaginary(
+    slice: &str,
+) -> Result<Complex<BigDecimal>, LexerError> {
+    let body = strip_decimal_radix_prefixes(slice)?;
+    let imaginary = parse_inexact_decimal_radix_component(&body[..body.len() - 1])?;
+    Ok(Complex::new(BigDecimal::from(0), imaginary))
+}
+
+fn parse_inexact_decimal_radix_unit_imaginary_complex(
+    slice: &str,
+) -> Result<Complex<BigDecimal>, LexerError> {
+    let body = strip_decimal_radix_prefixes(slice)?;
+    let sign_index = body
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_inexact_decimal_radix_component(&body[..sign_index])?;
+    let imaginary = if body[sign_index..].starts_with('-') {
+        -1
+    } else {
+        1
+    };
+
+    Ok(Complex::new(real, BigDecimal::from(imaginary)))
+}
+
+fn strip_number_prefixes(slice: &str) -> &str {
+    if matches!(
+        slice.get(..4),
+        Some(
+            "#e#d"
+                | "#E#d"
+                | "#e#D"
+                | "#E#D"
+                | "#d#e"
+                | "#D#e"
+                | "#d#E"
+                | "#D#E"
+                | "#i#d"
+                | "#I#d"
+                | "#i#D"
+                | "#I#D"
+                | "#d#i"
+                | "#D#i"
+                | "#d#I"
+                | "#D#I"
+        )
+    ) {
+        &slice[4..]
+    } else {
+        &slice[2..]
+    }
+}
+
+fn strip_decimal_radix_prefixes(slice: &str) -> Result<&str, LexerError> {
+    match slice.get(..4) {
+        Some("#i#d" | "#I#d" | "#i#D" | "#I#D" | "#d#i" | "#D#i" | "#d#I" | "#D#I") => {
+            Ok(&slice[4..])
+        }
+        _ if matches!(slice.get(..2), Some("#d" | "#D")) => Ok(&slice[2..]),
+        _ => Err(LexerError::DefaultError),
+    }
+}
+
+fn parse_inexact_decimal_radix_component(slice: &str) -> Result<BigDecimal, LexerError> {
+    let slice = slice.strip_prefix('+').unwrap_or(slice);
+    let Some((numerator, denominator)) = slice.split_once('/') else {
+        if has_decimal_syntax(slice) {
+            return parse_decimal_literal(slice).map_err(LexerError::from);
+        }
+        return BigDecimal::from_str(slice).map_err(LexerError::from);
+    };
+
+    let numerator = BigInt::from_str(numerator)?;
+    let denominator = BigInt::from_str(denominator)?;
+    if denominator.is_zero() {
+        return Err(LexerError::ZeroDenominator);
+    }
+
+    Ok(BigDecimal::from(numerator) / BigDecimal::from(denominator))
+}
+
+fn parse_inexact_radix_rectangular_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
     let (radix, body) = strip_inexact_radix_prefix(slice)?;
     let sign_index = body
         .char_indices()
@@ -985,9 +1149,7 @@ fn parse_inexact_radix_imaginary_unit(slice: &str) -> Result<Complex<BigDecimal>
     Ok(parse_imaginary_unit(body))
 }
 
-fn parse_inexact_radix_pure_imaginary(
-    slice: &str,
-) -> Result<Complex<BigDecimal>, LexerError> {
+fn parse_inexact_radix_pure_imaginary(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
     let (radix, body) = strip_inexact_radix_prefix(slice)?;
     let imaginary = parse_inexact_radix_component(&body[..body.len() - 1], radix)?;
     Ok(Complex::new(BigDecimal::from(0), imaginary))
@@ -1509,7 +1671,7 @@ mod tests {
         );
 
         let exact_rectangular = tokenize(
-            "1/2+3/4i #e1/2+3/4i #e+i #e1.5+2.25i #e.5+1e2i #b101+10i #x1/2+3/4i #e#x1+2i #x#e+i",
+            "1/2+3/4i #e1/2+3/4i #e+i #e1.5+2.25i #e.5+1e2i #b101+10i #x1/2+3/4i #e#x1+2i #x#e+i #d1+2i #e#d1.5+2.25i #d#e.5+1e2i #d+i",
         );
         assert_eq!(
             exact_rectangular[0].0,
@@ -1574,6 +1736,34 @@ mod tests {
                 BigRational::from_integer(BigInt::from(1))
             ))
         );
+        assert_eq!(
+            exact_rectangular[18].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::from_integer(BigInt::from(1)),
+                BigRational::from_integer(BigInt::from(2))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[20].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(15), BigInt::from(10)),
+                BigRational::new(BigInt::from(225), BigInt::from(100))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[22].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(5), BigInt::from(10)),
+                BigRational::from_integer(BigInt::from(100))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[24].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(1))
+            ))
+        );
 
         let inexact_radix_rectangular =
             tokenize("#i#b101+10i #b#i101/10+1/10i #i#x+i #x#i101-i #i#o10i");
@@ -1599,6 +1789,38 @@ mod tests {
         assert_eq!(
             inexact_radix_rectangular[8].0,
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(8)))
+        );
+
+        let inexact_decimal_radix_rectangular =
+            tokenize("#d1.5+2.25i #i#d1/2+3/4i #d#i+i #d#i1-i #d2.5i");
+        assert_eq!(
+            inexact_decimal_radix_rectangular[0].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("1.5").unwrap(),
+                BigDecimal::from_str("2.25").unwrap()
+            ))
+        );
+        assert_eq!(
+            inexact_decimal_radix_rectangular[2].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("0.5").unwrap(),
+                BigDecimal::from_str("0.75").unwrap()
+            ))
+        );
+        assert_eq!(
+            inexact_decimal_radix_rectangular[4].0,
+            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+        );
+        assert_eq!(
+            inexact_decimal_radix_rectangular[6].0,
+            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(-1)))
+        );
+        assert_eq!(
+            inexact_decimal_radix_rectangular[8].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from(0),
+                BigDecimal::from_str("2.5").unwrap()
+            ))
         );
 
         let rectangular = tokenize(".5+.5i #i-1.5+2.i");
