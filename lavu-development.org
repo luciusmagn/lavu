@@ -260,6 +260,8 @@ Scheme value is valid.
   rationals, decimals, and the current decimal complex representation.
 - Allow numeric === to compare complex values while keeping ordered
   comparisons restricted to real numbers.
+- Treat decimal complex values with a zero imaginary component as real
+  for real predicates, ordered comparisons, extrema, and real coercions.
 ** Character Library
 - Add R5RS character classification and case primitives to the native
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,

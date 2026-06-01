@@ -1041,14 +1041,17 @@ fn numeric_compare(
         });
     }
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if numbers.iter().any(NumberValue::is_non_real_complex) {
         return Err(EvalError::TypeError {
             expected: "real number?",
             span,
         });
     }
 
-    if numbers.iter().any(NumberValue::is_decimal) {
+    if numbers
+        .iter()
+        .any(|number| number.is_decimal() || number.is_complex())
+    {
         let numbers = numbers
             .iter()
             .map(NumberValue::to_decimal)
@@ -1217,6 +1220,7 @@ fn real_ordering(value: &Value, span: SourceSpan) -> Result<Ordering, EvalError>
         Value::Integer(n) => Ok(n.cmp(&BigInt::zero())),
         Value::Rational(n) => Ok(n.cmp(&BigRational::zero())),
         Value::Decimal(n) => Ok(decimal_ordering(n)),
+        Value::Complex(n) if n.im.is_zero() => Ok(decimal_ordering(&n.re)),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1243,6 +1247,7 @@ fn numeric_abs(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         Value::Integer(n) => Ok(Value::Integer(n.abs())),
         Value::Rational(n) => Ok(exact_number(n.abs())),
         Value::Decimal(n) => Ok(Value::Decimal(n.abs())),
+        Value::Complex(n) if n.im.is_zero() => Ok(Value::Decimal(n.re.abs())),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1269,14 +1274,17 @@ fn numeric_extreme(
         });
     }
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if numbers.iter().any(NumberValue::is_non_real_complex) {
         return Err(EvalError::TypeError {
             expected: "real number?",
             span,
         });
     }
 
-    if numbers.iter().any(NumberValue::is_decimal) {
+    if numbers
+        .iter()
+        .any(|number| number.is_decimal() || number.is_complex())
+    {
         let mut numbers = numbers.iter().map(NumberValue::to_decimal);
         let first = numbers
             .next()
@@ -1365,6 +1373,9 @@ fn numeric_round(
         Value::Integer(n) => Ok(Value::Integer(n)),
         Value::Rational(n) => Ok(exact_number(exact(&n))),
         Value::Decimal(n) => Ok(Value::Decimal(n.with_scale_round(0, decimal))),
+        Value::Complex(n) if n.im.is_zero() => {
+            Ok(Value::Decimal(n.re.with_scale_round(0, decimal)))
+        }
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1406,6 +1417,7 @@ fn inexact_to_exact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     unary(args, span.clone(), |value| match value {
         Value::Integer(_) | Value::Rational(_) => Ok(value),
         Value::Decimal(n) => decimal_to_rational(&n, span).map(exact_number),
+        Value::Complex(n) if n.im.is_zero() => decimal_to_rational(&n.re, span).map(exact_number),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1681,6 +1693,7 @@ fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalErr
         Value::Integer(n) => Ok(BigDecimal::from(n)),
         Value::Rational(n) => Ok(rational_to_decimal(&n)),
         Value::Decimal(n) => Ok(n),
+        Value::Complex(n) if n.im.is_zero() => Ok(n.re),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1697,6 +1710,7 @@ fn real_to_rational(value: Value, span: SourceSpan) -> Result<BigRational, EvalE
         Value::Integer(n) => Ok(BigRational::from_integer(n)),
         Value::Rational(n) => Ok(n),
         Value::Decimal(n) => decimal_to_rational(&n, span),
+        Value::Complex(n) if n.im.is_zero() => decimal_to_rational(&n.re, span),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -1816,6 +1830,10 @@ impl NumberValue {
         matches!(self, Self::Complex(_))
     }
 
+    fn is_non_real_complex(&self) -> bool {
+        matches!(self, Self::Complex(n) if !n.im.is_zero())
+    }
+
     fn is_zero(&self) -> bool {
         match self {
             Self::Exact(n) => n.is_zero(),
@@ -1837,7 +1855,8 @@ impl NumberValue {
         match self {
             Self::Exact(n) => rational_to_decimal(n),
             Self::Decimal(n) => n.clone(),
-            Self::Complex(_) => unreachable!("complex numbers should promote above decimals"),
+            Self::Complex(n) if n.im.is_zero() => n.re.clone(),
+            Self::Complex(_) => unreachable!("non-real complex numbers should be rejected"),
         }
     }
 
@@ -4586,6 +4605,10 @@ mod tests {
         assert_eq!(eval_one("(real? 1+0i)"), "#t");
         assert_eq!(eval_one("(rational? 1+2i)"), "#f");
         assert_eq!(eval_one("(integer? 2.0)"), "#t");
+        assert_eq!(eval_one("(positive? 1+0i)"), "#t");
+        assert_eq!(eval_one("(< 1+0i 2)"), "#t");
+        assert_eq!(eval_one("(max 1+0i 2)"), "2");
+        assert_eq!(eval_one("(abs -2+0i)"), "2");
         assert_eq!(eval_one("(exact? 1/2)"), "#t");
         assert_eq!(eval_one("(inexact? 1.5)"), "#t");
         assert_eq!(eval_one("(zero? 0+0i)"), "#t");
@@ -4660,6 +4683,13 @@ mod tests {
                 }
             ));
         }
+        assert!(matches!(
+            eval_error("(< 1+1i 2)"),
+            EvalError::TypeError {
+                expected: "real number?",
+                ..
+            }
+        ));
     }
 
     #[test]
