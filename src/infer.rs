@@ -1290,6 +1290,7 @@ impl Inferencer {
             (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
+            (Type::Null, Type::ListOf(_)) | (Type::ListOf(_), Type::Null) => Ok(Type::Null),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
             (Type::VectorOf(_), Type::Vector) | (Type::Vector, Type::VectorOf(_)) => {
                 Ok(Type::Vector)
@@ -2442,6 +2443,7 @@ mod tests {
         assert_eq!(infer_one("(string-ref \"abc\" 1)"), "char?");
         assert_eq!(infer_one("(string->list \"ab\")"), "(listof char?)");
         assert_eq!(infer_one("(list->string '(#\\a #\\b))"), "string?");
+        assert_eq!(infer_one("(list->string '())"), "string?");
         assert_eq!(infer_one("(string-set! \"ab\" 0 #\\z)"), "unknown?");
     }
 

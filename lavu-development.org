@@ -601,3 +601,5 @@ Scheme value is valid.
 - Add an optional-argument procedure shape so R5RS procedures with one
   optional port, radix, fill, or second numeric argument reject
   too-many-argument calls during inference instead of looking variadic.
+- Accept =null?= wherever a proper =(listof a)= argument is required,
+  since the empty list is valid at every proper list element type.
