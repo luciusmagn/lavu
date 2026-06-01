@@ -12,6 +12,7 @@ use num::{
 };
 use thiserror::Error;
 
+use crate::datum_parser::parse as parse_datums;
 use crate::lexer::{Token, tokenize};
 use crate::surface::{Expr, Program, TopLevel, classify_expr};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
@@ -193,6 +194,9 @@ pub enum EvalError {
 
     #[error("I/O error: {message}")]
     IoError { message: String, span: SourceSpan },
+
+    #[error("read error: {message}")]
+    ReadError { message: String, span: SourceSpan },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,6 +348,7 @@ impl Env {
             "current-output-port",
             "open-input-file",
             "close-input-port",
+            "read",
             "read-char",
             "peek-char",
             "char-ready?",
@@ -753,6 +758,7 @@ fn apply_primitive(
         "current-output-port" => current_output_port(args, span),
         "open-input-file" => open_input_file(args, span),
         "close-input-port" => close_input_port(args, span),
+        "read" => read_datum(args, span),
         "read-char" => read_char(args, span),
         "peek-char" => peek_char(args, span),
         "char-ready?" => char_ready(args, span),
@@ -2272,6 +2278,37 @@ fn close_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     })
 }
 
+fn read_datum(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let port = optional_input_port(args, span.clone())?;
+    let mut state = port.0.borrow_mut();
+    if state.closed {
+        return Err(EvalError::TypeError {
+            expected: "open input-port?",
+            span,
+        });
+    }
+    if state.index >= state.chars.len() && matches!(state.kind, InputPortKind::Stdin) {
+        refill_stdin(&mut state, span.clone())?;
+    }
+    if state.index >= state.chars.len() {
+        return Ok(Value::EofObject);
+    }
+
+    let remaining = state.chars[state.index..].iter().collect::<String>();
+    let datums = parse_datums(&remaining).map_err(|error| EvalError::ReadError {
+        message: error.to_string(),
+        span: span.clone(),
+    })?;
+    let Some(datum) = datums.into_iter().next() else {
+        state.index = state.chars.len();
+        return Ok(Value::EofObject);
+    };
+    state.index += remaining[..datum.span.end].chars().count();
+    drop(state);
+
+    datum_to_value(&datum)
+}
+
 fn read_char(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     let port = optional_input_port(args, span.clone())?;
     input_char(&port, span, true)
@@ -3670,6 +3707,17 @@ mod tests {
         assert_eq!(eval_one(&input), "(#t #t #t #\\a #\\b #\\b #t closed)");
         std::fs::remove_file(path).unwrap();
         assert_eq!(eval_one("(current-input-port)"), "#<input-port>");
+
+        let read_path = std::env::temp_dir().join(format!("lavu-read-{}.ss", std::process::id()));
+        std::fs::write(&read_path, "(a 1) #\\z").unwrap();
+        let input = format!(
+            "(define p (open-input-file \"{}\"))
+             (list (read p) (read p) (eof-object? (read p)))",
+            read_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "((a 1) #\\z #t)");
+        std::fs::remove_file(read_path).unwrap();
     }
 
     #[test]

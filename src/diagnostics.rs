@@ -101,6 +101,7 @@ fn eval_span(error: &EvalError) -> SourceSpan {
         | EvalError::NotProcedure { span }
         | EvalError::ArityMismatch { span, .. }
         | EvalError::TypeError { span, .. }
-        | EvalError::IoError { span, .. } => span.clone(),
+        | EvalError::IoError { span, .. }
+        | EvalError::ReadError { span, .. } => span.clone(),
     }
 }

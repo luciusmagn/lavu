@@ -140,6 +140,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::InputPort], Type::Unknown),
         ),
         Primitive::new(
+            "read",
+            Type::rest_procedure(vec![], Type::InputPort, Type::Any),
+        ),
+        Primitive::new(
             "read-char",
             Type::rest_procedure(
                 vec![],
@@ -872,6 +876,10 @@ mod tests {
         assert_eq!(
             primitive("read-char").unwrap().signature.to_string(),
             "(-> input-port? * (U char? eof-object?))"
+        );
+        assert_eq!(
+            primitive("read").unwrap().signature.to_string(),
+            "(-> input-port? * any?)"
         );
         assert_eq!(
             primitive("current-output-port")

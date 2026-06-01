@@ -1091,6 +1091,7 @@ mod tests {
     fn infers_output_primitives() {
         assert_eq!(infer_one("(current-input-port)"), "input-port?");
         assert_eq!(infer_one("(input-port? (current-input-port))"), "boolean?");
+        assert_eq!(infer_one("(read)"), "any?");
         assert_eq!(infer_one("(read-char)"), "(U char? eof-object?)");
         assert_eq!(infer_one("(current-output-port)"), "output-port?");
         assert_eq!(

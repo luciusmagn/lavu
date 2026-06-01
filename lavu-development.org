@@ -406,7 +406,7 @@ Scheme value is valid.
 - Bind conservative runtime predicates for port and EOF object metadata
   so typed names are available even before resource values exist.
 ** Input Ports
-- Add EOF objects, current/file input ports, =read-char=,
+- Add EOF objects, current/file input ports, =read=, =read-char=,
   =peek-char=, =char-ready?=, and =close-input-port= with conservative
   typed metadata.
 ** Output Ports
