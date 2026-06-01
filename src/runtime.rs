@@ -3484,9 +3484,16 @@ fn member(
     })?;
 
     let mut tail = list;
+    let mut seen = HashSet::new();
     loop {
         match tail.clone() {
             Value::Pair(pair) => {
+                if !seen.insert(Rc::as_ptr(&pair)) {
+                    return Err(EvalError::TypeError {
+                        expected: "list?",
+                        span,
+                    });
+                }
                 let (car, cdr) = {
                     let pair = pair.borrow();
                     (pair.car.clone(), pair.cdr.clone())
@@ -5092,6 +5099,13 @@ mod tests {
         assert_eq!(eval_one("(memq 'b '(a b c))"), "(b c)");
         assert_eq!(eval_one("(memq 'x '(a b c))"), "#f");
         assert_eq!(eval_one("(member '(1) '((0) (1) (2)))"), "((1) (2))");
+        assert!(matches!(
+            eval_error("(define p (list 1)) (set-cdr! p p) (member 2 p)"),
+            EvalError::TypeError {
+                expected: "list?",
+                ..
+            }
+        ));
     }
 
     #[test]
