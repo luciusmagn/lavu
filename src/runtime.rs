@@ -586,7 +586,10 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
             expr.as_ref().clone(),
             env.clone(),
         )))),
-        Expr::LetRec { bindings, body } => eval_letrec(bindings, body, env),
+        Expr::LetRec { bindings, body } => {
+            let local = eval_letrec_bindings(bindings, env)?;
+            eval_sequence(body, &local)
+        }
         Expr::Apply { operator, operands } => {
             let procedure = eval_expr(operator, env)?;
             let args = operands
@@ -604,6 +607,101 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
     }
 }
 
+fn eval_tail_expr(mut expr: Spanned<Expr>, mut env: Env) -> Result<Value, EvalError> {
+    loop {
+        match expr.node {
+            Expr::Literal(atom) => return Ok(atom_to_value(&atom)),
+            Expr::Variable(name) => {
+                return match env.lookup(&name) {
+                    Some(Value::Uninitialized) => Err(EvalError::UninitializedVariable {
+                        name,
+                        span: expr.span,
+                    }),
+                    Some(value) => Ok(value),
+                    None => Err(EvalError::UnboundVariable {
+                        name,
+                        span: expr.span,
+                    }),
+                };
+            }
+            Expr::Quote(datum) => return datum_to_value(&datum),
+            Expr::Quasiquote(datum) => return eval_quasiquote(&datum, &env, 0),
+            Expr::Lambda { params, rest, body } => {
+                return Ok(Value::Procedure(Rc::new(Procedure {
+                    params: params.into_iter().map(|param| param.node).collect(),
+                    rest: rest.map(|param| param.node),
+                    body,
+                    env,
+                })));
+            }
+            Expr::If {
+                condition,
+                consequent,
+                alternate,
+            } => {
+                if truthy(&eval_expr(&condition, &env)?) {
+                    expr = *consequent;
+                } else if let Some(alternate) = alternate {
+                    expr = *alternate;
+                } else {
+                    return Ok(Value::Unspecified);
+                }
+            }
+            Expr::Begin(exprs) => {
+                if let Some(next) = eval_sequence_prefix(exprs, &env)? {
+                    expr = next;
+                } else {
+                    return Ok(Value::Unspecified);
+                }
+            }
+            Expr::Set { name, value } => {
+                let value = eval_expr(&value, &env)?;
+                if env.set(&name.node, value) {
+                    return Ok(Value::Unspecified);
+                }
+                return Err(EvalError::UnboundVariable {
+                    name: name.node,
+                    span: name.span,
+                });
+            }
+            Expr::Delay(delayed) => {
+                return Ok(Value::Promise(Rc::new(Promise::new(*delayed, env))));
+            }
+            Expr::LetRec { bindings, body } => {
+                env = eval_letrec_bindings(&bindings, &env)?;
+                if let Some(next) = eval_sequence_prefix(body, &env)? {
+                    expr = next;
+                } else {
+                    return Ok(Value::Unspecified);
+                }
+            }
+            Expr::Apply { operator, operands } => {
+                let span = expr.span;
+                let procedure = eval_expr(&operator, &env)?;
+                let args = operands
+                    .iter()
+                    .map(|operand| eval_expr(operand, &env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                match procedure {
+                    Value::Primitive("load") => return load(args, span, &env),
+                    Value::Primitive("interaction-environment") => {
+                        return interaction_environment(args, span, &env);
+                    }
+                    Value::Procedure(procedure) => {
+                        env = procedure_application_env(&procedure, args, span)?;
+                        if let Some(next) = eval_sequence_prefix(procedure.body.clone(), &env)? {
+                            expr = next;
+                        } else {
+                            return Ok(Value::Unspecified);
+                        }
+                    }
+                    procedure => return apply(procedure, args, span),
+                }
+            }
+        }
+    }
+}
+
 fn eval_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError> {
     let mut result = Value::Unspecified;
     for expr in exprs {
@@ -612,11 +710,35 @@ fn eval_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError>
     Ok(result)
 }
 
-fn eval_letrec(
-    bindings: &[(Spanned<String>, Spanned<Expr>)],
-    body: &[Spanned<Expr>],
+fn eval_tail_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError> {
+    match exprs.split_last() {
+        Some((last, prefix)) => {
+            for expr in prefix {
+                eval_expr(expr, env)?;
+            }
+            eval_tail_expr(last.clone(), env.clone())
+        }
+        None => Ok(Value::Unspecified),
+    }
+}
+
+fn eval_sequence_prefix(
+    mut exprs: Vec<Spanned<Expr>>,
     env: &Env,
-) -> Result<Value, EvalError> {
+) -> Result<Option<Spanned<Expr>>, EvalError> {
+    let Some(last) = exprs.pop() else {
+        return Ok(None);
+    };
+    for expr in &exprs {
+        eval_expr(expr, env)?;
+    }
+    Ok(Some(last))
+}
+
+fn eval_letrec_bindings(
+    bindings: &[(Spanned<String>, Spanned<Expr>)],
+    env: &Env,
+) -> Result<Env, EvalError> {
     let local = Env::child(env.clone());
     for (name, _) in bindings {
         local.define(name.node.clone(), Value::Uninitialized);
@@ -627,7 +749,7 @@ fn eval_letrec(
         local.set(&name.node, value);
     }
 
-    eval_sequence(body, &local)
+    Ok(local)
 }
 
 fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -635,36 +757,45 @@ fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, 
         Value::Primitive(name) => apply_primitive(name, args, span),
         Value::Continuation(continuation) => apply_continuation(continuation, args, span),
         Value::Procedure(procedure) => {
-            if procedure.rest.is_none() && procedure.params.len() != args.len() {
-                return Err(EvalError::ArityMismatch {
-                    expected: procedure.params.len(),
-                    actual: args.len(),
-                    span,
-                });
-            }
-            if procedure.rest.is_some() && args.len() < procedure.params.len() {
-                return Err(EvalError::ArityMismatch {
-                    expected: procedure.params.len(),
-                    actual: args.len(),
-                    span,
-                });
-            }
-
-            let env = Env::child(procedure.env.clone());
-            for (name, value) in procedure.params.iter().zip(args.iter()) {
-                env.define(name.clone(), value.clone());
-            }
-            if let Some(rest) = &procedure.rest {
-                env.define(
-                    rest.clone(),
-                    list_value(args[procedure.params.len()..].to_vec()),
-                );
-            }
-
-            eval_sequence(&procedure.body, &env)
+            let env = procedure_application_env(&procedure, args, span)?;
+            eval_tail_sequence(&procedure.body, &env)
         }
         _ => Err(EvalError::NotProcedure { span }),
     }
+}
+
+fn procedure_application_env(
+    procedure: &Procedure,
+    args: Vec<Value>,
+    span: SourceSpan,
+) -> Result<Env, EvalError> {
+    if procedure.rest.is_none() && procedure.params.len() != args.len() {
+        return Err(EvalError::ArityMismatch {
+            expected: procedure.params.len(),
+            actual: args.len(),
+            span,
+        });
+    }
+    if procedure.rest.is_some() && args.len() < procedure.params.len() {
+        return Err(EvalError::ArityMismatch {
+            expected: procedure.params.len(),
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let env = Env::child(procedure.env.clone());
+    for (name, value) in procedure.params.iter().zip(args.iter()) {
+        env.define(name.clone(), value.clone());
+    }
+    if let Some(rest) = &procedure.rest {
+        env.define(
+            rest.clone(),
+            list_value(args[procedure.params.len()..].to_vec()),
+        );
+    }
+
+    Ok(env)
 }
 
 fn is_procedure(value: &Value) -> bool {
@@ -4430,6 +4561,14 @@ mod tests {
         assert_eq!(
             eval_one("(let loop ((n 5) (acc 1)) (if (= n 0) acc (loop (- n 1) (* acc n))))"),
             "120"
+        );
+    }
+
+    #[test]
+    fn evaluates_tail_calls_iteratively() {
+        assert_eq!(
+            eval_one("(let loop ((n 5000)) (if (= n 0) 'done (loop (- n 1))))"),
+            "done"
         );
     }
 

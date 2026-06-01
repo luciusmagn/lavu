@@ -407,6 +407,10 @@ Scheme value is valid.
 ** Recursive Native Definitions
 - Cover recursive top-level procedure definitions through the native
   evaluator.
+** Proper Tail Calls
+- Evaluate runtime tail positions through an iterative loop for
+  conditionals, body sequences, =letrec= bodies, and procedure calls, so
+  tail-recursive Scheme loops no longer consume Rust stack frames.
 ** Letrec And Named Let
 - Classify =letrec= and named =let= on the stable surface path.
 - Evaluate local recursive bindings natively with placeholder detection
