@@ -899,6 +899,7 @@ fn parse_syntax_rule(
     }
 
     ensure_distinct_pattern_variables(&items[0], literals)?;
+    validate_template_ellipsis(&items[1])?;
 
     Ok(SyntaxRule {
         pattern: items[0].clone(),
@@ -934,45 +935,66 @@ fn ensure_distinct_pattern_variables(
 
 fn validate_pattern_ellipsis(pattern: &Spanned<Datum>) -> Result<(), SurfaceError> {
     match &pattern.node {
-        Datum::List(items) => validate_pattern_sequence(&items[1..]),
+        Datum::List(items) => validate_ellipsis_sequence(&items[1..], EllipsisContext::Pattern),
         Datum::DottedList(items, tail) => {
-            validate_pattern_sequence(&items[1..])?;
-            validate_pattern_item(tail)
+            validate_ellipsis_sequence(&items[1..], EllipsisContext::Pattern)?;
+            validate_ellipsis_item(tail, EllipsisContext::Pattern)
         }
         _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
     }
 }
 
-fn validate_pattern_item(pattern: &Spanned<Datum>) -> Result<(), SurfaceError> {
-    match &pattern.node {
-        Datum::Atom(Atom::Identifier(name)) if name == "..." => {
-            Err(SurfaceError::UnsupportedMacroPattern {
-                span: pattern.span.clone(),
-            })
+fn validate_template_ellipsis(template: &Spanned<Datum>) -> Result<(), SurfaceError> {
+    validate_ellipsis_item(template, EllipsisContext::Template)
+}
+
+#[derive(Clone, Copy)]
+enum EllipsisContext {
+    Pattern,
+    Template,
+}
+
+impl EllipsisContext {
+    fn error(self, span: SourceSpan) -> SurfaceError {
+        match self {
+            Self::Pattern => SurfaceError::UnsupportedMacroPattern { span },
+            Self::Template => SurfaceError::InvalidMacroTemplate { span },
         }
-        Datum::List(items) | Datum::Vector(items) => validate_pattern_sequence(items),
+    }
+}
+
+fn validate_ellipsis_item(
+    datum: &Spanned<Datum>,
+    context: EllipsisContext,
+) -> Result<(), SurfaceError> {
+    match &datum.node {
+        Datum::Atom(Atom::Identifier(name)) if name == "..." => {
+            Err(context.error(datum.span.clone()))
+        }
+        Datum::List(items) | Datum::Vector(items) => validate_ellipsis_sequence(items, context),
         Datum::DottedList(items, tail) => {
-            validate_pattern_sequence(items)?;
-            validate_pattern_item(tail)
+            validate_ellipsis_sequence(items, context)?;
+            validate_ellipsis_item(tail, context)
         }
         Datum::Quote(inner)
         | Datum::Quasiquote(inner)
         | Datum::Unquote(inner)
-        | Datum::UnquoteSplicing(inner) => validate_pattern_item(inner),
+        | Datum::UnquoteSplicing(inner) => validate_ellipsis_item(inner, context),
         Datum::Atom(_) => Ok(()),
     }
 }
 
-fn validate_pattern_sequence(items: &[Spanned<Datum>]) -> Result<(), SurfaceError> {
+fn validate_ellipsis_sequence(
+    items: &[Spanned<Datum>],
+    context: EllipsisContext,
+) -> Result<(), SurfaceError> {
     for (index, item) in items.iter().enumerate() {
         if is_ellipsis(item) {
             if index == 0 || items.get(index - 1).is_some_and(is_ellipsis) {
-                return Err(SurfaceError::UnsupportedMacroPattern {
-                    span: item.span.clone(),
-                });
+                return Err(context.error(item.span.clone()));
             }
         } else {
-            validate_pattern_item(item)?;
+            validate_ellipsis_item(item, context)?;
         }
     }
 
@@ -3140,6 +3162,27 @@ mod tests {
             assert!(matches!(
                 classify_program(&datums),
                 Err(SurfaceError::UnsupportedMacroPattern { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_bad_syntax_rule_ellipsis_templates() {
+        for input in [
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m) (...))))",
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m x) (x ... ...))))",
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m) (a . ...))))",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_program(&datums),
+                Err(SurfaceError::InvalidMacroTemplate { .. })
             ));
         }
     }

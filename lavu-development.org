@@ -316,6 +316,8 @@ Scheme value is valid.
   variable set.
 - Reject invalid =syntax-rules= pattern ellipses such as a body-leading
   ellipsis or doubled ellipses while parsing the transformer.
+- Reject invalid =syntax-rules= template ellipses in the same parsing
+  phase, keeping template placement errors out of later expansion.
 - Reject =cond= forms whose =else= clause is not last, matching the
   existing =case= clause validation.
 - Reject empty =cond= forms and empty =cond= =else= clauses while keeping
