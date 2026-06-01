@@ -835,6 +835,9 @@ impl Inferencer {
             .zip(&operands[1..])
             .map(|(ty, operand)| self.infer_list_element_type(ty, operand))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(ty) = self.infer_constructor_mapper(&operands[0], &element_tys, result) {
+            return Ok(ty);
+        }
         let mapped_ty =
             self.infer_application(procedure_ty, &operands[1..], element_tys, span.clone())?;
 
@@ -842,6 +845,28 @@ impl Inferencer {
             HigherOrderListResult::Mapped => Ok(Type::ListOf(Box::new(self.resolve(mapped_ty)))),
             HigherOrderListResult::Unspecified => Ok(Type::Unknown),
         }
+    }
+
+    fn infer_constructor_mapper(
+        &self,
+        procedure: &Spanned<Expr>,
+        element_tys: &[Type],
+        result: HigherOrderListResult,
+    ) -> Option<Type> {
+        let Expr::Variable(name) = &procedure.node else {
+            return None;
+        };
+
+        let mapped = match name.as_str() {
+            "list" => self.infer_list_constructor(element_tys.to_vec()),
+            "vector" => self.infer_vector_constructor(element_tys.to_vec()),
+            _ => return None,
+        };
+
+        Some(match result {
+            HigherOrderListResult::Mapped => Type::ListOf(Box::new(mapped)),
+            HigherOrderListResult::Unspecified => Type::Unknown,
+        })
     }
 
     fn infer_list_element_type(
@@ -2358,6 +2383,14 @@ mod tests {
         assert_eq!(
             infer_one("(map string-length '(\"a\" \"bb\"))"),
             "(listof number?)"
+        );
+        assert_eq!(
+            infer_one("(map list '(1 2) '(\"a\" \"b\"))"),
+            "(listof (listof (U number? string?)))"
+        );
+        assert_eq!(
+            infer_one("(map vector '(1 2) '(\"a\" \"b\"))"),
+            "(listof (vectorof (U number? string?)))"
         );
         assert_eq!(
             infer_one("(lambda (xs) (map string-length xs))"),
