@@ -322,3 +322,7 @@ Scheme value is valid.
 - Route native parser, surface, type, and evaluator errors through
   Ariadne reports in the REPL so the new implementation keeps highlighted
   span-oriented failures.
+** Empty Stage Placeholders
+- Remove empty pre-created parser/AST stages 17-20 and empty transform
+  stages 13-15; their intended work is now represented in the stable
+  datum/surface/runtime/type path.
