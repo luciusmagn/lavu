@@ -429,7 +429,7 @@ impl Inferencer {
                     .collect::<Vec<_>>(),
             )),
             PrimitiveApplication::CallWithValues => {
-                self.infer_call_with_values(operands, operand_tys, span)
+                self.infer_call_with_values(operands, operand_tys, span, env)
             }
             PrimitiveApplication::CallCc => self.infer_call_cc(operands, operand_tys, span),
             PrimitiveApplication::CallWithInputFile => {
@@ -852,6 +852,7 @@ impl Inferencer {
         operands: &[Spanned<Expr>],
         operand_tys: Vec<Type>,
         span: SourceSpan,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         let [producer_ty, consumer_ty]: [Type; 2] =
             operand_tys
@@ -877,7 +878,22 @@ impl Inferencer {
             .map(|_| operands[0].clone())
             .collect::<Vec<_>>();
 
+        if let Some(constructor) = constructor_kind(&operands[1], env) {
+            return Ok(self.infer_constructor_result(constructor, value_tys));
+        }
+
         self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
+    fn infer_constructor_result(
+        &self,
+        constructor: ConstructorKind,
+        operand_tys: Vec<Type>,
+    ) -> Type {
+        match constructor {
+            ConstructorKind::List => self.infer_list_constructor(operand_tys),
+            ConstructorKind::Vector => self.infer_vector_constructor(operand_tys),
+        }
     }
 
     fn infer_call_with_values_producer(
@@ -3161,6 +3177,14 @@ mod tests {
             "number?"
         );
         assert_eq!(
+            infer_one("(call-with-values (lambda () (values 1 \"x\")) list)"),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(
+            infer_one("(call-with-values (lambda () (values 1 \"x\")) vector)"),
+            "(vectorof (U number? string?))"
+        );
+        assert_eq!(
             infer_one(
                 "(call-with-values (lambda () (values 1 \"xx\")) \
                  (lambda (n s) (+ n (string-length s))))"
@@ -3173,7 +3197,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (producer) (call-with-values producer list))"),
-            "(-> (-> t0) (listof t0))"
+            "(-> (-> t1) (listof t1))"
         );
         assert_eq!(
             infer_one("(lambda (producer) (call-with-values producer +))"),
@@ -3320,6 +3344,14 @@ mod tests {
         assert_eq!(
             infer_one("((lambda (list) (map list '(1) '(\"x\"))) (lambda (x y) x))"),
             "(listof number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "((lambda (list)
+                    (call-with-values (lambda () (values 1 \"x\")) list))
+                  (lambda (x y) x))"
+            ),
+            "number?"
         );
         assert_eq!(
             infer_one("(lambda (string? x) (if (string? x) (+ x 1) 0))"),

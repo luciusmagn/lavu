@@ -771,6 +771,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Infer unknown producer value arity from fixed =call-with-values=
   consumers, so producer variables can be typed as returning
   =(values ...)= when the consumer requires multiple arguments.
+- Preserve heterogeneous element unions when =call-with-values= sends
+  fixed values into primitive =list= or =vector= constructors, while still
+  respecting lexical shadowing of those constructor names.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.
