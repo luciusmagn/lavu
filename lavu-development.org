@@ -254,6 +254,8 @@ Scheme value is valid.
   future numeric-tower work.
 - Add conservative =expt= for exact integer exponents across exact
   rationals, decimals, and the current decimal complex representation.
+- Allow numeric === to compare complex values while keeping ordered
+  comparisons restricted to real numbers.
 ** Character Library
 - Add R5RS character classification and case primitives to the native
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,

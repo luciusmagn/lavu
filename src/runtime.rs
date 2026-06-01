@@ -818,7 +818,7 @@ fn apply_primitive(
         "-" => subtract(args, span),
         "*" => multiply(args, span),
         "/" => divide(args, span),
-        "=" => numeric_compare(args, span, |a, b| a == b, |a, b| a == b),
+        "=" => numeric_equal(args, span),
         "<" => numeric_compare(args, span, |a, b| a < b, |a, b| a < b),
         ">" => numeric_compare(args, span, |a, b| a > b, |a, b| a > b),
         "<=" => numeric_compare(args, span, |a, b| a <= b, |a, b| a <= b),
@@ -1255,6 +1255,45 @@ fn numeric_compare(
         numbers
             .windows(2)
             .all(|pair| exact_pred(&pair[0], &pair[1])),
+    ))
+}
+
+fn numeric_equal(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let numbers = numeric_args(args, span.clone())?;
+    if numbers.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: numbers.len(),
+            span,
+        });
+    }
+
+    if numbers.iter().any(NumberValue::is_complex) {
+        let numbers = numbers
+            .iter()
+            .map(NumberValue::to_complex)
+            .collect::<Vec<_>>();
+        return Ok(Value::Boolean(
+            numbers.windows(2).all(|pair| pair[0] == pair[1]),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_decimal) {
+        let numbers = numbers
+            .iter()
+            .map(NumberValue::to_decimal)
+            .collect::<Vec<_>>();
+        return Ok(Value::Boolean(
+            numbers.windows(2).all(|pair| pair[0] == pair[1]),
+        ));
+    }
+
+    let numbers = numbers
+        .into_iter()
+        .map(NumberValue::into_exact)
+        .collect::<Vec<_>>();
+    Ok(Value::Boolean(
+        numbers.windows(2).all(|pair| pair[0] == pair[1]),
     ))
 }
 
@@ -4574,6 +4613,8 @@ mod tests {
         assert_eq!(eval_one("(+ 1+2i 3+4i)"), "4+6i");
         assert_eq!(eval_one("(= 2 2 2)"), "#t");
         assert_eq!(eval_one("(= 1/2 (/ 1 2))"), "#t");
+        assert_eq!(eval_one("(= 1+2i 1+2i)"), "#t");
+        assert_eq!(eval_one("(= 1+2i 1+3i)"), "#f");
         assert_eq!(eval_one("(< 1.5 2.5)"), "#t");
         assert_eq!(eval_one("(< 1 2 3)"), "#t");
     }
