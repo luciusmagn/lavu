@@ -214,6 +214,12 @@ impl Env {
             "append",
             "list-ref",
             "list-tail",
+            "memq",
+            "memv",
+            "member",
+            "assq",
+            "assv",
+            "assoc",
             "string-length",
             "char=?",
             "char<?",
@@ -462,6 +468,12 @@ fn apply_primitive(
         "append" => append(args, span),
         "list-ref" => list_ref(args, span),
         "list-tail" => list_tail(args, span),
+        "memq" => member(args, span, eq_value),
+        "memv" => member(args, span, eqv_value),
+        "member" => member(args, span, equal_value),
+        "assq" => assoc(args, span, eq_value),
+        "assv" => assoc(args, span, eqv_value),
+        "assoc" => assoc(args, span, equal_value),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -1030,6 +1042,77 @@ fn list_tail(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
+fn member(
+    args: Vec<Value>,
+    span: SourceSpan,
+    compare: impl Fn(&Value, &Value) -> bool,
+) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [target, list]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+
+    match list {
+        Value::List(items) => Ok(items
+            .iter()
+            .position(|item| compare(&target, item))
+            .map(|index| Value::List(items[index..].to_vec()))
+            .unwrap_or(Value::Boolean(false))),
+        _ => Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        }),
+    }
+}
+
+fn assoc(
+    args: Vec<Value>,
+    span: SourceSpan,
+    compare: impl Fn(&Value, &Value) -> bool,
+) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [target, alist]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+
+    let Value::List(entries) = alist else {
+        return Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        });
+    };
+
+    for entry in entries {
+        match &entry {
+            Value::List(items) => {
+                let Some(key) = items.first() else {
+                    return Err(EvalError::TypeError {
+                        expected: "pair?",
+                        span,
+                    });
+                };
+                if compare(&target, key) {
+                    return Ok(entry);
+                }
+            }
+            Value::Pair(key, _) if compare(&target, key) => return Ok(entry),
+            Value::Pair(_, _) => {}
+            _ => {
+                return Err(EvalError::TypeError {
+                    expected: "pair?",
+                    span,
+                });
+            }
+        }
+    }
+
+    Ok(Value::Boolean(false))
+}
+
 fn make_vector(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if !(1..=2).contains(&args.len()) {
         return Err(EvalError::ArityMismatch {
@@ -1520,6 +1603,20 @@ mod tests {
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
         assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1)"), "b");
         assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1)"), "(b c)");
+    }
+
+    #[test]
+    fn evaluates_membership_primitives() {
+        assert_eq!(eval_one("(memq 'b '(a b c))"), "(b c)");
+        assert_eq!(eval_one("(memq 'x '(a b c))"), "#f");
+        assert_eq!(eval_one("(member '(1) '((0) (1) (2)))"), "((1) (2))");
+    }
+
+    #[test]
+    fn evaluates_association_primitives() {
+        assert_eq!(eval_one("(assq 'b '((a 1) (b 2)))"), "(b 2)");
+        assert_eq!(eval_one("(assq 'x '((a 1) (b 2)))"), "#f");
+        assert_eq!(eval_one("(assoc '(b) '(((a) 1) ((b) 2)))"), "((b) 2)");
     }
 
     #[test]

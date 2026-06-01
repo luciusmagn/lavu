@@ -349,3 +349,6 @@ Scheme value is valid.
 ** Indexed List Primitives
 - Add typed and native =list-ref= and =list-tail= over proper lists with
   checked exact non-negative indexes.
+** Membership Primitives
+- Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
+  =assoc= using the corresponding equality predicate semantics.

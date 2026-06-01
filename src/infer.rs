@@ -838,4 +838,10 @@ mod tests {
         assert_eq!(infer_one("(list-ref '(a b c) 1)"), "any?");
         assert_eq!(infer_one("(list-tail '(a b c) 1)"), "list?");
     }
+
+    #[test]
+    fn infers_membership_primitives_conservatively() {
+        assert_eq!(infer_one("(member 'b '(a b c))"), "any?");
+        assert_eq!(infer_one("(assoc 'b '((a 1) (b 2)))"), "any?");
+    }
 }
