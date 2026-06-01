@@ -305,6 +305,8 @@ Scheme value is valid.
   namespace so user identifiers cannot capture them.
 - Reject duplicate =syntax-rules= literals during macro definition parsing
   instead of silently collapsing them into a set.
+- Match a =syntax-rules= rule head as the macro keyword itself, so a typo
+  in the rule head cannot accidentally become a pattern variable.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.

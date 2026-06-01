@@ -888,7 +888,7 @@ fn apply_syntax_rules(
 ) -> Result<Spanned<Datum>, SurfaceError> {
     for rule in &rules.rules {
         let mut captures = BTreeMap::new();
-        if match_pattern(&rule.pattern, datum, &rules.literals, name, &mut captures)? {
+        if match_macro_pattern(&rule.pattern, datum, &rules.literals, name, &mut captures)? {
             let mut expanded = expand_template(&rule.template, &captures)?;
             expanded.span = datum.span.clone();
             return Ok(expanded);
@@ -899,6 +899,96 @@ fn apply_syntax_rules(
         name: name.to_string(),
         span: datum.span.clone(),
     })
+}
+
+fn match_macro_pattern(
+    pattern: &Spanned<Datum>,
+    datum: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    match (&pattern.node, &datum.node) {
+        (Datum::List(pattern_items), Datum::List(datum_items)) => {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+                return Ok(false);
+            };
+            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+                return Ok(false);
+            };
+            match_pattern_list(pattern_rest, datum_rest, literals, keyword, captures)
+        }
+        (Datum::DottedList(pattern_items, pattern_tail), Datum::List(datum_items)) => {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+                return Ok(false);
+            };
+            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+                return Ok(false);
+            };
+            match_pattern_list_with_tail(
+                pattern_rest,
+                pattern_tail,
+                DottedDatum {
+                    items: datum_rest,
+                    tail: None,
+                    original: datum,
+                },
+                literals,
+                keyword,
+                captures,
+            )
+        }
+        (
+            Datum::DottedList(pattern_items, pattern_tail),
+            Datum::DottedList(datum_items, datum_tail),
+        ) => {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+                return Ok(false);
+            };
+            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+                return Ok(false);
+            };
+            match_pattern_list_with_tail(
+                pattern_rest,
+                pattern_tail,
+                DottedDatum {
+                    items: datum_rest,
+                    tail: Some(datum_tail.as_ref()),
+                    original: datum,
+                },
+                literals,
+                keyword,
+                captures,
+            )
+        }
+        _ => Ok(false),
+    }
+}
+
+fn macro_pattern_rest<'a>(
+    pattern: &Spanned<Datum>,
+    items: &'a [Spanned<Datum>],
+    keyword: &str,
+) -> Result<Option<&'a [Spanned<Datum>]>, SurfaceError> {
+    let Some((head, rest)) = items.split_first() else {
+        return Err(SurfaceError::UnsupportedMacroPattern {
+            span: pattern.span.clone(),
+        });
+    };
+
+    Ok(is_keyword_head(head, keyword).then_some(rest))
+}
+
+fn macro_datum_rest<'a>(
+    items: &'a [Spanned<Datum>],
+    keyword: &str,
+) -> Option<&'a [Spanned<Datum>]> {
+    let (head, rest) = items.split_first()?;
+    is_keyword_head(head, keyword).then_some(rest)
+}
+
+fn is_keyword_head(datum: &Spanned<Datum>, keyword: &str) -> bool {
+    identifier_name(datum).as_deref() == Some(keyword)
 }
 
 fn match_pattern(
@@ -2787,6 +2877,26 @@ mod tests {
             classify_program(&datums),
             Err(SurfaceError::DuplicateIdentifier { .. })
         ));
+    }
+
+    #[test]
+    fn macro_rule_head_must_match_keyword() {
+        for input in [
+            "(define-syntax m
+               (syntax-rules ()
+                 ((wrong x) x)))
+             (m 1)",
+            "(define-syntax m
+               (syntax-rules ()
+                 ((wrong) 1)))
+             (m)",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_program(&datums),
+                Err(SurfaceError::NoMatchingMacroRule { name, .. }) if name == "m"
+            ));
+        }
     }
 
     #[test]
