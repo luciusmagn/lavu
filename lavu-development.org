@@ -277,9 +277,8 @@ and output procedures. =any?= means any Scheme value is valid.
   host complex =f64= operations.
 - Add =rationalize= with the standard simplest-rational interval
   algorithm over exact rationals and finite decimals.
-- Add conservative =sqrt= for real inputs, including negative reals as
-  decimal complex results; full complex transcendental behavior remains
-  future numeric-tower work.
+- Extend =sqrt= to non-real complex inputs through decimal complex
+  results while preserving exact existing behavior for real inputs.
 - Add conservative =expt= for exact integer exponents across exact
   rationals, decimals, and the current decimal complex representation.
 - Allow numeric === to compare complex values while keeping ordered

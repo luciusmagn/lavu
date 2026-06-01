@@ -1679,6 +1679,11 @@ fn simplest_positive_rational(low: BigRational, high: BigRational) -> BigRationa
 
 fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
+        if !value_is_real_number(&value) {
+            let number = number_to_complex_f64(value, span.clone())?;
+            return complex_f64_to_value(number.sqrt(), span);
+        }
+
         let decimal = real_to_decimal(value, span.clone())?;
         if decimal < decimal_zero() {
             return decimal_sqrt(-decimal, span)
@@ -1803,6 +1808,15 @@ fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalErr
             expected: "real number?",
             span,
         }),
+    }
+}
+
+fn value_is_real_number(value: &Value) -> bool {
+    match value {
+        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => true,
+        Value::ExactComplex(number) => number.im.is_zero(),
+        Value::Complex(number) => number.im.is_zero(),
+        _ => false,
     }
 }
 
@@ -4929,6 +4943,7 @@ mod tests {
         );
         assert_eq!(eval_one("(sqrt 4)"), "2");
         assert_eq!(eval_one("(sqrt -4)"), "0+2i");
+        assert_eq!(eval_one("(sqrt 3+4i)"), "2+1i");
         assert_eq!(eval_one("(expt 2 3)"), "8");
         assert_eq!(eval_one("(expt 2 -1)"), "1/2");
         assert_eq!(eval_one("(expt 1.5 2)"), "2.25");
