@@ -172,8 +172,8 @@ pub enum Token {
         callback = |lex| parse_exact_rectangular_complex(lex.slice())
     )]
     #[regex(
-        r"#[eE][+-]?([0-9]+(/[0-9]+)?)[+-]([0-9]+(/[0-9]+)?)i",
-        priority = 11,
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 12,
         callback = |lex| parse_exact_rectangular_complex(&lex.slice()[2..])
     )]
     #[regex(
@@ -192,8 +192,8 @@ pub enum Token {
         callback = |lex| parse_exact_pure_imaginary(lex.slice())
     )]
     #[regex(
-        r"#[eE][+-]?([0-9]+(/[0-9]+)?)i",
-        priority = 9,
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)i",
+        priority = 10,
         callback = |lex| parse_exact_pure_imaginary(&lex.slice()[2..])
     )]
     #[regex(
@@ -202,8 +202,8 @@ pub enum Token {
         callback = |lex| parse_exact_unit_imaginary_complex(lex.slice())
     )]
     #[regex(
-        r"#[eE][+-]?([0-9]+(/[0-9]+)?)[+-]i",
-        priority = 9,
+        r"#[eE][+-]?([0-9]+(/[0-9]+)?|(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))([eEsSfFdDlL][+-]?[0-9]+)?)[+-]i",
+        priority = 10,
         callback = |lex| parse_exact_unit_imaginary_complex(&lex.slice()[2..])
     )]
     ExactComplex(Complex<BigRational>),
@@ -743,6 +743,10 @@ fn parse_exact_unit_imaginary_complex(slice: &str) -> Result<Complex<BigRational
 fn parse_exact_component(slice: &str) -> Result<BigRational, LexerError> {
     let slice = slice.strip_prefix('+').unwrap_or(slice);
     let Some((numerator, denominator)) = slice.split_once('/') else {
+        if has_decimal_syntax(slice) {
+            let (numerator, denominator) = parse_exact_decimal_literal(slice)?;
+            return Ok(BigRational::new(numerator, denominator));
+        }
         return Ok(BigRational::from_integer(BigInt::from_str(slice)?));
     };
 
@@ -753,6 +757,15 @@ fn parse_exact_component(slice: &str) -> Result<BigRational, LexerError> {
     }
 
     Ok(BigRational::new(numerator, denominator))
+}
+
+fn has_decimal_syntax(slice: &str) -> bool {
+    slice.chars().any(|ch| {
+        matches!(
+            ch,
+            '.' | 'e' | 'E' | 's' | 'S' | 'f' | 'F' | 'd' | 'D' | 'l' | 'L'
+        )
+    })
 }
 
 fn parse_rectangular_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
@@ -1266,7 +1279,7 @@ mod tests {
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
         );
 
-        let exact_rectangular = tokenize("1/2+3/4i #e1/2+3/4i #e+i");
+        let exact_rectangular = tokenize("1/2+3/4i #e1/2+3/4i #e+i #e1.5+2.25i #e.5+1e2i");
         assert_eq!(
             exact_rectangular[0].0,
             Token::ExactComplex(Complex::new(
@@ -1286,6 +1299,20 @@ mod tests {
             Token::ExactComplex(Complex::new(
                 BigRational::zero(),
                 BigRational::from_integer(BigInt::from(1))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[6].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(15), BigInt::from(10)),
+                BigRational::new(BigInt::from(225), BigInt::from(100))
+            ))
+        );
+        assert_eq!(
+            exact_rectangular[8].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(5), BigInt::from(10)),
+                BigRational::from_integer(BigInt::from(100))
             ))
         );
 

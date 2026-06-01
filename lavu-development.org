@@ -251,6 +251,8 @@ Scheme value is valid.
   remain exact unless explicitly marked with =#i= or decimal notation.
 - Accept the same exact complex literal shapes with a leading =#e=
   exactness prefix.
+- Let =#e= exact complex literals use exact decimal and exponent
+  components, so =#e1.5+2.25i= reads as exact rational parts.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.
