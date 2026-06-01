@@ -8,8 +8,8 @@ use lavu::diagnostics::{
 use lavu::infer::{Inferencer, TypeEnv, TypeError};
 use lavu::query::infer_query_with_context;
 use lavu::repl::{line_editor, print_logo};
-use lavu::runtime::{Env, EvalError, Value, eval_program};
-use lavu::surface::{Program, SurfaceContext, SurfaceError};
+use lavu::runtime::{Env, EvalError, Value, eval_top_level};
+use lavu::surface::{SurfaceContext, SurfaceError};
 use reedline::Signal;
 
 fn main() -> Result<()> {
@@ -88,19 +88,26 @@ fn eval_input(
 ) -> std::result::Result<EvalOutput, ReplError> {
     let datums = parse(input)?;
     let program = surface.classify_program(&datums)?;
-    let values = eval_program(&program, env).map_err(ReplError::Eval)?;
-    let type_error = update_type_env(&program, type_env).err();
-    Ok(EvalOutput { values, type_error })
-}
-
-fn update_type_env(program: &Program, type_env: &mut TypeEnv) -> Result<(), TypeError> {
     let mut inferencer = Inferencer::new();
+    let mut values = Vec::new();
+
     for form in &program.forms {
         let mut next_env = type_env.clone();
-        inferencer.infer_top_level(form, &mut next_env)?;
+        if let Err(error) = inferencer.infer_top_level(form, &mut next_env) {
+            return Ok(EvalOutput {
+                values,
+                type_error: Some(error),
+            });
+        }
+
+        values.push(eval_top_level(form, env).map_err(ReplError::Eval)?);
         *type_env = next_env;
     }
-    Ok(())
+
+    Ok(EvalOutput {
+        values,
+        type_error: None,
+    })
 }
 
 impl From<DatumParseError> for ReplError {
@@ -137,11 +144,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(output.values, vec![Value::Unspecified]);
+        assert_eq!(output.values, Vec::<Value>::new());
         assert_eq!(
             output.type_error.unwrap().to_string(),
             "type constraint conflict: expected number?, got string?"
         );
+        assert!(env.lookup("broken").is_none());
 
         let QueryError::Type(error) =
             infer_query_with_context("broken", &surface, &type_env).unwrap_err()
@@ -166,6 +174,9 @@ mod tests {
         .unwrap();
 
         assert!(output.type_error.is_some());
+        assert_eq!(output.values, vec![Value::Unspecified]);
+        assert!(env.lookup("x").is_some());
+        assert!(env.lookup("broken").is_none());
         let types = infer_query_with_context("x", &surface, &type_env).unwrap();
         assert_eq!(types[0].to_string(), "number?");
     }

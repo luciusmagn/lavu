@@ -820,6 +820,8 @@ Scheme value is valid.
 - Reject invariant body errors such as =(+ x "hello")= during inference,
   including inside inferred definitions, and avoid committing recursive
   top-level placeholder bindings when inference fails.
+- In the REPL, infer each top-level form before evaluation so an
+  invariant type conflict cannot define a runtime binding.
 - Label hard unification failures as type constraint conflicts, reserving
   =unknown?= and =any?= for intentionally coarse inference results.
 - Normalize collection and port unions in displayed inference results,
