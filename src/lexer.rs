@@ -1,5 +1,5 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
-use logos::{Logos, Span};
+use logos::{Lexer as LogosLexer, Logos, Span};
 use num::{BigInt, Complex, Num, bigint::ParseBigIntError, complex::ParseComplexError};
 use strum::EnumIs;
 use thiserror::Error;
@@ -22,6 +22,9 @@ pub enum LexerError {
 
     #[error("complex number parse error: {0}")]
     ComplexNumParseError(#[from] Rc<ParseComplexError<ParseBigDecimalError>>),
+
+    #[error("unclosed block comment")]
+    UnclosedBlockComment,
 
     #[error("other error")]
     #[default]
@@ -156,9 +159,11 @@ pub enum Token {
     DatumComment,
 
     // Comments
+    #[token("#|", lex_block_comment)]
+    BlockComment,
+
     #[regex(r";[^\n]*")]
     LineComment,
-    // TODO: block comment
 
     // Whitespace (preserved)
     #[regex(
@@ -166,6 +171,35 @@ pub enum Token {
         |lex| lex.slice().to_string()
     )]
     Whitespace(String),
+}
+
+fn lex_block_comment(lex: &mut LogosLexer<'_, Token>) -> Result<(), LexerError> {
+    let mut depth = 1usize;
+    let mut consumed = 0usize;
+    let remainder = lex.remainder();
+
+    while consumed < remainder.len() {
+        let text = &remainder[consumed..];
+        if text.starts_with("#|") {
+            depth += 1;
+            consumed += 2;
+        } else if text.starts_with("|#") {
+            depth -= 1;
+            consumed += 2;
+            if depth == 0 {
+                lex.bump(consumed);
+                return Ok(());
+            }
+        } else {
+            let ch = text
+                .chars()
+                .next()
+                .expect("loop condition ensures remaining input");
+            consumed += ch.len_utf8();
+        }
+    }
+
+    Err(LexerError::UnclosedBlockComment)
 }
 
 pub fn special_forms() -> &'static [&'static str] {
@@ -377,11 +411,11 @@ mod tests {
 
     #[test]
     fn test_comments() {
-        let input = "; line comment\n#| block comment |#";
+        let input = "; line comment\n#| block #| nested |# comment |#";
         let tokens = tokenize(input);
 
         assert_eq!(tokens[0].0, Token::LineComment);
-        //assert_eq!(tokens[2].0, Token::BlockComment);
+        assert_eq!(tokens[2].0, Token::BlockComment);
     }
 
     #[test]

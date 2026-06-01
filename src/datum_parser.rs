@@ -47,7 +47,12 @@ impl Parser {
     fn new(tokens: &[(Token, &str, LogosSpan)]) -> Self {
         let tokens = tokens
             .iter()
-            .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_) | Token::LineComment))
+            .filter(|(token, _, _)| {
+                !matches!(
+                    token,
+                    Token::Whitespace(_) | Token::LineComment | Token::BlockComment
+                )
+            })
             .map(|(token, _, span)| Lexeme {
                 token: token.clone(),
                 span: span.clone(),
@@ -264,6 +269,15 @@ mod tests {
         assert_eq!(datums[2].span, 6..10);
         assert_eq!(datums[3].node, Datum::Atom(Atom::Character(' ')));
         assert_eq!(datums[3].span, 11..18);
+    }
+
+    #[test]
+    fn skips_line_and_block_comments() {
+        let datums = parse("1 ; line\n #| outer #| inner |# done |# 2").unwrap();
+
+        assert_eq!(datums.len(), 2);
+        assert_eq!(datums[0].span, 0..1);
+        assert_eq!(datums[1].span, 39..40);
     }
 
     #[test]

@@ -69,7 +69,9 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                     | Ok(Token::UnquoteSplicing)
                     | Ok(Token::SyntaxQuote) => Style::new().fg(Color::Magenta).bold(),
                     Ok(Token::VectorStart) => Style::new().fg(Color::Purple).bold(),
-                    Ok(Token::LineComment) => Style::new().fg(Color::DarkGray).italic(),
+                    Ok(Token::LineComment | Token::BlockComment) => {
+                        Style::new().fg(Color::DarkGray).italic()
+                    }
                     _ => Style::new().fg(Color::Default),
                 };
 
