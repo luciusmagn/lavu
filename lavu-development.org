@@ -625,6 +625,9 @@ Scheme value is valid.
 - Display and infer =call/cc= callback flow with an escape continuation
   returning =never?= and the overall result as the union of direct and
   escaped result types.
+- Infer literal =call/cc= callback lambdas in continuation context so
+  uses of the escape procedure behave as =never?= inside nested
+  applications instead of forcing unreachable operand checks.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
   =display= raw.

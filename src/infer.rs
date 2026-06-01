@@ -328,10 +328,20 @@ impl Inferencer {
                     return self.infer_desugared_or(condition, alternate, env);
                 }
 
+                if PrimitiveApplication::classify(&operator.node, env)
+                    == Some(PrimitiveApplication::CallCc)
+                {
+                    return self.infer_call_cc_application(operands, expr.span.clone(), env);
+                }
+
                 let operand_tys = operands
                     .iter()
                     .map(|operand| self.infer_expr(operand, env))
                     .collect::<Result<Vec<_>, _>>()?;
+
+                if self.any_never(&operand_tys) {
+                    return Ok(Type::Never);
+                }
 
                 if let Some(application) = PrimitiveApplication::classify(&operator.node, env) {
                     return self.infer_primitive_application(
@@ -344,9 +354,20 @@ impl Inferencer {
                 }
 
                 let operator_ty = self.infer_expr(operator, env)?;
+                if self.is_never(&operator_ty) {
+                    return Ok(Type::Never);
+                }
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
             }
         }
+    }
+
+    fn any_never(&self, types: &[Type]) -> bool {
+        types.iter().any(|ty| self.is_never(ty))
+    }
+
+    fn is_never(&self, ty: &Type) -> bool {
+        matches!(self.resolve(ty.clone()), Type::Never)
     }
 
     fn infer_desugared_or(
@@ -472,6 +493,47 @@ impl Inferencer {
             ),
             None => Type::procedure(param_types, result),
         })
+    }
+
+    fn infer_lambda_with_argument_types(
+        &mut self,
+        params: &[Spanned<String>],
+        rest: Option<&Spanned<String>>,
+        body: &[Spanned<Expr>],
+        argument_tys: Vec<Type>,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        if argument_tys.len() < params.len()
+            || (rest.is_none() && argument_tys.len() != params.len())
+        {
+            let expected = match rest {
+                Some(_) => format!("at least {}", params.len()),
+                None => params.len().to_string(),
+            };
+            return Err(TypeError::ArityMismatch {
+                expected,
+                actual: argument_tys.len(),
+                span,
+            });
+        }
+
+        let mut local = env.clone();
+        for (param, ty) in params.iter().zip(argument_tys.iter()) {
+            local.define(param.node.clone(), ty.clone());
+        }
+        if let Some(rest) = rest {
+            let rest_tys = argument_tys[params.len()..].to_vec();
+            let rest_ty = match rest_tys.as_slice() {
+                [] => Type::Null,
+                [single] => Type::ListOf(Box::new(single.clone())),
+                _ => Type::ListOf(Box::new(Type::union(rest_tys))),
+            };
+            local.define(rest.node.clone(), rest_ty);
+        }
+
+        let result = self.infer_sequence(body, &local)?;
+        Ok(self.resolve(result))
     }
 
     fn infer_letrec(
@@ -820,6 +882,39 @@ impl Inferencer {
         }
     }
 
+    fn infer_call_cc_application(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let [receiver] = operands else {
+            return Err(TypeError::ArityMismatch {
+                expected: "1".to_string(),
+                actual: operands.len(),
+                span,
+            });
+        };
+
+        let Expr::Lambda { params, rest, body } = &receiver.node else {
+            let receiver_ty = self.infer_expr(receiver, env)?;
+            return self.infer_call_cc(operands, vec![receiver_ty], span);
+        };
+
+        let escape_seed = self.fresh_type_var();
+        let continuation = Type::procedure(vec![escape_seed.clone()], Type::Never);
+        let direct = self.infer_lambda_with_argument_types(
+            params,
+            rest.as_ref(),
+            body,
+            vec![continuation],
+            receiver.span.clone(),
+            env,
+        )?;
+
+        Ok(self.call_cc_result(direct, escape_seed))
+    }
+
     fn infer_call_cc_receiver(
         &mut self,
         receiver: ProcedureType,
@@ -828,18 +923,22 @@ impl Inferencer {
         let escape_seed = self.fresh_type_var();
         let continuation = Type::procedure(vec![escape_seed.clone()], Type::Never);
         let direct = self.apply_procedure(receiver, operands, vec![continuation])?;
+        Ok(self.call_cc_result(direct, escape_seed))
+    }
+
+    fn call_cc_result(&self, direct: Type, escape_seed: Type) -> Type {
         let direct = self.resolve(direct);
         let escape = self.resolve(escape_seed.clone());
 
         if same_type_var(&escape, &escape_seed) {
-            return Ok(direct);
+            return direct;
         }
 
-        Ok(if direct == Type::Never {
+        if direct == Type::Never {
             escape
         } else {
             Type::union(vec![direct, escape])
-        })
+        }
     }
 
     fn infer_file_callback(
@@ -1534,6 +1633,7 @@ impl Inferencer {
         match (actual, expected) {
             (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => Ok(ty),
             (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
+            (Type::Never, _) | (_, Type::Never) => Ok(Type::Never),
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::Null, Type::ListOf(_)) | (Type::ListOf(_), Type::Null) => Ok(Type::Null),
@@ -2732,6 +2832,11 @@ mod tests {
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "number?");
         assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");
+        assert_eq!(
+            infer_one("(call/cc (lambda (k) (+ (k 5) \"x\")))"),
+            "number?"
+        );
+        assert_eq!(infer_one("(call/cc (lambda (k) ((k 5) \"x\")))"), "number?");
         assert_eq!(
             infer_one("(call-with-current-continuation (lambda (k) (if #t (k 5) \"x\")))"),
             "(U number? string?)"
