@@ -4703,6 +4703,7 @@ mod tests {
     fn evaluates_define_procedure_shorthand() {
         assert_eq!(eval_one("(define (add1 x) (+ x 1)) (add1 4)"), "5");
         assert_eq!(eval_one("(define X 1) x"), "1");
+        assert_eq!(eval_one("(define foo.bar 2) foo.bar"), "2");
         assert_eq!(eval_one("(eq? 'MixedCase 'mixedcase)"), "#t");
         assert_eq!(eval_one("'(Foo BAR)"), "(foo bar)");
     }

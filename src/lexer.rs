@@ -50,7 +50,7 @@ pub enum LexerError {
 pub enum Token {
     // Identifiers
     #[regex(
-        r"([a-zA-Z!$%&*/:<=>?^_~+@-][a-zA-Z0-9!$%&*/:<>=?^_~+@-]*)|(\.\.\.)",
+        r"([a-zA-Z!$%&*/:<=>?^_~+@-][a-zA-Z0-9!$%&*/:<>=?^_~+@.\-]*)|(\.\.\.)",
         |lex| lex.slice().to_ascii_lowercase()
     )]
     Identifier(String),
@@ -837,10 +837,10 @@ mod tests {
 
     #[test]
     fn test_identifiers() {
-        let input = "foo bar+ set! string->symbol MixedCase";
+        let input = "foo bar+ set! string->symbol MixedCase foo.bar";
         let tokens = tokenize(input);
 
-        assert_eq!(tokens.len(), 9); // 5 identifiers + 4 whitespaces
+        assert_eq!(tokens.len(), 11); // 6 identifiers + 5 whitespaces
         assert!(tokens[0].0.is_identifier());
         assert_eq!(tokens[0].1, "foo");
         assert!(tokens[2].0.is_identifier());
@@ -850,6 +850,7 @@ mod tests {
         assert!(tokens[6].0.is_identifier());
         assert_eq!(tokens[6].1, "string->symbol");
         assert_eq!(tokens[8].0, Token::Identifier("mixedcase".to_string()));
+        assert_eq!(tokens[10].0, Token::Identifier("foo.bar".to_string()));
     }
 
     #[test]
@@ -877,6 +878,7 @@ mod tests {
         test_single("list->vector", Token::is_identifier)?;
         test_single("<=?", Token::is_identifier)?;
         test_single("the-word-recursion-has-many-meanings", Token::is_identifier)?;
+        test_single("one.two", Token::is_identifier)?;
         test_single("q", Token::is_identifier)?;
         test_single("soup", Token::is_identifier)?;
         test_single("V17a", Token::is_identifier)?;

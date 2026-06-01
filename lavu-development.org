@@ -409,6 +409,8 @@ Scheme value is valid.
 - Fold reader identifiers to lowercase to match R5RS case-insensitive
   source syntax while leaving strings, characters, and =string->symbol=
   names alone.
+- Accept dot as an R5RS subsequent identifier character, while keeping
+  bare dot reserved for dotted-list syntax.
 - Add checked tokenization for parser entry points so lexer failures
   such as unclosed block comments and invalid named characters become
   spanned parse diagnostics instead of disappearing from best-effort
