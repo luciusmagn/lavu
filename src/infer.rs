@@ -22,7 +22,7 @@ pub enum TypeError {
         span: SourceSpan,
     },
 
-    #[error("type mismatch: expected {expected}, got {actual}")]
+    #[error("type constraint conflict: expected {expected}, got {actual}")]
     Mismatch {
         expected: Box<Type>,
         actual: Box<Type>,
@@ -2292,7 +2292,7 @@ mod tests {
     fn displays_type_error_details() {
         assert_eq!(
             infer_error("(+ \"x\" 1)").to_string(),
-            "type mismatch: expected number?, got string?"
+            "type constraint conflict: expected number?, got string?"
         );
         assert_eq!(
             infer_error("(car)").to_string(),
@@ -2317,11 +2317,11 @@ mod tests {
     fn rejects_impossible_arithmetic_lambda_bodies() {
         assert_eq!(
             infer_error("(lambda (x) (+ x \"hello\"))").to_string(),
-            "type mismatch: expected number?, got string?"
+            "type constraint conflict: expected number?, got string?"
         );
         assert_eq!(
             infer_error("(define (broken x) (+ x \"hello\"))").to_string(),
-            "type mismatch: expected number?, got string?"
+            "type constraint conflict: expected number?, got string?"
         );
     }
 
@@ -2331,7 +2331,7 @@ mod tests {
 
         assert_eq!(
             infer_error_with_env("(define (broken x) (+ x \"hello\"))", &mut env).to_string(),
-            "type mismatch: expected number?, got string?"
+            "type constraint conflict: expected number?, got string?"
         );
 
         assert!(env.binding("broken").is_none());

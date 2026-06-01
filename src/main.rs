@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(output.values, vec![Value::Unspecified]);
         assert_eq!(
             output.type_error.unwrap().to_string(),
-            "type mismatch: expected number?, got string?"
+            "type constraint conflict: expected number?, got string?"
         );
 
         let QueryError::Type(error) =

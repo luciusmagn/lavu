@@ -403,7 +403,7 @@ Scheme value is valid.
 - Highlight rational and complex numeric tokens with the same numeric
   style as integers, decimals, and radix-prefixed integers.
 ** Diagnostics
-- Include expected/actual details in type mismatch, arity, and
+- Include expected/actual details in type constraint conflict, arity, and
   non-procedure inference errors so Ariadne labels are more informative.
 - Include expected/actual counts in runtime arity errors.
 ** Agent Workflow
@@ -796,3 +796,5 @@ Scheme value is valid.
 - Reject invariant body errors such as =(+ x "hello")= during inference,
   including inside inferred definitions, and avoid committing recursive
   top-level placeholder bindings when inference fails.
+- Label hard unification failures as type constraint conflicts, reserving
+  =unknown?= and =any?= for intentionally coarse inference results.
