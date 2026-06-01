@@ -248,6 +248,11 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::rest_procedure(vec![Type::Char], Type::OutputPort, Type::Unknown),
         ),
         Primitive::new(
+            "transcript-on",
+            Type::procedure(vec![Type::String], Type::Unknown),
+        ),
+        Primitive::new("transcript-off", Type::procedure(vec![], Type::Unknown)),
+        Primitive::new(
             "number->string",
             Type::rest_procedure(vec![Type::Number], Type::Number, Type::String),
         ),
@@ -1083,6 +1088,14 @@ mod tests {
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),
             "(-> char? output-port? * unknown?)"
+        );
+        assert_eq!(
+            primitive("transcript-on").unwrap().signature.to_string(),
+            "(-> string? unknown?)"
+        );
+        assert_eq!(
+            primitive("transcript-off").unwrap().signature.to_string(),
+            "(-> unknown?)"
         );
     }
 }

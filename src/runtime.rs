@@ -149,6 +149,7 @@ pub struct OutputFilePort {
 thread_local! {
     static CURRENT_INPUT_PORT: RefCell<InputPort> = RefCell::new(InputPort::stdin());
     static CURRENT_OUTPUT_PORT: RefCell<OutputPort> = const { RefCell::new(OutputPort::Stdout) };
+    static TRANSCRIPT_PORT: RefCell<Option<OutputPort>> = const { RefCell::new(None) };
     static NEXT_CONTINUATION_ID: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -411,6 +412,8 @@ impl Env {
             "display",
             "newline",
             "write-char",
+            "transcript-on",
+            "transcript-off",
             "eof-object?",
             "not",
             "eqv?",
@@ -850,6 +853,8 @@ fn apply_primitive(
         "display" => output_value(args, span, OutputMode::Display),
         "newline" => newline(args, span),
         "write-char" => write_char(args, span),
+        "transcript-on" => transcript_on(args, span),
+        "transcript-off" => transcript_off(args, span),
         "eof-object?" => predicate(args, span, |value| matches!(value, Value::EofObject)),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
@@ -2795,6 +2800,41 @@ fn write_char(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     }
 }
 
+fn transcript_on(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let Value::String(path) = value else {
+            return Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            });
+        };
+        let port = output_port_from_path(path.borrow().as_str(), span)?;
+        TRANSCRIPT_PORT.with(|current| {
+            if let Some(old) = current.replace(Some(port)) {
+                close_output_port_value(old);
+            }
+        });
+        Ok(Value::Unspecified)
+    })
+}
+
+fn transcript_off(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if !args.is_empty() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    TRANSCRIPT_PORT.with(|current| {
+        if let Some(port) = current.replace(None) {
+            close_output_port_value(port);
+        }
+    });
+    Ok(Value::Unspecified)
+}
+
 fn value_and_optional_output_port(
     args: Vec<Value>,
     span: SourceSpan,
@@ -2858,6 +2898,22 @@ fn display_text(value: &Value) -> String {
 }
 
 fn write_output(text: &str, port: &OutputPort, span: SourceSpan) -> Result<Value, EvalError> {
+    write_output_raw(text, port, span.clone())?;
+    mirror_transcript(text, port, span)?;
+    Ok(Value::Unspecified)
+}
+
+fn mirror_transcript(text: &str, port: &OutputPort, span: SourceSpan) -> Result<(), EvalError> {
+    if matches!(port, OutputPort::Stdout) {
+        let transcript = TRANSCRIPT_PORT.with(|current| current.borrow().clone());
+        if let Some(transcript) = transcript {
+            write_output_raw(text, &transcript, span)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_output_raw(text: &str, port: &OutputPort, span: SourceSpan) -> Result<(), EvalError> {
     match port {
         OutputPort::Stdout => {
             let mut stdout = io::stdout().lock();
@@ -2868,7 +2924,7 @@ fn write_output(text: &str, port: &OutputPort, span: SourceSpan) -> Result<Value
                     message: error.to_string(),
                     span,
                 })?;
-            Ok(Value::Unspecified)
+            Ok(())
         }
         OutputPort::File(file) => {
             let mut port = file.borrow_mut();
@@ -2885,12 +2941,12 @@ fn write_output(text: &str, port: &OutputPort, span: SourceSpan) -> Result<Value
                     message: error.to_string(),
                     span,
                 })?;
-            Ok(Value::Unspecified)
+            Ok(())
         }
         #[cfg(test)]
         OutputPort::Buffer(output) => {
             output.borrow_mut().push_str(text);
-            Ok(Value::Unspecified)
+            Ok(())
         }
     }
 }
@@ -3972,8 +4028,12 @@ fn write_string_literal(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use super::{
-        EvalError, OutputMode, OutputPort, Value, newline, output_value, string_value, write_char,
+        EvalError, OutputMode, OutputPort, TRANSCRIPT_PORT, Value, mirror_transcript, newline,
+        output_value, string_value, write_char,
     };
 
     use crate::datum_parser::parse;
@@ -4720,6 +4780,42 @@ mod tests {
         assert_eq!(eval_one(&input), "#<unspecified>");
         assert_eq!(std::fs::read_to_string(&with_path).unwrap(), "z(c 3)");
         std::fs::remove_file(with_path).unwrap();
+    }
+
+    #[test]
+    fn evaluates_transcript_primitives() {
+        let path = std::env::temp_dir().join(format!(
+            "lavu-transcript-{}-{}.ss",
+            std::process::id(),
+            line!()
+        ));
+        let input = format!(
+            "(transcript-on \"{}\")
+             (transcript-off)",
+            path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "#<unspecified>");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mirrors_stdout_to_active_transcript() {
+        let transcript = Rc::new(RefCell::new(String::new()));
+        let explicit = Rc::new(RefCell::new(String::new()));
+        TRANSCRIPT_PORT.with(|current| {
+            current.replace(Some(OutputPort::Buffer(transcript.clone())));
+        });
+
+        mirror_transcript("x", &OutputPort::Stdout, 0..0).unwrap();
+        mirror_transcript("y", &OutputPort::Buffer(explicit.clone()), 0..0).unwrap();
+
+        TRANSCRIPT_PORT.with(|current| {
+            current.replace(None);
+        });
+        assert_eq!(*transcript.borrow(), "x");
+        assert_eq!(*explicit.borrow(), "");
     }
 
     #[test]

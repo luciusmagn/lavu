@@ -507,6 +507,8 @@ Scheme value is valid.
 - Add dynamic default output rebinding with =with-output-to-file=.
 - Type output-file combinator callbacks as output-port procedures or
   thunks.
+- Add R5RS =transcript-on= and =transcript-off= as a native output hook
+  for interaction stdout writes.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.
