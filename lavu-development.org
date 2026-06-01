@@ -333,6 +333,8 @@ Scheme value is valid.
 - Make Reedline validation token-aware so delimiters inside strings and
   comments do not trigger spurious continuation prompts, while unclosed
   block comments still wait for more input.
+- Highlight rational and complex numeric tokens with the same numeric
+  style as integers, decimals, and radix-prefixed integers.
 ** Diagnostics
 - Include expected/actual details in type mismatch, arity, and
   non-procedure inference errors so Ariadne labels are more informative.

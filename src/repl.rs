@@ -56,6 +56,8 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                     },
                     Ok(Token::Integer(_))
                     | Ok(Token::Decimal(_))
+                    | Ok(Token::Real(_))
+                    | Ok(Token::Complex(_))
                     | Ok(Token::Binary(_))
                     | Ok(Token::Octal(_))
                     | Ok(Token::Hex(_)) => Style::new().fg(Color::Green),
@@ -205,7 +207,8 @@ pub fn line_editor() -> Result<(Reedline, Box<dyn Prompt>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::input_is_complete;
+    use super::{highlighter, input_is_complete};
+    use nu_ansi_term::Color;
 
     #[test]
     fn validation_tracks_token_delimiters() {
@@ -224,5 +227,18 @@ mod tests {
     #[test]
     fn validation_waits_for_unclosed_block_comments() {
         assert!(!input_is_complete("#| ("));
+    }
+
+    #[test]
+    fn highlighter_colors_all_numeric_token_shapes() {
+        let highlighted = highlighter().unwrap().highlight("1 1.5 3/2 1+2i #x10", 0);
+        let foregrounds = highlighted
+            .buffer
+            .into_iter()
+            .filter(|(_, text)| !text.trim().is_empty())
+            .map(|(style, _)| style.foreground)
+            .collect::<Vec<_>>();
+
+        assert_eq!(foregrounds, vec![Some(Color::Green); 5]);
     }
 }
