@@ -3246,12 +3246,21 @@ fn string_to_number_with_radix(text: &str, radix: u32) -> Value {
 }
 
 fn text_has_explicit_radix(text: &str) -> bool {
-    text.get(..2).is_some_and(|prefix| {
-        matches!(
-            prefix,
-            "#b" | "#B" | "#o" | "#O" | "#d" | "#D" | "#x" | "#X"
-        )
-    })
+    let text = strip_exactness_prefix(text).unwrap_or(text);
+    text.get(..2).is_some_and(is_radix_prefix)
+}
+
+fn strip_exactness_prefix(text: &str) -> Option<&str> {
+    text.get(..2)
+        .filter(|prefix| matches!(*prefix, "#e" | "#E" | "#i" | "#I"))
+        .map(|_| &text[2..])
+}
+
+fn is_radix_prefix(prefix: &str) -> bool {
+    matches!(
+        prefix,
+        "#b" | "#B" | "#o" | "#O" | "#d" | "#D" | "#x" | "#X"
+    )
 }
 
 fn eqv_value(left: &Value, right: &Value) -> bool {
@@ -4823,6 +4832,10 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#x10\")"), "16");
         assert_eq!(eval_one("(string->number \"#x-ff\")"), "-255");
         assert_eq!(eval_one("(string->number \"#b+1010\")"), "10");
+        assert_eq!(eval_one("(string->number \"#e1.5\")"), "3/2");
+        assert_eq!(eval_one("(string->number \"#i1/2\")"), "0.5");
+        assert_eq!(eval_one("(string->number \"#i#x10\")"), "16");
+        assert_eq!(eval_one("(string->number \"#x#i10\" 2)"), "16");
         assert_eq!(eval_one("(string->number \".5\")"), "0.5");
         assert_eq!(eval_one("(string->number \"1.\")"), "1");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
@@ -4830,6 +4843,10 @@ mod tests {
         assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
         assert_eq!(eval_one("(string->number \"12\" 2)"), "#f");
         assert_eq!(eval_one("(string->number \"wat\")"), "#f");
+        assert_eq!(
+            eval_one("(list (exact? #e1.5) (inexact? #i1/2))"),
+            "(#t #t)"
+        );
     }
 
     #[test]

@@ -594,6 +594,10 @@ Scheme value is valid.
   conversion primitives, with =string->number= reusing the lexer.
 - Extend =number->string= and =string->number= with the optional R5RS
   radix argument for radices 2, 8, 10, and 16.
+- Parse R5RS exactness prefixes for supported real numeric literals:
+  exact decimal forms become rational values, inexact integer/fraction
+  forms become decimal values, and exactness composes with radix prefixes
+  for integer literals.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.

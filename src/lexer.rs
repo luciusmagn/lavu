@@ -53,23 +53,59 @@ pub enum Token {
         priority = 3,
         callback = |lex| BigInt::from_str(lex.slice())
     )]
+    #[regex(
+        r"#[eE][+-]?[0-9]+",
+        priority = 4,
+        callback = |lex| BigInt::from_str(&lex.slice()[2..])
+    )]
     Integer(BigInt),
 
     #[regex(
         r"[+-]?[0-9]+/[0-9]+",
         priority = 3,
-        callback = |lex| {
-            Ok::<_, ParseBigIntError>((
-                BigInt::from_str(lex.slice().split("/").next().unwrap())?,
-                BigInt::from_str(lex.slice().split("/").nth(1).unwrap())?
-            ))
-        }
+        callback = |lex| parse_ratio_literal(lex.slice())
+    )]
+    #[regex(
+        r"#[eE][+-]?[0-9]+/[0-9]+",
+        priority = 6,
+        callback = |lex| parse_ratio_literal(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[eE]#[dD][+-]?[0-9]+/[0-9]+",
+        priority = 8,
+        callback = |lex| parse_ratio_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[eE][+-]?[0-9]+/[0-9]+",
+        priority = 8,
+        callback = |lex| parse_ratio_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[eE][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 6,
+        callback = |lex| parse_exact_decimal_literal(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[eE]#[dD][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 8,
+        callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[eE][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 8,
+        callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
     Real((BigInt, BigInt)),
 
     #[regex(
         r"[+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
         |lex| Complex::from_str(lex.slice())
+            .map_err(Rc::new)
+    )]
+    #[regex(
+        r"#[iI][+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
+        priority = 6,
+        callback = |lex| Complex::from_str(&lex.slice()[2..])
             .map_err(Rc::new)
     )]
     Complex(Complex<BigDecimal>),
@@ -79,11 +115,96 @@ pub enum Token {
         priority = 4,
         callback = |lex| BigDecimal::from_str(lex.slice())
     )]
+    #[regex(
+        r"#[iI][+-]?[0-9]+",
+        priority = 4,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[iI]#[dD][+-]?[0-9]+",
+        priority = 6,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[iI][+-]?[0-9]+",
+        priority = 6,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[iI]#[bB][+-]?[01]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[bB]#[iI][+-]?[01]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[iI]#[oO][+-]?[0-7]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[oO]#[iI][+-]?[0-7]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[iI]#[xX][+-]?[0-9a-fA-F]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 16)
+    )]
+    #[regex(
+        r"#[xX]#[iI][+-]?[0-9a-fA-F]+",
+        priority = 6,
+        callback = |lex| parse_inexact_radix_literal(&lex.slice()[4..], 16)
+    )]
+    #[regex(
+        r"#[iI][+-]?[0-9]+/[0-9]+",
+        priority = 6,
+        callback = |lex| parse_inexact_fraction_literal(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[iI]#[dD][+-]?[0-9]+/[0-9]+",
+        priority = 8,
+        callback = |lex| parse_inexact_fraction_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[iI][+-]?[0-9]+/[0-9]+",
+        priority = 8,
+        callback = |lex| parse_inexact_fraction_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[iI][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 6,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[iI]#[dD][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 8,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[iI][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
+        priority = 8,
+        callback = |lex| BigDecimal::from_str(&lex.slice()[4..])
+    )]
     Decimal(BigDecimal),
 
     #[regex(
         r"#[bB][+-]?[01]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 2)
+    )]
+    #[regex(
+        r"#[eE]#[bB][+-]?[01]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[bB]#[eE][+-]?[01]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 2)
     )]
     Binary(BigInt),
 
@@ -91,17 +212,47 @@ pub enum Token {
         r"#[oO][+-]?[0-7]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 8)
     )]
+    #[regex(
+        r"#[eE]#[oO][+-]?[0-7]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[oO]#[eE][+-]?[0-7]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 8)
+    )]
     Octal(BigInt),
 
     #[regex(
         r"#[xX][+-]?[0-9a-fA-F]+",
         |lex| BigInt::from_str_radix(&lex.slice()[2..], 16)
     )]
+    #[regex(
+        r"#[eE]#[xX][+-]?[0-9a-fA-F]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 16)
+    )]
+    #[regex(
+        r"#[xX]#[eE][+-]?[0-9a-fA-F]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str_radix(&lex.slice()[4..], 16)
+    )]
     Hex(BigInt),
 
     #[regex(
         r"#[dD][+-]?[0-9]+",
         |lex| BigInt::from_str(&lex.slice()[2..])
+    )]
+    #[regex(
+        r"#[eE]#[dD][+-]?[0-9]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[dD]#[eE][+-]?[0-9]+",
+        priority = 6,
+        callback = |lex| BigInt::from_str(&lex.slice()[4..])
     )]
     DecInteger(BigInt),
 
@@ -261,6 +412,49 @@ pub fn is_operator(s: &str) -> bool {
     operators().contains(&s)
 }
 
+fn parse_ratio_literal(slice: &str) -> Result<(BigInt, BigInt), ParseBigIntError> {
+    let (numerator, denominator) = slice
+        .split_once('/')
+        .expect("ratio token regex guarantees a slash");
+
+    Ok((BigInt::from_str(numerator)?, BigInt::from_str(denominator)?))
+}
+
+fn parse_exact_decimal_literal(slice: &str) -> Result<(BigInt, BigInt), ParseBigIntError> {
+    let (sign, magnitude) = match slice.as_bytes().first() {
+        Some(b'-') => (-1, &slice[1..]),
+        Some(b'+') => (1, &slice[1..]),
+        _ => (1, slice),
+    };
+    let (whole, fractional) = magnitude
+        .split_once('.')
+        .expect("exact decimal token regex guarantees a decimal point");
+    let digits = format!("{whole}{fractional}");
+    let mut numerator = if digits.is_empty() {
+        BigInt::from(0)
+    } else {
+        BigInt::from_str(&digits)?
+    };
+    if sign < 0 {
+        numerator = -numerator;
+    }
+    let denominator = BigInt::from(10).pow(fractional.len() as u32);
+
+    Ok((numerator, denominator))
+}
+
+fn parse_inexact_fraction_literal(slice: &str) -> Result<BigDecimal, LexerError> {
+    let (numerator, denominator) = parse_ratio_literal(slice)?;
+
+    Ok(BigDecimal::from(numerator) / BigDecimal::from(denominator))
+}
+
+fn parse_inexact_radix_literal(slice: &str, radix: u32) -> Result<BigDecimal, LexerError> {
+    BigInt::from_str_radix(slice, radix)
+        .map(BigDecimal::from)
+        .map_err(LexerError::from)
+}
+
 pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
     let mut lexer = Token::lexer(input);
     let mut tokens = Vec::new();
@@ -393,6 +587,28 @@ mod tests {
         assert_eq!(signed[2].0, Token::Octal(BigInt::from(8)));
         assert_eq!(signed[4].0, Token::Hex(BigInt::from(-255)));
         assert_eq!(signed[6].0, Token::DecInteger(BigInt::from(-12)));
+
+        let exactness = tokenize("#e10 #i10 #e3/2 #i1/2 #e1.5 #i1.5 #e#x10 #x#i10");
+        assert_eq!(exactness[0].0, Token::Integer(BigInt::from(10)));
+        assert_eq!(exactness[2].0, Token::Decimal(BigDecimal::from(10)));
+        assert_eq!(
+            exactness[4].0,
+            Token::Real((BigInt::from(3), BigInt::from(2)))
+        );
+        assert_eq!(
+            exactness[6].0,
+            Token::Decimal(BigDecimal::from_str("0.5").unwrap())
+        );
+        assert_eq!(
+            exactness[8].0,
+            Token::Real((BigInt::from(15), BigInt::from(10)))
+        );
+        assert_eq!(
+            exactness[10].0,
+            Token::Decimal(BigDecimal::from_str("1.5").unwrap())
+        );
+        assert_eq!(exactness[12].0, Token::Hex(BigInt::from(16)));
+        assert_eq!(exactness[14].0, Token::Decimal(BigDecimal::from(16)));
     }
 
     #[test]
