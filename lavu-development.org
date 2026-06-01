@@ -272,6 +272,8 @@ and output procedures. =any?= means any Scheme value is valid.
   representation.
 - Add decimal-backed polar helpers =make-polar=, =magnitude=, and
   =angle=; trigonometric conversion currently uses host =f64=.
+- Preserve exact =magnitude= results for exact real inputs and exact
+  complex inputs whose squared magnitude is a perfect rational square.
 - Add decimal-backed transcendental functions =exp=, =log=, =sin=,
   =cos=, =tan=, =asin=, =acos=, and one- or two-argument =atan= using
   host complex =f64= operations.

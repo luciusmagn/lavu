@@ -1568,11 +1568,32 @@ fn imag_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 }
 
 fn magnitude(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    unary(args, span.clone(), |value| {
-        let number = number_to_complex_decimal(value, span.clone())?;
-        let squared = number.re.clone() * number.re + number.im.clone() * number.im;
-        decimal_sqrt(squared, span).map(Value::Decimal)
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(n) => Ok(Value::Integer(n.abs())),
+        Value::Rational(n) => Ok(exact_number(n.abs())),
+        Value::ExactComplex(n) => exact_complex_magnitude(n, span),
+        Value::Decimal(n) => Ok(Value::Decimal(n.abs())),
+        Value::Complex(n) => {
+            let squared = n.re.clone() * n.re + n.im.clone() * n.im;
+            decimal_sqrt(squared, span).map(Value::Decimal)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
     })
+}
+
+fn exact_complex_magnitude(
+    number: Complex<BigRational>,
+    span: SourceSpan,
+) -> Result<Value, EvalError> {
+    let squared = number.re.clone() * number.re + number.im.clone() * number.im;
+    if let Some(root) = exact_nonnegative_rational_sqrt(&squared) {
+        Ok(exact_number(root))
+    } else {
+        decimal_sqrt(rational_to_decimal(&squared), span).map(Value::Decimal)
+    }
 }
 
 fn angle(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -4953,7 +4974,11 @@ mod tests {
         assert_eq!(eval_one("(real-part 1+2i)"), "1");
         assert_eq!(eval_one("(imag-part 1+2i)"), "2");
         assert_eq!(eval_one("(imag-part 5)"), "0");
+        assert_eq!(eval_one("(magnitude -3/2)"), "3/2");
+        assert_eq!(eval_one("(exact? (magnitude -3/2))"), "#t");
         assert_eq!(eval_one("(magnitude 3+4i)"), "5");
+        assert_eq!(eval_one("(exact? (magnitude 3+4i))"), "#t");
+        assert_eq!(eval_one("(inexact? (magnitude 1+1i))"), "#t");
         assert_eq!(eval_one("(angle 1+0i)"), "0");
         assert_eq!(eval_one("(exp 0)"), "1");
         assert_eq!(eval_one("(log 1)"), "0");
