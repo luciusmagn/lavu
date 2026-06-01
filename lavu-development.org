@@ -405,6 +405,10 @@ Scheme value is valid.
 ** Resource Predicates
 - Bind conservative runtime predicates for port and EOF object metadata
   so typed names are available even before resource values exist.
+** Input Ports
+- Add EOF objects, current/file input ports, =read-char=,
+  =peek-char=, =char-ready?=, and =close-input-port= with conservative
+  typed metadata.
 ** Output Ports
 - Add a first stdout-backed output port, plus native =current-output-port=,
   =write=, =display=, =newline=, and =write-char= with conservative

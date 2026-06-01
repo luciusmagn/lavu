@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -28,11 +29,13 @@ pub enum Value {
     List(Vec<Value>),
     Pair(Rc<RefCell<PairValue>>),
     Vector(Rc<RefCell<Vec<Value>>>),
+    InputPort(InputPort),
     OutputPort(OutputPort),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
     Values(Vec<Value>),
+    EofObject,
     Unspecified,
     Uninitialized,
 }
@@ -55,16 +58,61 @@ impl PartialEq for Value {
                 left.car == right.car && left.cdr == right.cdr
             }
             (Value::Vector(left), Value::Vector(right)) => *left.borrow() == *right.borrow(),
+            (Value::InputPort(left), Value::InputPort(right)) => left == right,
             (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
             (Value::Values(left), Value::Values(right)) => left == right,
-            (Value::Unspecified, Value::Unspecified)
+            (Value::EofObject, Value::EofObject)
+            | (Value::Unspecified, Value::Unspecified)
             | (Value::Uninitialized, Value::Uninitialized) => true,
             _ => false,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct InputPort(Rc<RefCell<InputPortState>>);
+
+impl InputPort {
+    fn stdin() -> Self {
+        Self(Rc::new(RefCell::new(InputPortState {
+            kind: InputPortKind::Stdin,
+            chars: Vec::new(),
+            index: 0,
+            closed: false,
+        })))
+    }
+
+    fn from_string(text: String) -> Self {
+        Self(Rc::new(RefCell::new(InputPortState {
+            kind: InputPortKind::Buffer,
+            chars: text.chars().collect(),
+            index: 0,
+            closed: false,
+        })))
+    }
+}
+
+impl PartialEq for InputPort {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+#[derive(Debug)]
+struct InputPortState {
+    kind: InputPortKind,
+    chars: Vec<char>,
+    index: usize,
+    closed: bool,
+}
+
+#[derive(Debug)]
+enum InputPortKind {
+    Stdin,
+    Buffer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +120,10 @@ pub enum OutputPort {
     Stdout,
     #[cfg(test)]
     Buffer(Rc<RefCell<String>>),
+}
+
+thread_local! {
+    static CURRENT_INPUT_PORT: InputPort = InputPort::stdin();
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -288,7 +340,13 @@ impl Env {
             "port?",
             "input-port?",
             "output-port?",
+            "current-input-port",
             "current-output-port",
+            "open-input-file",
+            "close-input-port",
+            "read-char",
+            "peek-char",
+            "char-ready?",
             "write",
             "display",
             "newline",
@@ -686,15 +744,23 @@ fn apply_primitive(
         "procedure?" => predicate(args, span, |value| {
             matches!(value, Value::Procedure(_) | Value::Primitive(_))
         }),
-        "port?" => predicate(args, span, |value| matches!(value, Value::OutputPort(_))),
-        "input-port?" => predicate(args, span, |_| false),
+        "port?" => predicate(args, span, |value| {
+            matches!(value, Value::InputPort(_) | Value::OutputPort(_))
+        }),
+        "input-port?" => predicate(args, span, |value| matches!(value, Value::InputPort(_))),
         "output-port?" => predicate(args, span, |value| matches!(value, Value::OutputPort(_))),
+        "current-input-port" => current_input_port(args, span),
         "current-output-port" => current_output_port(args, span),
+        "open-input-file" => open_input_file(args, span),
+        "close-input-port" => close_input_port(args, span),
+        "read-char" => read_char(args, span),
+        "peek-char" => peek_char(args, span),
+        "char-ready?" => char_ready(args, span),
         "write" => output_value(args, span, OutputMode::Write),
         "display" => output_value(args, span, OutputMode::Display),
         "newline" => newline(args, span),
         "write-char" => write_char(args, span),
-        "eof-object?" => predicate(args, span, |_| false),
+        "eof-object?" => predicate(args, span, |value| matches!(value, Value::EofObject)),
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
         "eq?" => eq(args, span),
@@ -2169,6 +2235,129 @@ fn call_with_values(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     apply(consumer, consumer_args, span)
 }
 
+fn current_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if !args.is_empty() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    CURRENT_INPUT_PORT.with(|port| Ok(Value::InputPort(port.clone())))
+}
+
+fn open_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let Value::String(path) = value else {
+            return Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            });
+        };
+        fs::read_to_string(path.borrow().as_str())
+            .map(|text| Value::InputPort(InputPort::from_string(text)))
+            .map_err(|error| EvalError::IoError {
+                message: error.to_string(),
+                span,
+            })
+    })
+}
+
+fn close_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let port = input_port(value, span)?;
+        port.0.borrow_mut().closed = true;
+        Ok(Value::Unspecified)
+    })
+}
+
+fn read_char(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let port = optional_input_port(args, span.clone())?;
+    input_char(&port, span, true)
+}
+
+fn peek_char(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let port = optional_input_port(args, span.clone())?;
+    input_char(&port, span, false)
+}
+
+fn char_ready(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let port = optional_input_port(args, span.clone())?;
+    let state = port.0.borrow();
+    if state.closed {
+        return Err(EvalError::TypeError {
+            expected: "open input-port?",
+            span,
+        });
+    }
+
+    Ok(Value::Boolean(state.index < state.chars.len()))
+}
+
+fn optional_input_port(args: Vec<Value>, span: SourceSpan) -> Result<InputPort, EvalError> {
+    let actual = args.len();
+    let mut args = args.into_iter();
+    let port = match args.next() {
+        Some(port) => input_port(port, span.clone())?,
+        None => CURRENT_INPUT_PORT.with(Clone::clone),
+    };
+    if args.next().is_some() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual,
+            span,
+        });
+    }
+
+    Ok(port)
+}
+
+fn input_port(value: Value, span: SourceSpan) -> Result<InputPort, EvalError> {
+    match value {
+        Value::InputPort(port) => Ok(port),
+        _ => Err(EvalError::TypeError {
+            expected: "input-port?",
+            span,
+        }),
+    }
+}
+
+fn input_char(port: &InputPort, span: SourceSpan, advance: bool) -> Result<Value, EvalError> {
+    let mut state = port.0.borrow_mut();
+    if state.closed {
+        return Err(EvalError::TypeError {
+            expected: "open input-port?",
+            span,
+        });
+    }
+    if state.index >= state.chars.len() && matches!(state.kind, InputPortKind::Stdin) {
+        refill_stdin(&mut state, span.clone())?;
+    }
+    if state.index >= state.chars.len() {
+        return Ok(Value::EofObject);
+    }
+
+    let ch = state.chars[state.index];
+    if advance {
+        state.index += 1;
+    }
+    Ok(Value::Character(ch))
+}
+
+fn refill_stdin(state: &mut InputPortState, span: SourceSpan) -> Result<(), EvalError> {
+    let mut line = String::new();
+    io::stdin()
+        .read_line(&mut line)
+        .map_err(|error| EvalError::IoError {
+            message: error.to_string(),
+            span,
+        })?;
+    state.chars = line.chars().collect();
+    state.index = 0;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 enum OutputMode {
     Write,
@@ -2486,7 +2675,9 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Character(left), Value::Character(right)) => left == right,
         (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
+        (Value::InputPort(left), Value::InputPort(right)) => left == right,
         (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
+        (Value::EofObject, Value::EofObject) => true,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
     }
@@ -3159,6 +3350,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
+            Value::InputPort(_) => write!(f, "#<input-port>"),
             Value::OutputPort(_) => write!(f, "#<output-port>"),
             Value::Promise(_) => write!(f, "#<promise>"),
             Value::Values(values) => {
@@ -3168,6 +3360,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
+            Value::EofObject => write!(f, "#<eof>"),
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
@@ -3455,6 +3648,28 @@ mod tests {
         assert_eq!(eval_one("(input-port? 1)"), "#f");
         assert_eq!(eval_one("(output-port? 1)"), "#f");
         assert_eq!(eval_one("(eof-object? 1)"), "#f");
+    }
+
+    #[test]
+    fn evaluates_input_primitives() {
+        let path = std::env::temp_dir().join(format!("lavu-input-{}.ss", std::process::id()));
+        std::fs::write(&path, "ab").unwrap();
+        let input = format!(
+            "(define p (open-input-file \"{}\"))
+             (list (input-port? p)
+                   (port? p)
+                   (char-ready? p)
+                   (read-char p)
+                   (peek-char p)
+                   (read-char p)
+                   (eof-object? (read-char p))
+                   (begin (close-input-port p) 'closed))",
+            path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "(#t #t #t #\\a #\\b #\\b #t closed)");
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(eval_one("(current-input-port)"), "#<input-port>");
     }
 
     #[test]

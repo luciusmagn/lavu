@@ -124,8 +124,40 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::Char], Type::Char),
         ),
         Primitive::new(
+            "current-input-port",
+            Type::procedure(vec![], Type::InputPort),
+        ),
+        Primitive::new(
             "current-output-port",
             Type::procedure(vec![], Type::OutputPort),
+        ),
+        Primitive::new(
+            "open-input-file",
+            Type::procedure(vec![Type::String], Type::InputPort),
+        ),
+        Primitive::new(
+            "close-input-port",
+            Type::procedure(vec![Type::InputPort], Type::Unknown),
+        ),
+        Primitive::new(
+            "read-char",
+            Type::rest_procedure(
+                vec![],
+                Type::InputPort,
+                Type::union(vec![Type::Char, Type::EofObject]),
+            ),
+        ),
+        Primitive::new(
+            "peek-char",
+            Type::rest_procedure(
+                vec![],
+                Type::InputPort,
+                Type::union(vec![Type::Char, Type::EofObject]),
+            ),
+        ),
+        Primitive::new(
+            "char-ready?",
+            Type::rest_procedure(vec![], Type::InputPort, Type::Boolean),
         ),
         Primitive::new(
             "write",
@@ -830,6 +862,17 @@ mod tests {
 
     #[test]
     fn exposes_output_primitives() {
+        assert_eq!(
+            primitive("current-input-port")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> input-port?)"
+        );
+        assert_eq!(
+            primitive("read-char").unwrap().signature.to_string(),
+            "(-> input-port? * (U char? eof-object?))"
+        );
         assert_eq!(
             primitive("current-output-port")
                 .unwrap()
