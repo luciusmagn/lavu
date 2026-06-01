@@ -75,6 +75,6 @@ are recorded here instead.
 
 ** R5RS Compliance
 - (In progress) Full support for R5RS special and derived forms
-- (Done, growing) Top-level =define-syntax= and =syntax-rules= expansion
+- (Done, growing) Top-level/local =syntax-rules= expansion
 - (Planned) Full R5RS macro hygiene and internal syntax definitions
 - (In progress) Native Rust standard library with type metadata

@@ -187,6 +187,17 @@ impl MacroExpander {
                 if is_quoted_list(items) {
                     return Ok(datum.clone());
                 }
+                if let Some(form) = items.first().and_then(identifier_name) {
+                    match form.as_str() {
+                        "let-syntax" => {
+                            return self.expand_local_syntax("let-syntax", datum, items, depth);
+                        }
+                        "letrec-syntax" => {
+                            return self.expand_local_syntax("letrec-syntax", datum, items, depth);
+                        }
+                        _ => {}
+                    }
+                }
 
                 if let Some(name) = items.first().and_then(identifier_name)
                     && let Some(rules) = self.bindings.get(&name)
@@ -234,6 +245,45 @@ impl MacroExpander {
             | Datum::Unquote(_)
             | Datum::UnquoteSplicing(_) => Ok(datum.clone()),
         }
+    }
+
+    fn expand_local_syntax(
+        &self,
+        form: &'static str,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if items.len() < 3 {
+            return Err(SurfaceError::BadArity {
+                form,
+                expected: "syntax bindings and at least one body expression",
+                span: datum.span.clone(),
+            });
+        }
+
+        let mut local = self.clone();
+        for (name, rules) in parse_syntax_bindings(&items[1])? {
+            local.define(name, rules);
+        }
+
+        let body = items[2..]
+            .iter()
+            .map(|item| local.expand_with_depth(item, depth + 1))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Spanned {
+            node: Datum::List(
+                std::iter::once(Spanned {
+                    node: Datum::identifier("begin"),
+                    span: datum.span.clone(),
+                    origin: datum.origin,
+                })
+                .chain(body)
+                .collect(),
+            ),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
     }
 }
 
@@ -291,6 +341,41 @@ fn parse_syntax_rules(datum: &Spanned<Datum>) -> Result<SyntaxRules, SurfaceErro
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(SyntaxRules { literals, rules })
+}
+
+fn parse_syntax_bindings(
+    datum: &Spanned<Datum>,
+) -> Result<Vec<(String, SyntaxRules)>, SurfaceError> {
+    let Datum::List(bindings) = &datum.node else {
+        return Err(SurfaceError::ExpectedList {
+            context: "syntax bindings",
+            span: datum.span.clone(),
+        });
+    };
+
+    bindings
+        .iter()
+        .map(|binding| {
+            let Datum::List(items) = &binding.node else {
+                return Err(SurfaceError::ExpectedList {
+                    context: "syntax binding",
+                    span: binding.span.clone(),
+                });
+            };
+            if items.len() != 2 {
+                return Err(SurfaceError::BadArity {
+                    form: "syntax binding",
+                    expected: "a keyword and syntax-rules transformer",
+                    span: binding.span.clone(),
+                });
+            }
+
+            Ok((
+                expect_identifier(&items[0], "syntax binding")?.node,
+                parse_syntax_rules(&items[1])?,
+            ))
+        })
+        .collect()
 }
 
 fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>, SurfaceError> {

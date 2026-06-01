@@ -292,6 +292,8 @@ Scheme value is valid.
   future work.
 - Process top-level =begin= forms in macro-expansion order so syntax
   definitions can affect later forms in the same top-level sequence.
+- Expand =let-syntax= and =letrec-syntax= with scoped local
+  =syntax-rules= bindings before surface AST classification.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

@@ -4023,6 +4023,27 @@ mod tests {
             ),
             "3"
         );
+        assert_eq!(
+            eval_one(
+                "(let ((x 0))
+                   (let-syntax
+                     ((twice
+                        (syntax-rules ()
+                          ((twice expr) (begin expr expr)))))
+                     (twice (set! x (+ x 1)))
+                     x))"
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(letrec-syntax
+                   ((a (syntax-rules () ((a x) (b x))))
+                    (b (syntax-rules () ((b x) (+ x 1)))))
+                   (a 4))"
+            ),
+            "5"
+        );
     }
 
     #[test]
