@@ -330,6 +330,8 @@ Scheme value is valid.
 ** Displayed Type Model
 - Add a first Rust model for predicate-shaped displayed types and
   procedure type rendering.
+- Normalize unions so =never?= contributes no member and =any?= remains
+  the top type in displayed inference results.
 ** Stable Datum Model
 - Add initial stable syntax data structures with source spans and origin
   metadata for the future parser/AST refactor.

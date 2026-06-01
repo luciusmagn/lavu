@@ -67,6 +67,10 @@ impl Type {
 
     pub fn union(types: impl Into<Vec<Type>>) -> Self {
         let mut types = types.into();
+        if types.iter().any(|ty| matches!(ty, Self::Any)) {
+            return Self::Any;
+        }
+        types.retain(|ty| !matches!(ty, Self::Never));
         types.sort();
         types.dedup();
 
@@ -192,6 +196,11 @@ mod tests {
             Type::union(vec![Type::String, Type::Number]).to_string(),
             "(U number? string?)"
         );
+        assert_eq!(
+            Type::union(vec![Type::Never, Type::Char]).to_string(),
+            "char?"
+        );
+        assert_eq!(Type::union(vec![Type::Any, Type::Char]).to_string(), "any?");
         assert_eq!(Type::union(Vec::new()).to_string(), "never?");
         assert_eq!(Type::union(vec![Type::Char]).to_string(), "char?");
     }
