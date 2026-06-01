@@ -249,7 +249,7 @@ impl Inferencer {
                 self.unify(actual, expected, value.span.clone())?;
                 Ok(Type::Unknown)
             }
-            Expr::Delay(_) => Ok(Type::Any),
+            Expr::Delay(expr) => Ok(Type::PromiseOf(Box::new(self.infer_expr(expr, env)?))),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
                 if let Some((condition, alternate)) = desugared_or_operands(operator, operands) {
@@ -606,6 +606,9 @@ impl Inferencer {
             }
             Type::VectorOf(element) => {
                 Type::VectorOf(Box::new(self.instantiate_scheme_type(element, vars)))
+            }
+            Type::PromiseOf(element) => {
+                Type::PromiseOf(Box::new(self.instantiate_scheme_type(element, vars)))
             }
             Type::Values(types) => Type::Values(
                 types
@@ -1171,6 +1174,9 @@ impl Inferencer {
             (Type::VectorOf(actual), Type::VectorOf(expected)) => {
                 self.unify(*actual, *expected, span)
             }
+            (Type::PromiseOf(actual), Type::PromiseOf(expected)) => {
+                self.unify(*actual, *expected, span)
+            }
             (Type::Values(actual), Type::Values(expected)) => {
                 if actual.len() != expected.len() {
                     return Err(TypeError::ArityMismatch {
@@ -1404,6 +1410,7 @@ impl Inferencer {
                 .unwrap_or(Type::Var(name)),
             Type::ListOf(item) => Type::ListOf(Box::new(self.resolve(*item))),
             Type::VectorOf(item) => Type::VectorOf(Box::new(self.resolve(*item))),
+            Type::PromiseOf(item) => Type::PromiseOf(Box::new(self.resolve(*item))),
             Type::Pair(car, cdr) => {
                 Type::Pair(Box::new(self.resolve(*car)), Box::new(self.resolve(*cdr)))
             }
@@ -1483,8 +1490,9 @@ fn contains_var(ty: &Type, name: &str) -> bool {
     match ty {
         Type::Var(var) => var == name,
         Type::Pair(car, cdr) => contains_var(car, name) || contains_var(cdr, name),
-        Type::ListOf(element) => contains_var(element, name),
-        Type::VectorOf(element) => contains_var(element, name),
+        Type::ListOf(element) | Type::VectorOf(element) | Type::PromiseOf(element) => {
+            contains_var(element, name)
+        }
         Type::Values(types) => types.iter().any(|ty| contains_var(ty, name)),
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(|ty| contains_var(ty, name)) || contains_var(result, name)
@@ -1519,7 +1527,9 @@ fn has_type_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
         Type::Pair(car, cdr) => has_type_var(car) || has_type_var(cdr),
-        Type::ListOf(element) | Type::VectorOf(element) => has_type_var(element),
+        Type::ListOf(element) | Type::VectorOf(element) | Type::PromiseOf(element) => {
+            has_type_var(element)
+        }
         Type::Values(types) | Type::Union(types) => types.iter().any(has_type_var),
         Type::Procedure(ProcedureType::Fixed { params, result }) => {
             params.iter().any(has_type_var) || has_type_var(result)
@@ -2023,8 +2033,13 @@ mod tests {
     }
 
     #[test]
-    fn infers_delay_conservatively() {
-        assert_eq!(infer_one("(delay (+ 1 2))"), "any?");
+    fn infers_delay_and_force() {
+        assert_eq!(infer_one("(delay (+ 1 2))"), "(promiseof number?)");
+        assert_eq!(infer_one("(force (delay (+ 1 2)))"), "number?");
+        assert_eq!(
+            infer_one("(lambda (p) (+ (force p) 1))"),
+            "(-> (promiseof number?) number?)"
+        );
     }
 
     #[test]

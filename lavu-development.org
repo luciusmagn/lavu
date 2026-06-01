@@ -169,6 +169,7 @@ Structured types:
 (listof any?)
 (vectorof number?)
 (vectorof any?)
+(promiseof number?)
 (pair? symbol? number?)
 #+end_src
 
@@ -444,8 +445,9 @@ Scheme value is valid.
   surface path so runtime evaluation and inference reuse =letrec=.
 ** Delay And Force
 - Add =delay= as a surface special form and =force= as a native
-  memoizing primitive, with conservative =any?= inference until promise
-  display syntax is chosen.
+  memoizing primitive.
+- Add displayed =(promiseof ...)= types so =delay= preserves the delayed
+  expression type and =force= returns the promised value type.
 ** Quasiquote Runtime
 - Preserve quote abbreviations as data under quoted data and evaluate
   quasiquote, unquote, and unquote-splicing directly over stable datums.

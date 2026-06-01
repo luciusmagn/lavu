@@ -90,7 +90,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "equal?",
             Type::procedure(vec![Type::Any, Type::Any], Type::Boolean),
         ),
-        Primitive::new("force", Type::procedure(vec![Type::Any], Type::Any)),
+        Primitive::new(
+            "force",
+            Type::procedure(vec![Type::PromiseOf(Box::new(a.clone()))], a.clone()),
+        ),
         Primitive::new("values", Type::uniform_variadic(Type::Any, Type::Unknown)),
         Primitive::new(
             "call-with-values",
@@ -859,7 +862,7 @@ mod tests {
         );
         assert_eq!(
             primitive("force").unwrap().signature.to_string(),
-            "(-> any? any?)"
+            "(-> (promiseof a) a)"
         );
         assert_eq!(
             primitive("values").unwrap().signature.to_string(),

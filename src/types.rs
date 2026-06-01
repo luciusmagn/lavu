@@ -16,6 +16,7 @@ pub enum Type {
     ListOf(Box<Type>),
     Vector,
     VectorOf(Box<Type>),
+    PromiseOf(Box<Type>),
     Procedure(ProcedureType),
     Port,
     InputPort,
@@ -117,6 +118,7 @@ impl fmt::Display for Type {
             Type::ListOf(element) => write!(f, "(listof {})", element),
             Type::Vector => write!(f, "vector?"),
             Type::VectorOf(element) => write!(f, "(vectorof {})", element),
+            Type::PromiseOf(element) => write!(f, "(promiseof {})", element),
             Type::Procedure(procedure) => write!(f, "{procedure}"),
             Type::Port => write!(f, "port?"),
             Type::InputPort => write!(f, "input-port?"),
@@ -219,6 +221,10 @@ mod tests {
         assert_eq!(
             Type::VectorOf(Box::new(Type::Number)).to_string(),
             "(vectorof number?)"
+        );
+        assert_eq!(
+            Type::PromiseOf(Box::new(Type::Number)).to_string(),
+            "(promiseof number?)"
         );
     }
 
