@@ -2017,7 +2017,7 @@ fn desugared_or_operands<'a>(
     let [param] = params.as_slice() else {
         return None;
     };
-    if rest.is_some() || body.len() != 1 || !param.node.starts_with("__lavu_or_value") {
+    if rest.is_some() || body.len() != 1 || !param.node.starts_with("#%lavu_or_value_") {
         return None;
     }
 

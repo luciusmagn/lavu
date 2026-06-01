@@ -301,6 +301,8 @@ Scheme value is valid.
 - Splice top-level =begin= forms during program classification so nested
   top-level definitions are evaluated and inferred as ordinary program
   forms.
+- Put generated derived-form temporaries in an unlexable =#%lavu_=
+  namespace so user identifiers cannot capture them.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.

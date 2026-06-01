@@ -5316,6 +5316,10 @@ mod tests {
         assert_eq!(eval_one("(let* ((x 2) (y (+ x 3))) y)"), "5");
         assert_eq!(eval_one("(and #t 1)"), "1");
         assert_eq!(eval_one("(or #f 7)"), "7");
+        assert_eq!(
+            eval_one("(let ((__lavu_or_value 42)) (or #f __lavu_or_value))"),
+            "42"
+        );
     }
 
     #[test]

@@ -1938,7 +1938,7 @@ fn parse_or(
         [single] => Ok(classify_expr(single)?.node),
         [first, remaining @ ..] => {
             let temp = Spanned {
-                node: "__lavu_or_value".to_string(),
+                node: generated_name("or_value", &span),
                 span: first.span.clone(),
                 origin,
             };
@@ -2029,7 +2029,7 @@ fn parse_cond(
         }
         if body.is_empty() || arrow_recipient.is_some() {
             let temp = Spanned {
-                node: format!("__lavu_cond_value_{}", clause.span.start),
+                node: generated_name("cond_value", &clause.span),
                 span: test.span.clone(),
                 origin,
             };
@@ -2109,7 +2109,7 @@ fn parse_case(
 
     let key = classify_expr(&rest[0])?;
     let temp = Spanned {
-        node: format!("__lavu_case_key_{}", span.start),
+        node: generated_name("case_key", &span),
         span: rest[0].span.clone(),
         origin,
     };
@@ -2280,7 +2280,7 @@ fn parse_do(
     };
 
     let loop_name = Spanned {
-        node: format!("__lavu_do_loop_{}", span.start),
+        node: generated_name("do_loop", &span),
         span: span.clone(),
         origin,
     };
@@ -2507,6 +2507,10 @@ fn sequence_with_tail(body: &[Spanned<Datum>], tail: Spanned<Expr>) -> Result<Ex
         .collect::<Result<Vec<_>, _>>()?;
     exprs.push(tail);
     Ok(Expr::Begin(exprs))
+}
+
+fn generated_name(prefix: &str, span: &SourceSpan) -> String {
+    format!("#%lavu_{prefix}_{}", span.start)
 }
 
 fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {
