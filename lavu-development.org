@@ -411,6 +411,9 @@ Scheme value is valid.
   typed metadata.
 - Add =call-with-input-file= around file-backed input ports.
 - Add dynamic default input rebinding with =with-input-from-file=.
+** Load
+- Add native =load= over the current evaluator environment, so loaded
+  top-level definitions are visible to following expressions.
 ** Output Ports
 - Add a first stdout-backed output port, plus native =current-output-port=,
   =write=, =display=, =newline=, and =write-char= with conservative

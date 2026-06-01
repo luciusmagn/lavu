@@ -159,6 +159,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "with-output-to-file",
             Type::procedure(vec![Type::String, Type::Any], Type::Any),
         ),
+        Primitive::new("load", Type::procedure(vec![Type::String], Type::Unknown)),
         Primitive::new(
             "close-output-port",
             Type::procedure(vec![Type::OutputPort], Type::Unknown),
@@ -947,6 +948,10 @@ mod tests {
                 .signature
                 .to_string(),
             "(-> string? any? any?)"
+        );
+        assert_eq!(
+            primitive("load").unwrap().signature.to_string(),
+            "(-> string? unknown?)"
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),

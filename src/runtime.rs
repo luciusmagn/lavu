@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::datum_parser::parse as parse_datums;
 use crate::lexer::{Token, tokenize};
-use crate::surface::{Expr, Program, TopLevel, classify_expr};
+use crate::surface::{Expr, Program, TopLevel, classify_expr, classify_program};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
 #[derive(Debug, Clone)]
@@ -372,6 +372,7 @@ impl Env {
             "call-with-output-file",
             "with-input-from-file",
             "with-output-to-file",
+            "load",
             "close-input-port",
             "close-output-port",
             "read",
@@ -561,7 +562,10 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
                 .iter()
                 .map(|operand| eval_expr(operand, env))
                 .collect::<Result<Vec<_>, _>>()?;
-            apply(procedure, args, expr.span.clone())
+            match procedure {
+                Value::Primitive("load") => load(args, expr.span.clone(), env),
+                procedure => apply(procedure, args, expr.span.clone()),
+            }
         }
     }
 }
@@ -788,6 +792,10 @@ fn apply_primitive(
         "call-with-output-file" => call_with_output_file(args, span),
         "with-input-from-file" => with_input_from_file(args, span),
         "with-output-to-file" => with_output_to_file(args, span),
+        "load" => Err(EvalError::TypeError {
+            expected: "direct load call?",
+            span,
+        }),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -2571,6 +2579,32 @@ fn with_output_to_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eval
     result
 }
 
+fn load(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let Value::String(path) = value else {
+            return Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            });
+        };
+        let source =
+            fs::read_to_string(path.borrow().as_str()).map_err(|error| EvalError::IoError {
+                message: error.to_string(),
+                span: span.clone(),
+            })?;
+        let datums = parse_datums(&source).map_err(|error| EvalError::ReadError {
+            message: error.to_string(),
+            span: span.clone(),
+        })?;
+        let program = classify_program(&datums).map_err(|error| EvalError::ReadError {
+            message: error.to_string(),
+            span: span.clone(),
+        })?;
+        eval_program(&program, env)
+            .map(|values| values.last().cloned().unwrap_or(Value::Unspecified))
+    })
+}
+
 fn close_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let port = output_port(value, span)?;
@@ -3932,6 +3966,20 @@ mod tests {
 
         assert_eq!(eval_one(&input), "(current 2)");
         std::fs::remove_file(with_path).unwrap();
+    }
+
+    #[test]
+    fn evaluates_load_in_current_environment() {
+        let path = std::env::temp_dir().join(format!("lavu-load-{}.ss", std::process::id()));
+        std::fs::write(&path, "(define loaded 41) (+ loaded 1)").unwrap();
+        assert_eq!(
+            eval_one(&format!("(load \"{}\")", path.to_string_lossy())),
+            "42"
+        );
+        let input = format!("(load \"{}\") loaded", path.to_string_lossy());
+
+        assert_eq!(eval_one(&input), "41");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

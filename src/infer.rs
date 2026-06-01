@@ -1109,6 +1109,7 @@ mod tests {
             infer_one("(with-output-to-file \"x\" (lambda () (write \"x\")))"),
             "any?"
         );
+        assert_eq!(infer_one("(load \"x\")"), "unknown?");
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 
