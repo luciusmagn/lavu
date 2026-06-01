@@ -278,7 +278,7 @@ and output procedures. =any?= means any Scheme value is valid.
 - Add =rationalize= with the standard simplest-rational interval
   algorithm over exact rationals and finite decimals.
 - Extend =sqrt= to non-real complex inputs through decimal complex
-  results while preserving exact existing behavior for real inputs.
+  results, and preserve exactness for exact real perfect-square roots.
 - Add conservative =expt= for exact integer exponents across exact
   rationals, decimals, and the current decimal complex representation.
 - Allow numeric === to compare complex values while keeping ordered

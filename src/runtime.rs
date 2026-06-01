@@ -1683,6 +1683,9 @@ fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
             let number = number_to_complex_f64(value, span.clone())?;
             return complex_f64_to_value(number.sqrt(), span);
         }
+        if let Some(exact) = exact_real_sqrt(&value) {
+            return Ok(exact);
+        }
 
         let decimal = real_to_decimal(value, span.clone())?;
         if decimal < decimal_zero() {
@@ -1692,6 +1695,31 @@ fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
 
         decimal_sqrt(decimal, span).map(Value::Decimal)
     })
+}
+
+fn exact_real_sqrt(value: &Value) -> Option<Value> {
+    let number = real_to_exact(value)?;
+    if number.is_negative() {
+        exact_nonnegative_rational_sqrt(&-number)
+            .map(|imaginary| exact_complex_value(Complex::new(BigRational::zero(), imaginary)))
+    } else {
+        exact_nonnegative_rational_sqrt(&number).map(exact_number)
+    }
+}
+
+fn exact_nonnegative_rational_sqrt(number: &BigRational) -> Option<BigRational> {
+    let numer_root = number.numer().sqrt();
+    let denom_root = number.denom().sqrt();
+
+    if is_square_root(&numer_root, number.numer()) && is_square_root(&denom_root, number.denom()) {
+        Some(BigRational::new(numer_root, denom_root))
+    } else {
+        None
+    }
+}
+
+fn is_square_root(root: &BigInt, number: &BigInt) -> bool {
+    root * root == *number
 }
 
 fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -4942,7 +4970,11 @@ mod tests {
             "4+6i"
         );
         assert_eq!(eval_one("(sqrt 4)"), "2");
+        assert_eq!(eval_one("(exact? (sqrt 4))"), "#t");
+        assert_eq!(eval_one("(sqrt 4/9)"), "2/3");
         assert_eq!(eval_one("(sqrt -4)"), "0+2i");
+        assert_eq!(eval_one("(exact? (sqrt -4))"), "#t");
+        assert_eq!(eval_one("(inexact? (sqrt 2))"), "#t");
         assert_eq!(eval_one("(sqrt 3+4i)"), "2+1i");
         assert_eq!(eval_one("(expt 2 3)"), "8");
         assert_eq!(eval_one("(expt 2 -1)"), "1/2");
