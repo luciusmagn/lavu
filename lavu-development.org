@@ -256,6 +256,8 @@ Scheme value is valid.
 - Parse radix-prefixed exact rectangular and pure-imaginary complex
   literals, including exactness/radix prefix compositions such as
   =#e#x1+2i= and =#x#e+i=.
+- Route exact complex tokens through =string->number= so parsed strings
+  preserve exact complex values too.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.

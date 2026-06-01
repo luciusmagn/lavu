@@ -3306,6 +3306,7 @@ fn string_to_number(text: &str) -> Value {
         Token::Real((numerator, denominator)) => {
             exact_number(BigRational::new(numerator, denominator))
         }
+        Token::ExactComplex(n) => exact_complex_value(n),
         Token::Decimal(n) => Value::Decimal(n),
         Token::Complex(n) => Value::Complex(n),
         _ => Value::Boolean(false),
@@ -5326,6 +5327,10 @@ mod tests {
         assert_eq!(eval_one("(number->string 1/2)"), "\"1/2\"");
         assert_eq!(eval_one("(number->string 16 16)"), "\"10\"");
         assert_eq!(eval_one("(number->string 10 2)"), "\"1010\"");
+        assert_eq!(eval_one("(string->number \"1+2i\")"), "1+2i");
+        assert_eq!(eval_one("(exact? (string->number \"1+2i\"))"), "#t");
+        assert_eq!(eval_one("(string->number \"#e1.5+2.25i\")"), "3/2+9/4i");
+        assert_eq!(eval_one("(string->number \"#b101+10i\")"), "5+2i");
         assert_eq!(eval_one("(string->number \"#x10\")"), "16");
         assert_eq!(eval_one("(string->number \"#x-ff\")"), "-255");
         assert_eq!(eval_one("(string->number \"#b+1010\")"), "10");
