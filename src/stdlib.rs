@@ -376,123 +376,83 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "char=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char<?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char>?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char<=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char>=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char-ci=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char-ci<?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char-ci>?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char-ci<=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "char-ci>=?",
-            Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
+            Type::procedure(vec![Type::Char, Type::Char], Type::Boolean),
         ),
         Primitive::new(
             "string=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string<?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string>?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string<=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string>=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-ci=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-ci<?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-ci>?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-ci<=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-ci>=?",
-            Type::rest_procedure(
-                vec![Type::String, Type::String],
-                Type::String,
-                Type::Boolean,
-            ),
+            Type::procedure(vec![Type::String, Type::String], Type::Boolean),
         ),
         Primitive::new(
             "string-length",
@@ -819,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn exposes_variadic_numeric_and_character_primitives() {
+    fn exposes_numeric_and_character_primitives() {
         assert_eq!(
             primitive("+").unwrap().signature.to_string(),
             "(->* number? number?)"
@@ -914,7 +874,7 @@ mod tests {
         );
         assert_eq!(
             primitive("char=?").unwrap().signature.to_string(),
-            "(-> char? char? char? * boolean?)"
+            "(-> char? char? boolean?)"
         );
         assert_eq!(
             primitive("char-alphabetic?").unwrap().signature.to_string(),
@@ -926,11 +886,11 @@ mod tests {
         );
         assert_eq!(
             primitive("char-ci<=?").unwrap().signature.to_string(),
-            "(-> char? char? char? * boolean?)"
+            "(-> char? char? boolean?)"
         );
         assert_eq!(
             primitive("string-ci>=?").unwrap().signature.to_string(),
-            "(-> string? string? string? * boolean?)"
+            "(-> string? string? boolean?)"
         );
     }
 

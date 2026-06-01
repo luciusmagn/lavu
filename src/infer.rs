@@ -3009,6 +3009,10 @@ mod tests {
             infer_one("(lambda (c) (char=? c #\\a))"),
             "(-> char? boolean?)"
         );
+        assert_eq!(
+            infer_error("(char=? #\\a #\\a #\\a)").to_string(),
+            "wrong number of arguments: expected 2, got 3"
+        );
     }
 
     #[test]

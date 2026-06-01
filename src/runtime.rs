@@ -2119,33 +2119,45 @@ fn char_map(
     })
 }
 
+fn binary_args(args: Vec<Value>, span: SourceSpan) -> Result<[Value; 2], EvalError> {
+    let actual = args.len();
+    args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span,
+    })
+}
+
+fn expect_char(value: Value, span: SourceSpan) -> Result<char, EvalError> {
+    match value {
+        Value::Character(c) => Ok(c),
+        _ => Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        }),
+    }
+}
+
+fn expect_string(value: Value, span: SourceSpan) -> Result<String, EvalError> {
+    match value {
+        Value::String(text) => Ok(text.borrow().clone()),
+        _ => Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        }),
+    }
+}
+
 fn char_compare(
     args: Vec<Value>,
     span: SourceSpan,
     pred: impl Fn(char, char) -> bool,
 ) -> Result<Value, EvalError> {
-    if args.len() < 2 {
-        return Err(EvalError::ArityMismatch {
-            expected: 2,
-            actual: args.len(),
-            span,
-        });
-    }
+    let [left, right] = binary_args(args, span.clone())?;
+    let left = expect_char(left, span.clone())?;
+    let right = expect_char(right, span)?;
 
-    let chars = args
-        .into_iter()
-        .map(|value| match value {
-            Value::Character(c) => Ok(c),
-            _ => Err(EvalError::TypeError {
-                expected: "char?",
-                span: span.clone(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(Value::Boolean(
-        chars.windows(2).all(|pair| pred(pair[0], pair[1])),
-    ))
+    Ok(Value::Boolean(pred(left, right)))
 }
 
 fn char_ci_compare(
@@ -2153,30 +2165,11 @@ fn char_ci_compare(
     span: SourceSpan,
     pred: impl Fn(&str, &str) -> bool,
 ) -> Result<Value, EvalError> {
-    if args.len() < 2 {
-        return Err(EvalError::ArityMismatch {
-            expected: 2,
-            actual: args.len(),
-            span,
-        });
-    }
+    let [left, right] = binary_args(args, span.clone())?;
+    let left = expect_char(left, span.clone())?.to_lowercase().to_string();
+    let right = expect_char(right, span)?.to_lowercase().to_string();
 
-    let chars = args
-        .into_iter()
-        .map(|value| match value {
-            Value::Character(c) => Ok(c.to_lowercase().to_string()),
-            _ => Err(EvalError::TypeError {
-                expected: "char?",
-                span: span.clone(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(Value::Boolean(
-        chars
-            .windows(2)
-            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
-    ))
+    Ok(Value::Boolean(pred(left.as_str(), right.as_str())))
 }
 
 fn string_compare(
@@ -2184,30 +2177,11 @@ fn string_compare(
     span: SourceSpan,
     pred: impl Fn(&str, &str) -> bool,
 ) -> Result<Value, EvalError> {
-    if args.len() < 2 {
-        return Err(EvalError::ArityMismatch {
-            expected: 2,
-            actual: args.len(),
-            span,
-        });
-    }
+    let [left, right] = binary_args(args, span.clone())?;
+    let left = expect_string(left, span.clone())?;
+    let right = expect_string(right, span)?;
 
-    let strings = args
-        .into_iter()
-        .map(|value| match value {
-            Value::String(text) => Ok(text.borrow().clone()),
-            _ => Err(EvalError::TypeError {
-                expected: "string?",
-                span: span.clone(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(Value::Boolean(
-        strings
-            .windows(2)
-            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
-    ))
+    Ok(Value::Boolean(pred(left.as_str(), right.as_str())))
 }
 
 fn make_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -2426,30 +2400,11 @@ fn string_ci_compare(
     span: SourceSpan,
     pred: impl Fn(&str, &str) -> bool,
 ) -> Result<Value, EvalError> {
-    if args.len() < 2 {
-        return Err(EvalError::ArityMismatch {
-            expected: 2,
-            actual: args.len(),
-            span,
-        });
-    }
+    let [left, right] = binary_args(args, span.clone())?;
+    let left = expect_string(left, span.clone())?.to_lowercase();
+    let right = expect_string(right, span)?.to_lowercase();
 
-    let strings = args
-        .into_iter()
-        .map(|value| match value {
-            Value::String(text) => Ok(text.borrow().to_lowercase()),
-            _ => Err(EvalError::TypeError {
-                expected: "string?",
-                span: span.clone(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(Value::Boolean(
-        strings
-            .windows(2)
-            .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
-    ))
+    Ok(Value::Boolean(pred(left.as_str(), right.as_str())))
 }
 
 fn eqv(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -5161,10 +5116,18 @@ mod tests {
         assert_eq!(eval_one("(reverse (list 1 2 3))"), "(3 2 1)");
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
         assert_eq!(eval_one("(char<? #\\a #\\b)"), "#t");
-        assert_eq!(eval_one("(char<=? #\\a #\\a #\\b)"), "#t");
-        assert_eq!(eval_one("(char>=? #\\b #\\a #\\a)"), "#t");
+        assert_eq!(eval_one("(char<=? #\\a #\\a)"), "#t");
+        assert_eq!(eval_one("(char>=? #\\b #\\a)"), "#t");
         assert_eq!(eval_one("(char-ci=? #\\A #\\a)"), "#t");
         assert_eq!(eval_one("(char-ci<? #\\a #\\B)"), "#t");
+        assert!(matches!(
+            eval_error("(char<=? #\\a #\\a #\\b)"),
+            EvalError::ArityMismatch {
+                expected: 2,
+                actual: 3,
+                ..
+            }
+        ));
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
     }
 
@@ -5248,10 +5211,18 @@ mod tests {
         assert_eq!(eval_one("(string=? \"a\" \"a\")"), "#t");
         assert_eq!(eval_one("(string<? \"a\" \"b\")"), "#t");
         assert_eq!(eval_one("(string>? \"b\" \"a\")"), "#t");
-        assert_eq!(eval_one("(string<=? \"a\" \"a\" \"b\")"), "#t");
-        assert_eq!(eval_one("(string>=? \"b\" \"a\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string<=? \"a\" \"a\")"), "#t");
+        assert_eq!(eval_one("(string>=? \"b\" \"a\")"), "#t");
         assert_eq!(eval_one("(string-ci=? \"A\" \"a\")"), "#t");
         assert_eq!(eval_one("(string-ci<? \"a\" \"B\")"), "#t");
+        assert!(matches!(
+            eval_error("(string<=? \"a\" \"a\" \"b\")"),
+            EvalError::ArityMismatch {
+                expected: 2,
+                actual: 3,
+                ..
+            }
+        ));
     }
 
     #[test]

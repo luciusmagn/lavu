@@ -289,6 +289,9 @@ Scheme value is valid.
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,
   =char-whitespace?=, =char-upper-case?=, =char-lower-case?=,
   =char-upcase=, and =char-downcase=.
+- Keep character and string comparison procedures at the R5RS
+  two-argument arity; multi-argument comparison is a common implementation
+  generalization, but outside Lavu's R5RS-only scope.
 ** String Library
 - Make runtime strings reference-backed so R5RS string mutation is
   visible through shared values.
