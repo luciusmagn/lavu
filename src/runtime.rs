@@ -809,7 +809,10 @@ fn apply_primitive(
         }),
         "vector-fill!" => vector_fill(args, span),
         "procedure?" => predicate(args, span, |value| {
-            matches!(value, Value::Procedure(_) | Value::Primitive(_))
+            matches!(
+                value,
+                Value::Procedure(_) | Value::Primitive(_) | Value::Continuation(_)
+            )
         }),
         "port?" => predicate(args, span, |value| {
             matches!(value, Value::InputPort(_) | Value::OutputPort(_))
@@ -4424,6 +4427,7 @@ mod tests {
     #[test]
     fn evaluates_escape_continuations() {
         assert_eq!(eval_one("(call/cc (lambda (k) 42))"), "42");
+        assert_eq!(eval_one("(call/cc (lambda (k) (procedure? k)))"), "#t");
         assert_eq!(eval_one("(+ 1 (call/cc (lambda (k) (k 5) 10)))"), "6");
         assert_eq!(
             eval_one(
