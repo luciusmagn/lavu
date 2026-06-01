@@ -1,13 +1,9 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Lexer as LogosLexer, Logos, Span};
-use num::{
-    BigInt, Complex, FromPrimitive, Num, ToPrimitive, Zero, bigint::ParseBigIntError,
-    complex::ParseComplexError,
-};
+use num::{BigInt, Complex, FromPrimitive, Num, ToPrimitive, Zero, bigint::ParseBigIntError};
 use strum::EnumIs;
 use thiserror::Error;
 
-use std::rc::Rc;
 use std::str::FromStr;
 
 use crate::chars::{ParseCharError, parse_char};
@@ -28,9 +24,6 @@ pub enum LexerError {
 
     #[error("char parse error: {0}")]
     CharParseError(#[from] ParseCharError),
-
-    #[error("complex number parse error: {0}")]
-    ComplexNumParseError(#[from] Rc<ParseComplexError<ParseBigDecimalError>>),
 
     #[error("zero denominator in rational literal")]
     ZeroDenominator,
@@ -172,11 +165,6 @@ pub enum Token {
     Real((BigInt, BigInt)),
 
     #[regex(
-        r"[+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
-        |lex| Complex::from_str(lex.slice())
-            .map_err(Rc::new)
-    )]
-    #[regex(
         r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-](([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
         priority = 7,
         callback = |lex| parse_rectangular_complex(lex.slice())
@@ -195,12 +183,6 @@ pub enum Token {
         r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-]i",
         priority = 6,
         callback = |lex| parse_unit_imaginary_complex(lex.slice())
-    )]
-    #[regex(
-        r"#[iI][+-]?[0-9]+\.?[0-9]*i?[+-][0-9]+\.?[0-9]*i?",
-        priority = 6,
-        callback = |lex| Complex::from_str(&lex.slice()[2..])
-            .map_err(Rc::new)
     )]
     #[regex(
         r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-](([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
@@ -1203,7 +1185,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_implicit_delimiters() {
-        for input in ["1abc", "#tfoo", "#\\a1", "foo'bar", ".x"] {
+        for input in ["1abc", "#tfoo", "#\\a1", "foo'bar", ".x", "1i+2"] {
             assert!(
                 matches!(
                     tokenize_checked(input),
@@ -1215,6 +1197,8 @@ mod tests {
                 "{input} should require a delimiter"
             );
         }
+
+        assert!(tokenize_checked("1+2").is_err());
 
         assert!(tokenize_checked("1(abc)").is_ok());
         assert!(tokenize_checked("#t; ok\n#f").is_ok());
