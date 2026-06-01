@@ -1,10 +1,11 @@
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
 use bigdecimal::BigDecimal;
-use num::{BigInt, BigRational, Complex, ToPrimitive};
+use num::{BigInt, BigRational, Complex, Integer, One, Signed, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::lexer::{Token, tokenize};
@@ -181,6 +182,27 @@ impl Env {
             ">=",
             "boolean?",
             "number?",
+            "complex?",
+            "real?",
+            "rational?",
+            "integer?",
+            "exact?",
+            "inexact?",
+            "zero?",
+            "positive?",
+            "negative?",
+            "odd?",
+            "even?",
+            "max",
+            "min",
+            "abs",
+            "quotient",
+            "remainder",
+            "modulo",
+            "gcd",
+            "lcm",
+            "numerator",
+            "denominator",
             "char?",
             "string?",
             "symbol?",
@@ -421,6 +443,41 @@ fn apply_primitive(
                 Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_)
             )
         }),
+        "complex?" => predicate(args, span, number_value),
+        "real?" => predicate(args, span, real_number_value),
+        "rational?" => predicate(args, span, rational_number_value),
+        "integer?" => predicate(args, span, integer_number_value),
+        "exact?" => numeric_predicate(args, span, exact_number_value),
+        "inexact?" => numeric_predicate(args, span, inexact_number_value),
+        "zero?" => numeric_predicate(args, span, zero_number_value),
+        "positive?" => numeric_predicate(args, span, positive_number_value),
+        "negative?" => numeric_predicate(args, span, negative_number_value),
+        "odd?" => numeric_predicate(args, span, odd_number_value),
+        "even?" => numeric_predicate(args, span, even_number_value),
+        "max" => numeric_extreme(
+            args,
+            span,
+            |left, right| left > right,
+            |left, right| left > right,
+        ),
+        "min" => numeric_extreme(
+            args,
+            span,
+            |left, right| left < right,
+            |left, right| left < right,
+        ),
+        "abs" => numeric_abs(args, span),
+        "quotient" => {
+            exact_integer_binary(args, span, "non-zero integer?", |left, right| left / right)
+        }
+        "remainder" => {
+            exact_integer_binary(args, span, "non-zero integer?", |left, right| left % right)
+        }
+        "modulo" => exact_integer_binary(args, span, "non-zero integer?", modulo_value),
+        "gcd" => exact_integer_fold(args, span, BigInt::zero(), |left, right| left.gcd(&right)),
+        "lcm" => exact_integer_fold(args, span, BigInt::one(), |left, right| left.lcm(&right)),
+        "numerator" => numerator(args, span),
+        "denominator" => denominator(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "string?" => predicate(args, span, |value| matches!(value, Value::String(_))),
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
@@ -759,6 +816,258 @@ fn numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<NumberValue>, 
             }),
         })
         .collect()
+}
+
+fn numeric_predicate(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl FnOnce(&Value, SourceSpan) -> Result<bool, EvalError>,
+) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        Ok(Value::Boolean(pred(&value, span)?))
+    })
+}
+
+fn number_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_)
+    )
+}
+
+fn real_number_value(value: &Value) -> bool {
+    match value {
+        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => true,
+        Value::Complex(n) => n.im.is_zero(),
+        _ => false,
+    }
+}
+
+fn rational_number_value(value: &Value) -> bool {
+    match value {
+        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => true,
+        Value::Complex(n) => n.im.is_zero(),
+        _ => false,
+    }
+}
+
+fn integer_number_value(value: &Value) -> bool {
+    match value {
+        Value::Integer(_) => true,
+        Value::Rational(n) => n.is_integer(),
+        Value::Decimal(n) => n.is_integer(),
+        Value::Complex(n) => n.im.is_zero() && n.re.is_integer(),
+        _ => false,
+    }
+}
+
+fn exact_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    match value {
+        Value::Integer(_) | Value::Rational(_) => Ok(true),
+        Value::Decimal(_) | Value::Complex(_) => Ok(false),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
+}
+
+fn inexact_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    exact_number_value(value, span).map(|exact| !exact)
+}
+
+fn zero_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(n.is_zero()),
+        Value::Rational(n) => Ok(n.is_zero()),
+        Value::Decimal(n) => Ok(n.is_zero()),
+        Value::Complex(n) => Ok(n.re.is_zero() && n.im.is_zero()),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
+}
+
+fn positive_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    Ok(real_ordering(value, span)? == Ordering::Greater)
+}
+
+fn negative_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    Ok(real_ordering(value, span)? == Ordering::Less)
+}
+
+fn odd_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    exact_integer(value, span).map(|n| n.is_odd())
+}
+
+fn even_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
+    exact_integer(value, span).map(|n| n.is_even())
+}
+
+fn real_ordering(value: &Value, span: SourceSpan) -> Result<Ordering, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(n.cmp(&BigInt::zero())),
+        Value::Rational(n) => Ok(n.cmp(&BigRational::zero())),
+        Value::Decimal(n) => Ok(decimal_ordering(n)),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+    }
+}
+
+fn decimal_ordering(number: &BigDecimal) -> Ordering {
+    if number < &decimal_zero() {
+        Ordering::Less
+    } else if number > &decimal_zero() {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
+    }
+}
+
+fn numeric_abs(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(n) => Ok(Value::Integer(n.abs())),
+        Value::Rational(n) => Ok(exact_number(n.abs())),
+        Value::Decimal(n) => Ok(Value::Decimal(n.abs())),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+    })
+}
+
+fn numeric_extreme(
+    args: Vec<Value>,
+    span: SourceSpan,
+    exact_better: impl Fn(&BigRational, &BigRational) -> bool,
+    decimal_better: impl Fn(&BigDecimal, &BigDecimal) -> bool,
+) -> Result<Value, EvalError> {
+    let numbers = numeric_args(args, span.clone())?;
+    if numbers.is_empty() {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual: 0,
+            span,
+        });
+    }
+
+    if numbers.iter().any(NumberValue::is_complex) {
+        return Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        });
+    }
+
+    if numbers.iter().any(NumberValue::is_decimal) {
+        let mut numbers = numbers.iter().map(NumberValue::to_decimal);
+        let first = numbers
+            .next()
+            .expect("arity check ensures at least one number");
+        return Ok(Value::Decimal(numbers.fold(first, |best, n| {
+            if decimal_better(&n, &best) { n } else { best }
+        })));
+    }
+
+    let mut numbers = numbers.into_iter().map(NumberValue::into_exact);
+    let first = numbers
+        .next()
+        .expect("arity check ensures at least one number");
+    Ok(exact_number(numbers.fold(first, |best, n| {
+        if exact_better(&n, &best) { n } else { best }
+    })))
+}
+
+fn exact_integer_binary(
+    args: Vec<Value>,
+    span: SourceSpan,
+    zero_expected: &'static str,
+    f: impl FnOnce(BigInt, BigInt) -> BigInt,
+) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [left, right]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let left = exact_integer(&left, span.clone())?;
+    let right = exact_integer(&right, span.clone())?;
+    if right.is_zero() {
+        return Err(EvalError::TypeError {
+            expected: zero_expected,
+            span,
+        });
+    }
+
+    Ok(Value::Integer(f(left, right)))
+}
+
+fn exact_integer_fold(
+    args: Vec<Value>,
+    span: SourceSpan,
+    identity: BigInt,
+    f: impl Fn(BigInt, BigInt) -> BigInt,
+) -> Result<Value, EvalError> {
+    args.iter()
+        .map(|value| exact_integer(value, span.clone()))
+        .try_fold(identity, |acc, n| n.map(|n| f(acc, n).abs()))
+        .map(Value::Integer)
+}
+
+fn modulo_value(left: BigInt, right: BigInt) -> BigInt {
+    let remainder = left % &right;
+    if remainder.is_zero()
+        || remainder.sign() == right.sign()
+        || right.sign() == num::bigint::Sign::NoSign
+    {
+        remainder
+    } else {
+        remainder + right
+    }
+}
+
+fn numerator(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        exact_rational(&value, span).map(|n| Value::Integer(n.numer().clone()))
+    })
+}
+
+fn denominator(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        exact_rational(&value, span).map(|n| Value::Integer(n.denom().clone()))
+    })
+}
+
+fn exact_integer(value: &Value, span: SourceSpan) -> Result<BigInt, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(n.clone()),
+        Value::Rational(n) if n.is_integer() => Ok(n.to_integer()),
+        _ => Err(EvalError::TypeError {
+            expected: "exact integer?",
+            span,
+        }),
+    }
+}
+
+fn exact_rational(value: &Value, span: SourceSpan) -> Result<BigRational, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(BigRational::from_integer(n.clone())),
+        Value::Rational(n) => Ok(n.clone()),
+        _ => Err(EvalError::TypeError {
+            expected: "exact rational?",
+            span,
+        }),
+    }
 }
 
 impl NumberValue {
@@ -1738,6 +2047,31 @@ mod tests {
         assert_eq!(eval_one("(number? 1.5)"), "#t");
         assert_eq!(eval_one("1/2"), "1/2");
         assert_eq!(eval_one("1.5"), "1.5");
+    }
+
+    #[test]
+    fn evaluates_numeric_predicates_and_integer_operations() {
+        assert_eq!(eval_one("(complex? 1+2i)"), "#t");
+        assert_eq!(eval_one("(real? 1+0i)"), "#t");
+        assert_eq!(eval_one("(rational? 1+2i)"), "#f");
+        assert_eq!(eval_one("(integer? 2.0)"), "#t");
+        assert_eq!(eval_one("(exact? 1/2)"), "#t");
+        assert_eq!(eval_one("(inexact? 1.5)"), "#t");
+        assert_eq!(eval_one("(zero? 0+0i)"), "#t");
+        assert_eq!(eval_one("(positive? 3/2)"), "#t");
+        assert_eq!(eval_one("(negative? -1)"), "#t");
+        assert_eq!(eval_one("(odd? 5)"), "#t");
+        assert_eq!(eval_one("(even? 4)"), "#t");
+        assert_eq!(eval_one("(max 1 5 3)"), "5");
+        assert_eq!(eval_one("(min 3 1/2 2)"), "1/2");
+        assert_eq!(eval_one("(abs -5/2)"), "5/2");
+        assert_eq!(eval_one("(quotient 13 5)"), "2");
+        assert_eq!(eval_one("(remainder -13 5)"), "-3");
+        assert_eq!(eval_one("(modulo -13 5)"), "2");
+        assert_eq!(eval_one("(gcd 32 -36)"), "4");
+        assert_eq!(eval_one("(lcm 4 6)"), "12");
+        assert_eq!(eval_one("(numerator 6/8)"), "3");
+        assert_eq!(eval_one("(denominator 6/8)"), "4");
     }
 
     #[test]

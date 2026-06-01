@@ -41,6 +41,17 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
     vec![
         Primitive::predicate("boolean?", Type::Boolean),
         Primitive::predicate("number?", Type::Number),
+        Primitive::predicate("complex?", Type::Number),
+        Primitive::predicate("real?", Type::Number),
+        Primitive::predicate("rational?", Type::Number),
+        Primitive::predicate("integer?", Type::Number),
+        Primitive::new("exact?", number_predicate()),
+        Primitive::new("inexact?", number_predicate()),
+        Primitive::new("zero?", number_predicate()),
+        Primitive::new("positive?", number_predicate()),
+        Primitive::new("negative?", number_predicate()),
+        Primitive::new("odd?", number_predicate()),
+        Primitive::new("even?", number_predicate()),
         Primitive::predicate("char?", Type::Char),
         Primitive::predicate("string?", Type::String),
         Primitive::predicate("symbol?", Type::Symbol),
@@ -123,6 +134,37 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::new(">", numeric_comparison()),
         Primitive::new("<=", numeric_comparison()),
         Primitive::new(">=", numeric_comparison()),
+        Primitive::new(
+            "max",
+            Type::rest_procedure(vec![Type::Number], Type::Number, Type::Number),
+        ),
+        Primitive::new(
+            "min",
+            Type::rest_procedure(vec![Type::Number], Type::Number, Type::Number),
+        ),
+        Primitive::new("abs", Type::procedure(vec![Type::Number], Type::Number)),
+        Primitive::new(
+            "quotient",
+            Type::procedure(vec![Type::Number, Type::Number], Type::Number),
+        ),
+        Primitive::new(
+            "remainder",
+            Type::procedure(vec![Type::Number, Type::Number], Type::Number),
+        ),
+        Primitive::new(
+            "modulo",
+            Type::procedure(vec![Type::Number, Type::Number], Type::Number),
+        ),
+        Primitive::new("gcd", Type::uniform_variadic(Type::Number, Type::Number)),
+        Primitive::new("lcm", Type::uniform_variadic(Type::Number, Type::Number)),
+        Primitive::new(
+            "numerator",
+            Type::procedure(vec![Type::Number], Type::Number),
+        ),
+        Primitive::new(
+            "denominator",
+            Type::procedure(vec![Type::Number], Type::Number),
+        ),
         Primitive::new(
             "char=?",
             Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
@@ -369,6 +411,10 @@ fn numeric_comparison() -> Type {
     )
 }
 
+fn number_predicate() -> Type {
+    Type::procedure(vec![Type::Number], Type::Boolean)
+}
+
 #[cfg(test)]
 mod tests {
     use super::primitive;
@@ -398,6 +444,26 @@ mod tests {
     fn exposes_variadic_numeric_and_character_primitives() {
         assert_eq!(
             primitive("+").unwrap().signature.to_string(),
+            "(->* number? number?)"
+        );
+        assert_eq!(
+            primitive("integer?").unwrap().signature.to_string(),
+            "(-> any? boolean?)"
+        );
+        assert_eq!(
+            primitive("zero?").unwrap().signature.to_string(),
+            "(-> number? boolean?)"
+        );
+        assert_eq!(
+            primitive("max").unwrap().signature.to_string(),
+            "(-> number? number? * number?)"
+        );
+        assert_eq!(
+            primitive("quotient").unwrap().signature.to_string(),
+            "(-> number? number? number?)"
+        );
+        assert_eq!(
+            primitive("gcd").unwrap().signature.to_string(),
             "(->* number? number?)"
         );
         assert_eq!(
