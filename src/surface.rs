@@ -99,15 +99,29 @@ pub enum SurfaceError {
     MacroExpansionLimit { span: SourceSpan },
 }
 
-pub fn classify_program(datums: &[Spanned<Datum>]) -> Result<Program, SurfaceError> {
-    let mut expander = MacroExpander::default();
-    let mut forms = Vec::new();
+#[derive(Debug, Clone, Default)]
+pub struct SurfaceContext {
+    expander: MacroExpander,
+}
 
-    for datum in datums {
-        classify_top_level_with_macros(&mut expander, datum, &mut forms)?;
+impl SurfaceContext {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    Ok(Program { forms })
+    pub fn classify_program(&mut self, datums: &[Spanned<Datum>]) -> Result<Program, SurfaceError> {
+        let mut forms = Vec::new();
+
+        for datum in datums {
+            classify_top_level_with_macros(&mut self.expander, datum, &mut forms)?;
+        }
+
+        Ok(Program { forms })
+    }
+}
+
+pub fn classify_program(datums: &[Spanned<Datum>]) -> Result<Program, SurfaceError> {
+    SurfaceContext::new().classify_program(datums)
 }
 
 fn classify_top_level_with_macros(
@@ -1972,7 +1986,7 @@ fn identifier_name(datum: &Spanned<Datum>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
-    use crate::surface::{Expr, TopLevel, classify_program, classify_top_level};
+    use crate::surface::{Expr, SurfaceContext, TopLevel, classify_program, classify_top_level};
 
     #[test]
     fn classifies_define_and_lambda() {
@@ -1984,6 +1998,32 @@ mod tests {
         };
         assert_eq!(name.node, "add1");
         assert!(matches!(value.node, Expr::Lambda { .. }));
+    }
+
+    #[test]
+    fn keeps_surface_macros_across_programs() {
+        let mut context = SurfaceContext::new();
+        let definition = parse(
+            "(define-syntax id
+               (syntax-rules ()
+                 ((id x) x)))",
+        )
+        .unwrap();
+        let use_site = parse("(id 1)").unwrap();
+
+        assert!(
+            context
+                .classify_program(&definition)
+                .unwrap()
+                .forms
+                .is_empty()
+        );
+        let program = context.classify_program(&use_site).unwrap();
+
+        assert!(matches!(
+            program.forms[0].node,
+            TopLevel::Expr(Expr::Literal(_))
+        ));
     }
 
     #[test]
