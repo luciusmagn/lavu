@@ -721,6 +721,8 @@ Scheme value is valid.
   parsing and =string->number= report failure instead of panicking later.
 - Parse inexact shorthand imaginary literals such as =+i=, =2i=, and
   =1-i= into the current decimal complex representation.
+- Parse decimal rectangular complex literals with leading-dot or
+  trailing-dot components, such as =.5+.5i= and =#i-1.5+2.i=.
 - Parse decimal-backed polar complex literals such as =1@0= and =#i2@0=
   through the same approximate representation used by =make-polar=.
 ** Complete Text Comparisons

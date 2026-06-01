@@ -4607,6 +4607,7 @@ mod tests {
         assert_eq!(eval_one("1.5"), "1.5");
         assert_eq!(eval_one("+i"), "0+1i");
         assert_eq!(eval_one("1-i"), "1-1i");
+        assert_eq!(eval_one(".5+.5i"), "0.5+0.5i");
         assert_eq!(eval_one("1@0"), "1+0i");
     }
 

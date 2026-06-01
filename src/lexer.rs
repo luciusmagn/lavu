@@ -177,6 +177,11 @@ pub enum Token {
             .map_err(Rc::new)
     )]
     #[regex(
+        r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-](([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
+        priority = 7,
+        callback = |lex| parse_rectangular_complex(lex.slice())
+    )]
+    #[regex(
         r"[+-]i",
         priority = 6,
         callback = |lex| parse_imaginary_unit(lex.slice())
@@ -196,6 +201,11 @@ pub enum Token {
         priority = 6,
         callback = |lex| Complex::from_str(&lex.slice()[2..])
             .map_err(Rc::new)
+    )]
+    #[regex(
+        r"#[iI][+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-](([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
+        priority = 9,
+        callback = |lex| parse_rectangular_complex(&lex.slice()[2..])
     )]
     #[regex(
         r"#[iI][+-]i",
@@ -652,6 +662,27 @@ fn parse_exact_decimal_literal(slice: &str) -> Result<(BigInt, BigInt), LexerErr
 
 fn parse_decimal_literal(slice: &str) -> Result<BigDecimal, ParseBigDecimalError> {
     BigDecimal::from_str(&normalize_decimal_exponent(slice))
+}
+
+fn parse_rectangular_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
+    let sign_index = slice
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_decimal_component(&slice[..sign_index])?;
+    let imaginary = parse_decimal_component(
+        slice[sign_index..]
+            .strip_suffix('i')
+            .ok_or(LexerError::DefaultError)?,
+    )?;
+
+    Ok(Complex::new(real, imaginary))
+}
+
+fn parse_decimal_component(slice: &str) -> Result<BigDecimal, ParseBigDecimalError> {
+    BigDecimal::from_str(slice.strip_prefix('+').unwrap_or(slice))
 }
 
 fn parse_imaginary_unit(slice: &str) -> Complex<BigDecimal> {
@@ -1126,6 +1157,22 @@ mod tests {
         assert_eq!(
             imaginary[12].0,
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+        );
+
+        let rectangular = tokenize(".5+.5i #i-1.5+2.i");
+        assert_eq!(
+            rectangular[0].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("0.5").unwrap(),
+                BigDecimal::from_str("0.5").unwrap()
+            ))
+        );
+        assert_eq!(
+            rectangular[2].0,
+            Token::Complex(Complex::new(
+                BigDecimal::from_str("-1.5").unwrap(),
+                BigDecimal::from(2)
+            ))
         );
 
         let polar = tokenize("1@0 #i2@0");
