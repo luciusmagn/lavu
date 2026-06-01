@@ -654,7 +654,7 @@ fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, 
             if let Some(rest) = &procedure.rest {
                 env.define(
                     rest.clone(),
-                    Value::List(args[procedure.params.len()..].to_vec()),
+                    list_value(args[procedure.params.len()..].to_vec()),
                 );
             }
 
@@ -775,12 +775,8 @@ fn apply_primitive(
             Value::Pair(_) => true,
             _ => false,
         }),
-        "null?" => predicate(
-            args,
-            span,
-            |value| matches!(value, Value::List(items) if items.is_empty()),
-        ),
-        "list?" => predicate(args, span, |value| matches!(value, Value::List(_))),
+        "null?" => predicate(args, span, is_empty_list),
+        "list?" => predicate(args, span, is_proper_list),
         "vector?" => predicate(args, span, |value| matches!(value, Value::Vector(_))),
         "make-vector" => make_vector(args, span),
         "vector" => Ok(Value::Vector(Rc::new(RefCell::new(args)))),
@@ -794,18 +790,15 @@ fn apply_primitive(
         "vector-ref" => vector_ref(args, span),
         "vector-set!" => vector_set(args, span),
         "vector->list" => unary(args, span.clone(), |value| match value {
-            Value::Vector(items) => Ok(Value::List(items.borrow().clone())),
+            Value::Vector(items) => Ok(list_value(items.borrow().clone())),
             _ => Err(EvalError::TypeError {
                 expected: "vector?",
                 span,
             }),
         }),
-        "list->vector" => unary(args, span.clone(), |value| match value {
-            Value::List(items) => Ok(Value::Vector(Rc::new(RefCell::new(items)))),
-            _ => Err(EvalError::TypeError {
-                expected: "list?",
-                span,
-            }),
+        "list->vector" => unary(args, span.clone(), |value| {
+            expect_list_items(&value, span.clone())
+                .map(|items| Value::Vector(Rc::new(RefCell::new(items))))
         }),
         "vector-fill!" => vector_fill(args, span),
         "procedure?" => predicate(args, span, |value| {
@@ -892,23 +885,15 @@ fn apply_primitive(
         "set-car!" => set_car(args, span),
         "set-cdr!" => set_cdr(args, span),
         name if composed_accessor_ops(name).is_some() => composed_accessor(name, args, span),
-        "list" => Ok(Value::List(args)),
-        "length" => unary(args, span.clone(), |value| match value {
-            Value::List(items) => Ok(Value::Integer(BigInt::from(items.len()))),
-            _ => Err(EvalError::TypeError {
-                expected: "list?",
-                span,
-            }),
+        "list" => Ok(list_value(args)),
+        "length" => unary(args, span.clone(), |value| {
+            expect_list_items(&value, span.clone())
+                .map(|items| Value::Integer(BigInt::from(items.len())))
         }),
-        "reverse" => unary(args, span.clone(), |value| match value {
-            Value::List(mut items) => {
-                items.reverse();
-                Ok(Value::List(items))
-            }
-            _ => Err(EvalError::TypeError {
-                expected: "list?",
-                span,
-            }),
+        "reverse" => unary(args, span.clone(), |value| {
+            let mut items = expect_list_items(&value, span.clone())?;
+            items.reverse();
+            Ok(list_value(items))
         }),
         "append" => append(args, span),
         "list-ref" => list_ref(args, span),
@@ -2152,7 +2137,7 @@ fn string_append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError>
 
 fn string_to_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
-        Value::String(text) => Ok(Value::List(
+        Value::String(text) => Ok(list_value(
             text.borrow().chars().map(Value::Character).collect(),
         )),
         _ => Err(EvalError::TypeError {
@@ -2164,14 +2149,7 @@ fn string_to_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError
 
 fn list_to_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
-        let Value::List(items) = value else {
-            return Err(EvalError::TypeError {
-                expected: "list?",
-                span,
-            });
-        };
-
-        items
+        expect_list_items(&value, span.clone())?
             .into_iter()
             .map(|value| match value {
                 Value::Character(c) => Ok(c),
@@ -2924,12 +2902,7 @@ fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value,
     let final_operand = operands
         .pop()
         .expect("arity check ensures a final list argument");
-    let Value::List(final_operands) = final_operand else {
-        return Err(EvalError::TypeError {
-            expected: "list?",
-            span,
-        });
-    };
+    let final_operands = expect_list_items(&final_operand, span.clone())?;
 
     operands.extend(final_operands);
     apply(procedure, operands, span)
@@ -3110,6 +3083,7 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
 
 fn eq_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
+        (Value::Pair(left), Value::Pair(right)) => Rc::ptr_eq(left, right),
         (Value::Vector(left), Value::Vector(right)) => Rc::ptr_eq(left, right),
         (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
         (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
@@ -3122,6 +3096,18 @@ fn equal_value(left: &Value, right: &Value) -> bool {
         (Value::List(left), Value::List(right)) => {
             left.iter()
                 .zip(right)
+                .all(|(left, right)| equal_value(left, right))
+                && left.len() == right.len()
+        }
+        (Value::List(_), Value::Pair(_)) | (Value::Pair(_), Value::List(_)) => {
+            let Some(left) = list_items(left) else {
+                return false;
+            };
+            let Some(right) = list_items(right) else {
+                return false;
+            };
+            left.iter()
+                .zip(right.iter())
                 .all(|(left, right)| equal_value(left, right))
                 && left.len() == right.len()
         }
@@ -3166,7 +3152,7 @@ fn car(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
 
 fn cdr(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
     match value {
-        Value::List(items) if !items.is_empty() => Ok(Value::List(items[1..].to_vec())),
+        Value::List(items) if !items.is_empty() => Ok(list_value(items[1..].to_vec())),
         Value::Pair(pair) => Ok(pair.borrow().cdr.clone()),
         _ => Err(EvalError::TypeError {
             expected: "pair?",
@@ -3238,20 +3224,18 @@ fn composed_accessor_ops(name: &str) -> Option<Vec<char>> {
 }
 
 fn append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    let mut result = Vec::new();
-    for arg in args {
-        match arg {
-            Value::List(items) => result.extend(items),
-            _ => {
-                return Err(EvalError::TypeError {
-                    expected: "list?",
-                    span,
-                });
-            }
-        }
+    if args.is_empty() {
+        return Ok(empty_list());
     }
 
-    Ok(Value::List(result))
+    let mut args = args.into_iter().rev();
+    let tail = args.next().expect("empty argument list was handled");
+    args.try_fold(tail, |tail, list| {
+        Ok(expect_list_items(&list, span.clone())?
+            .into_iter()
+            .rev()
+            .fold(tail, |tail, head| cons_value(head, tail)))
+    })
 }
 
 fn list_ref(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -3263,16 +3247,10 @@ fn list_ref(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     })?;
     let index = exact_nonnegative_integer(&index, span.clone())?;
 
-    match list {
-        Value::List(items) => items.get(index).cloned().ok_or(EvalError::TypeError {
-            expected: "valid list index",
-            span,
-        }),
-        _ => Err(EvalError::TypeError {
-            expected: "list?",
-            span,
-        }),
-    }
+    car(list_tail_at(list, index, span.clone())?, span.clone()).map_err(|_| EvalError::TypeError {
+        expected: "valid list index",
+        span,
+    })
 }
 
 fn list_tail(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -3284,17 +3262,7 @@ fn list_tail(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     })?;
     let index = exact_nonnegative_integer(&index, span.clone())?;
 
-    match list {
-        Value::List(items) if index <= items.len() => Ok(Value::List(items[index..].to_vec())),
-        Value::List(_) => Err(EvalError::TypeError {
-            expected: "valid list index",
-            span,
-        }),
-        _ => Err(EvalError::TypeError {
-            expected: "list?",
-            span,
-        }),
-    }
+    list_tail_at(list, index, span)
 }
 
 fn member(
@@ -3309,16 +3277,33 @@ fn member(
         span: span.clone(),
     })?;
 
-    match list {
-        Value::List(items) => Ok(items
-            .iter()
-            .position(|item| compare(&target, item))
-            .map(|index| Value::List(items[index..].to_vec()))
-            .unwrap_or(Value::Boolean(false))),
-        _ => Err(EvalError::TypeError {
-            expected: "list?",
-            span,
-        }),
+    let mut tail = list;
+    loop {
+        match tail.clone() {
+            Value::Pair(pair) => {
+                let (car, cdr) = {
+                    let pair = pair.borrow();
+                    (pair.car.clone(), pair.cdr.clone())
+                };
+                if compare(&target, &car) {
+                    return Ok(tail);
+                }
+                tail = cdr;
+            }
+            Value::List(items) => {
+                return Ok(items
+                    .iter()
+                    .position(|item| compare(&target, item))
+                    .map(|index| list_value(items[index..].to_vec()))
+                    .unwrap_or(Value::Boolean(false)));
+            }
+            _ => {
+                return Err(EvalError::TypeError {
+                    expected: "list?",
+                    span,
+                });
+            }
+        }
     }
 }
 
@@ -3334,12 +3319,7 @@ fn assoc(
         span: span.clone(),
     })?;
 
-    let Value::List(entries) = alist else {
-        return Err(EvalError::TypeError {
-            expected: "list?",
-            span,
-        });
-    };
+    let entries = expect_list_items(&alist, span.clone())?;
 
     for entry in entries {
         match &entry {
@@ -3388,7 +3368,7 @@ fn map_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         results.push(apply(procedure.clone(), operands, span.clone())?);
     }
 
-    Ok(Value::List(results))
+    Ok(list_value(results))
 }
 
 fn for_each(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -3421,13 +3401,7 @@ fn procedure_and_lists(
     let mut args = args.into_iter();
     let procedure = args.next().expect("arity check ensures procedure argument");
     let lists = args
-        .map(|value| match value {
-            Value::List(items) => Ok(items),
-            _ => Err(EvalError::TypeError {
-                expected: "list?",
-                span: span.clone(),
-            }),
-        })
+        .map(|value| expect_list_items(&value, span.clone()))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok((procedure, lists))
@@ -3585,7 +3559,7 @@ fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
             .iter()
             .map(datum_to_value)
             .collect::<Result<Vec<_>, _>>()
-            .map(Value::List),
+            .map(list_value),
         Datum::DottedList(items, tail) => {
             let tail = datum_to_value(tail)?;
             items
@@ -3607,7 +3581,7 @@ fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
 }
 
 fn abbreviation_to_value(name: &'static str, datum: &Spanned<Datum>) -> Result<Value, EvalError> {
-    Ok(Value::List(vec![
+    Ok(list_value(vec![
         Value::Symbol(name.to_string()),
         datum_to_value(datum)?,
     ]))
@@ -3683,7 +3657,7 @@ fn pair_to_datum(car: Value, cdr: Value, span: SourceSpan) -> Result<Spanned<Dat
 fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Value, EvalError> {
     match &datum.node {
         Datum::Unquote(inner) if level == 0 => eval_unquoted(inner, env),
-        Datum::Unquote(inner) => Ok(Value::List(vec![
+        Datum::Unquote(inner) => Ok(list_value(vec![
             Value::Symbol("unquote".to_string()),
             eval_quasiquote(inner, env, level - 1)?,
         ])),
@@ -3691,11 +3665,11 @@ fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Va
             expected: "unquote-splicing inside quasiquote list",
             span: datum.span.clone(),
         }),
-        Datum::UnquoteSplicing(inner) => Ok(Value::List(vec![
+        Datum::UnquoteSplicing(inner) => Ok(list_value(vec![
             Value::Symbol("unquote-splicing".to_string()),
             eval_quasiquote(inner, env, level - 1)?,
         ])),
-        Datum::Quasiquote(inner) => Ok(Value::List(vec![
+        Datum::Quasiquote(inner) => Ok(list_value(vec![
             Value::Symbol("quasiquote".to_string()),
             eval_quasiquote(inner, env, level + 1)?,
         ])),
@@ -3722,15 +3696,10 @@ fn eval_quasiquote_list(
 
     for item in items {
         match &item.node {
-            Datum::UnquoteSplicing(inner) if level == 0 => match eval_unquoted(inner, env)? {
-                Value::List(spliced) => values.extend(spliced),
-                _ => {
-                    return Err(EvalError::TypeError {
-                        expected: "list?",
-                        span: inner.span.clone(),
-                    });
-                }
-            },
+            Datum::UnquoteSplicing(inner) if level == 0 => {
+                let spliced = eval_unquoted(inner, env)?;
+                values.extend(expect_list_items(&spliced, inner.span.clone())?);
+            }
             _ => values.push(eval_quasiquote(item, env, level)?),
         }
     }
@@ -3743,7 +3712,7 @@ fn eval_quasiquote_list(
                 .rev()
                 .fold(tail, |tail, head| cons_value(head, tail)))
         }
-        None => Ok(Value::List(values)),
+        None => Ok(list_value(values)),
     }
 }
 
@@ -3781,17 +3750,89 @@ fn exact_number(number: BigRational) -> Value {
     }
 }
 
-fn cons_value(head: Value, tail: Value) -> Value {
-    match tail {
-        Value::List(mut items) => {
-            items.insert(0, head);
-            Value::List(items)
+fn empty_list() -> Value {
+    Value::List(Vec::new())
+}
+
+fn list_value(items: Vec<Value>) -> Value {
+    items
+        .into_iter()
+        .rev()
+        .fold(empty_list(), |tail, head| cons_value(head, tail))
+}
+
+fn is_empty_list(value: &Value) -> bool {
+    matches!(value, Value::List(items) if items.is_empty())
+}
+
+fn list_items(value: &Value) -> Option<Vec<Value>> {
+    let mut items = Vec::new();
+    let mut tail = value.clone();
+
+    loop {
+        match tail {
+            Value::List(values) => {
+                items.extend(values);
+                return Some(items);
+            }
+            Value::Pair(pair) => {
+                let (car, cdr) = {
+                    let pair = pair.borrow();
+                    (pair.car.clone(), pair.cdr.clone())
+                };
+                items.push(car);
+                tail = cdr;
+            }
+            _ => return None,
         }
-        tail => Value::Pair(Rc::new(RefCell::new(PairValue {
-            car: head,
-            cdr: tail,
-        }))),
     }
+}
+
+fn is_proper_list(value: &Value) -> bool {
+    list_items(value).is_some()
+}
+
+fn expect_list_items(value: &Value, span: SourceSpan) -> Result<Vec<Value>, EvalError> {
+    list_items(value).ok_or(EvalError::TypeError {
+        expected: "list?",
+        span,
+    })
+}
+
+fn list_tail_at(value: Value, index: usize, span: SourceSpan) -> Result<Value, EvalError> {
+    let mut tail = value;
+    for _ in 0..index {
+        match tail {
+            Value::Pair(pair) => {
+                tail = pair.borrow().cdr.clone();
+            }
+            Value::List(items) if !items.is_empty() => {
+                tail = list_value(items[1..].to_vec());
+            }
+            _ => {
+                return Err(EvalError::TypeError {
+                    expected: "valid list index",
+                    span,
+                });
+            }
+        }
+    }
+
+    if is_proper_list(&tail) {
+        Ok(tail)
+    } else {
+        Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        })
+    }
+}
+
+fn cons_value(head: Value, tail: Value) -> Value {
+    Value::Pair(Rc::new(RefCell::new(PairValue {
+        car: head,
+        cdr: tail,
+    })))
 }
 
 fn string_value(text: impl Into<String>) -> Value {
@@ -3828,10 +3869,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
-            Value::Pair(pair) => {
-                let pair = pair.borrow();
-                write!(f, "({} . {})", pair.car, pair.cdr)
-            }
+            Value::Pair(pair) => write_pair_value(pair.clone(), f),
             Value::Vector(items) => {
                 write!(f, "#(")?;
                 for (index, item) in items.borrow().iter().enumerate() {
@@ -3858,6 +3896,41 @@ impl fmt::Display for Value {
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
+        }
+    }
+}
+
+fn write_pair_value(pair: Rc<RefCell<PairValue>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "(")?;
+    let mut tail = Value::Pair(pair);
+    let mut first = true;
+
+    loop {
+        match tail {
+            Value::Pair(pair) => {
+                let (car, cdr) = {
+                    let pair = pair.borrow();
+                    (pair.car.clone(), pair.cdr.clone())
+                };
+                if !first {
+                    write!(f, " ")?;
+                }
+                write!(f, "{car}")?;
+                tail = cdr;
+                first = false;
+            }
+            Value::List(items) if items.is_empty() => return write!(f, ")"),
+            Value::List(items) => {
+                for item in items {
+                    if !first {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{item}")?;
+                    first = false;
+                }
+                return write!(f, ")");
+            }
+            value => return write!(f, " . {value})"),
         }
     }
 }
@@ -4420,6 +4493,18 @@ mod tests {
             eval_one("(define p (cons 1 2)) (set-cdr! p 9) p"),
             "(1 . 9)"
         );
+        assert_eq!(eval_one("(define p (list 1 2)) (set-car! p 9) p"), "(9 2)");
+        assert_eq!(
+            eval_one("(define p (list 1 2)) (define tail (cdr p)) (set-car! tail 9) p"),
+            "(1 9)"
+        );
+        assert_eq!(
+            eval_one("(define p (list 1 2)) (set-cdr! p (list 3 4)) p"),
+            "(1 3 4)"
+        );
+        assert_eq!(eval_one("(pair? (list 1))"), "#t");
+        assert_eq!(eval_one("(list? (cons 1 (cons 2 '())))"), "#t");
+        assert_eq!(eval_one("(list? (cons 1 2))"), "#f");
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(length (list 1 2 3))"), "3");
@@ -4428,6 +4513,8 @@ mod tests {
         assert_eq!(eval_one("(caddr '(1 2 3))"), "3");
         assert_eq!(eval_one("(cadddr '(1 2 3 4))"), "4");
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
+        assert_eq!(eval_one("(append '(a b) '(c . d))"), "(a b c . d)");
+        assert_eq!(eval_one("(append '() 'a)"), "a");
         assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1)"), "b");
         assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1)"), "(b c)");
     }
