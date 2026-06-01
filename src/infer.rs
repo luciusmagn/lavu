@@ -66,6 +66,12 @@ enum HigherOrderListResult {
     Unspecified,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IndexedListResult {
+    Element,
+    Tail,
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -177,6 +183,22 @@ impl Inferencer {
                         operand_tys,
                         expr.span.clone(),
                         HigherOrderListResult::Unspecified,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "list-ref") {
+                    return self.infer_indexed_list(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        IndexedListResult::Element,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "list-tail") {
+                    return self.infer_indexed_list(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        IndexedListResult::Tail,
                     );
                 }
 
@@ -480,6 +502,31 @@ impl Inferencer {
                 self.unify(actual, Type::List, operand.span.clone())?;
                 Ok(Type::Any)
             }
+        }
+    }
+
+    fn infer_indexed_list(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        result: IndexedListResult,
+    ) -> Result<Type, TypeError> {
+        let [list_ty, index_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        self.unify(index_ty, Type::Number, operands[1].span.clone())?;
+        let element = self.infer_list_element_type(list_ty, &operands[0])?;
+
+        match result {
+            IndexedListResult::Element => Ok(self.resolve(element)),
+            IndexedListResult::Tail => Ok(Type::ListOf(Box::new(self.resolve(element)))),
         }
     }
 
@@ -1273,8 +1320,12 @@ mod tests {
         assert_eq!(infer_one("(length '(a b c))"), "number?");
         assert_eq!(infer_one("(append '(a) 'b)"), "any?");
         assert_eq!(infer_one("(cadr '(a b c))"), "any?");
-        assert_eq!(infer_one("(list-ref '(a b c) 1)"), "any?");
-        assert_eq!(infer_one("(list-tail '(a b c) 1)"), "list?");
+        assert_eq!(infer_one("(list-ref '(a b c) 1)"), "symbol?");
+        assert_eq!(infer_one("(list-tail '(a b c) 1)"), "(listof symbol?)");
+        assert_eq!(
+            infer_one("(lambda (xs) (string-length (list-ref xs 0)))"),
+            "(-> (listof string?) number?)"
+        );
     }
 
     #[test]
