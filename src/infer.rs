@@ -919,6 +919,8 @@ mod tests {
         assert_eq!(infer_one("(quotient 5 2)"), "number?");
         assert_eq!(infer_one("(floor 3/2)"), "number?");
         assert_eq!(infer_one("(exact->inexact 1/2)"), "number?");
+        assert_eq!(infer_one("(make-rectangular 1 2)"), "number?");
+        assert_eq!(infer_one("(real-part 1+2i)"), "number?");
         assert_eq!(
             infer_one("(lambda (x) (if (integer? x) (+ x 1) 0))"),
             "(-> number? number?)"

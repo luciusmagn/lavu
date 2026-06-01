@@ -210,6 +210,9 @@ impl Env {
             "round",
             "exact->inexact",
             "inexact->exact",
+            "make-rectangular",
+            "real-part",
+            "imag-part",
             "char?",
             "char-alphabetic?",
             "char-numeric?",
@@ -551,6 +554,9 @@ fn apply_primitive(
         "round" => numeric_round(args, span, round_rational_half_even, RoundingMode::HalfEven),
         "exact->inexact" => exact_to_inexact(args, span),
         "inexact->exact" => inexact_to_exact(args, span),
+        "make-rectangular" => make_rectangular(args, span),
+        "real-part" => real_part(args, span),
+        "imag-part" => imag_part(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
         "char-numeric?" => char_predicate(args, span, char::is_numeric),
@@ -1212,6 +1218,59 @@ fn inexact_to_exact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
             span,
         }),
     })
+}
+
+fn make_rectangular(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [real, imaginary]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+
+    Ok(Value::Complex(Complex::new(
+        real_to_decimal(real, span.clone())?,
+        real_to_decimal(imaginary, span)?,
+    )))
+}
+
+fn real_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => Ok(value),
+        Value::Complex(n) => Ok(Value::Decimal(n.re)),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    })
+}
+
+fn imag_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(_) | Value::Rational(_) => Ok(Value::Integer(BigInt::zero())),
+        Value::Decimal(_) => Ok(Value::Decimal(decimal_zero())),
+        Value::Complex(n) => Ok(Value::Decimal(n.im)),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    })
+}
+
+fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(BigDecimal::from(n)),
+        Value::Rational(n) => Ok(rational_to_decimal(&n)),
+        Value::Decimal(n) => Ok(n),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+    }
 }
 
 fn decimal_to_rational(number: &BigDecimal, span: SourceSpan) -> Result<BigRational, EvalError> {
@@ -2547,6 +2606,14 @@ mod tests {
         assert_eq!(eval_one("(inexact->exact 2.0)"), "2");
         assert_eq!(eval_one("(inexact? (exact->inexact 1))"), "#t");
         assert_eq!(eval_one("(exact? (inexact->exact 1.25))"), "#t");
+        assert_eq!(eval_one("(make-rectangular 1 2)"), "1+2i");
+        assert_eq!(eval_one("(real-part 1+2i)"), "1");
+        assert_eq!(eval_one("(imag-part 1+2i)"), "2");
+        assert_eq!(eval_one("(imag-part 5)"), "0");
+        assert_eq!(
+            eval_one("(+ (make-rectangular 1 2) (make-rectangular 3 4))"),
+            "4+6i"
+        );
     }
 
     #[test]
