@@ -128,6 +128,10 @@ fn classify_top_level_with_macros(
     }
 
     let expanded = expander.expand(datum)?;
+    if let Some((name, rules)) = parse_define_syntax(&expanded)? {
+        expander.define(name, rules);
+        return Ok(());
+    }
     if let Some(body) = top_level_begin_body(&expanded) {
         for datum in body {
             classify_top_level_with_macros(expander, datum, forms)?;

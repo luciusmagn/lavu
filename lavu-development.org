@@ -294,6 +294,8 @@ Scheme value is valid.
   definitions can affect later forms in the same top-level sequence.
 - Expand =let-syntax= and =letrec-syntax= with scoped local
   =syntax-rules= bindings before surface AST classification.
+- Install top-level =define-syntax= forms produced by macro expansion so
+  generated syntax bindings can affect following forms.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

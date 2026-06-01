@@ -4051,6 +4051,19 @@ mod tests {
             ),
             "5"
         );
+        assert_eq!(
+            eval_one(
+                "(define-syntax install-id
+                   (syntax-rules ()
+                     ((install-id)
+                      (define-syntax id
+                        (syntax-rules ()
+                          ((id x) x))))))
+                 (install-id)
+                 (id 9)"
+            ),
+            "9"
+        );
     }
 
     #[test]
