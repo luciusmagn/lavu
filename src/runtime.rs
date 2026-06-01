@@ -236,6 +236,7 @@ impl Env {
             "asin",
             "acos",
             "atan",
+            "rationalize",
             "sqrt",
             "expt",
             "char?",
@@ -597,6 +598,7 @@ fn apply_primitive(
         "asin" => complex_unary(args, span, |number| number.asin()),
         "acos" => complex_unary(args, span, |number| number.acos()),
         "atan" => numeric_atan(args, span),
+        "rationalize" => rationalize(args, span),
         "sqrt" => numeric_sqrt(args, span),
         "expt" => numeric_expt(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
@@ -1355,6 +1357,66 @@ fn numeric_atan(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
     }
 }
 
+fn rationalize(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [number, tolerance]: [Value; 2] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 2,
+            actual,
+            span: span.clone(),
+        })?;
+
+    let number = real_to_rational(number, span.clone())?;
+    let tolerance = real_to_rational(tolerance, span.clone())?;
+    if tolerance < BigRational::zero() {
+        return Err(EvalError::TypeError {
+            expected: "non-negative real number?",
+            span,
+        });
+    }
+
+    Ok(exact_number(simplest_rational(
+        number.clone() - tolerance.clone(),
+        number + tolerance,
+    )))
+}
+
+fn simplest_rational(low: BigRational, high: BigRational) -> BigRational {
+    if high < low {
+        return simplest_rational(high, low);
+    }
+    if low == high {
+        return low;
+    }
+    if low > BigRational::zero() {
+        return simplest_positive_rational(low, high);
+    }
+    if high < BigRational::zero() {
+        return -simplest_positive_rational(-high, -low);
+    }
+    BigRational::zero()
+}
+
+fn simplest_positive_rational(low: BigRational, high: BigRational) -> BigRational {
+    let low_floor = low.floor().to_integer();
+    let high_floor = high.floor().to_integer();
+    let low_floor_rational = BigRational::from_integer(low_floor.clone());
+
+    if low == low_floor_rational {
+        return low_floor_rational;
+    }
+    if low_floor == high_floor {
+        let one = BigRational::one();
+        let low_fraction = low - low_floor_rational.clone();
+        let high_fraction = high - BigRational::from_integer(high_floor);
+        return low_floor_rational
+            + one.clone()
+                / simplest_positive_rational(one.clone() / high_fraction, one / low_fraction);
+    }
+
+    BigRational::from_integer(low_floor + BigInt::one())
+}
+
 fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let decimal = real_to_decimal(value, span.clone())?;
@@ -1440,6 +1502,22 @@ fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalErr
         Value::Integer(n) => Ok(BigDecimal::from(n)),
         Value::Rational(n) => Ok(rational_to_decimal(&n)),
         Value::Decimal(n) => Ok(n),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+    }
+}
+
+fn real_to_rational(value: Value, span: SourceSpan) -> Result<BigRational, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(BigRational::from_integer(n)),
+        Value::Rational(n) => Ok(n),
+        Value::Decimal(n) => decimal_to_rational(&n, span),
         Value::Complex(_) => Err(EvalError::TypeError {
             expected: "real number?",
             span,
@@ -3035,6 +3113,8 @@ mod tests {
         assert_eq!(eval_one("(asin 0)"), "0");
         assert_eq!(eval_one("(acos 1)"), "0");
         assert_eq!(eval_one("(atan 0)"), "0");
+        assert_eq!(eval_one("(rationalize 1.3 0.1)"), "4/3");
+        assert_eq!(eval_one("(rationalize 1/3 1/100)"), "1/3");
         assert_eq!(
             eval_one("(+ (make-rectangular 1 2) (make-rectangular 3 4))"),
             "4+6i"

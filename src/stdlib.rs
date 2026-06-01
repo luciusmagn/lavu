@@ -228,6 +228,10 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "atan",
             Type::rest_procedure(vec![Type::Number], Type::Number, Type::Number),
         ),
+        Primitive::new(
+            "rationalize",
+            Type::procedure(vec![Type::Number, Type::Number], Type::Number),
+        ),
         Primitive::new("sqrt", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
             "expt",
@@ -657,6 +661,10 @@ mod tests {
         assert_eq!(
             primitive("atan").unwrap().signature.to_string(),
             "(-> number? number? * number?)"
+        );
+        assert_eq!(
+            primitive("rationalize").unwrap().signature.to_string(),
+            "(-> number? number? number?)"
         );
         assert_eq!(
             primitive("expt").unwrap().signature.to_string(),

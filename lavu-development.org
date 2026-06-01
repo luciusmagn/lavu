@@ -243,6 +243,8 @@ Scheme value is valid.
 - Add decimal-backed transcendental functions =exp=, =log=, =sin=,
   =cos=, =tan=, =asin=, =acos=, and one- or two-argument =atan= using
   host complex =f64= operations.
+- Add =rationalize= with the standard simplest-rational interval
+  algorithm over exact rationals and finite decimals.
 - Add conservative =sqrt= for real inputs, including negative reals as
   decimal complex results; full complex transcendental behavior remains
   future numeric-tower work.
