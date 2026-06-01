@@ -611,3 +611,6 @@ Scheme value is valid.
   since the empty list is valid at every proper list element type.
 - Classify primitive-specific inference cases through the active type
   environment so lexical bindings can shadow standard names normally.
+- Recognize occurrence-typing predicate refinements through the active
+  type environment too, including =not=, so shadowed predicate names stay
+  ordinary calls.

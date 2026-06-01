@@ -312,7 +312,8 @@ impl Inferencer {
             Expr::Delay(expr) => Ok(Type::PromiseOf(Box::new(self.infer_expr(expr, env)?))),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
-                if let Some((condition, alternate)) = desugared_or_operands(operator, operands) {
+                if let Some((condition, alternate)) = desugared_or_operands(operator, operands, env)
+                {
                     return self.infer_desugared_or(condition, alternate, env);
                 }
 
@@ -485,7 +486,7 @@ impl Inferencer {
         alternate: Option<&Spanned<Expr>>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let refinement = predicate_refinement(condition);
+        let refinement = predicate_refinement(condition, env);
         self.infer_expr(condition, env)?;
 
         let base = self.clone();
@@ -1947,8 +1948,8 @@ struct BranchRefinement {
     positive: Type,
 }
 
-fn predicate_refinement(condition: &Spanned<Expr>) -> Option<BranchRefinement> {
-    if let Some(refinement) = direct_predicate_refinement(condition) {
+fn predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<BranchRefinement> {
+    if let Some(refinement) = direct_predicate_refinement(condition, env) {
         return Some(BranchRefinement {
             branch: RefinedBranch::Then,
             name: refinement.0,
@@ -1962,18 +1963,18 @@ fn predicate_refinement(condition: &Spanned<Expr>) -> Option<BranchRefinement> {
     let Expr::Variable(operator_name) = &operator.node else {
         return None;
     };
-    if operator_name != "not" || operands.len() != 1 {
+    if operator_name != "not" || !env.is_primitive(operator_name) || operands.len() != 1 {
         return None;
     }
 
-    direct_predicate_refinement(&operands[0]).map(|(name, positive)| BranchRefinement {
+    direct_predicate_refinement(&operands[0], env).map(|(name, positive)| BranchRefinement {
         branch: RefinedBranch::Else,
         name,
         positive,
     })
 }
 
-fn direct_predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
+fn direct_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<(String, Type)> {
     let Expr::Apply { operator, operands } = &condition.node else {
         return None;
     };
@@ -1988,6 +1989,10 @@ fn direct_predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Typ
         return None;
     };
 
+    if !env.is_primitive(predicate_name) {
+        return None;
+    }
+
     primitive(predicate_name).and_then(|primitive| {
         primitive
             .predicate
@@ -1999,11 +2004,12 @@ fn direct_predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Typ
 fn desugared_or_operands<'a>(
     operator: &'a Spanned<Expr>,
     operands: &'a [Spanned<Expr>],
+    env: &TypeEnv,
 ) -> Option<(&'a Spanned<Expr>, &'a Spanned<Expr>)> {
     let [condition] = operands else {
         return None;
     };
-    direct_predicate_refinement(condition)?;
+    direct_predicate_refinement(condition, env)?;
 
     let Expr::Lambda { params, rest, body } = &operator.node else {
         return None;
@@ -2479,6 +2485,10 @@ mod tests {
         assert_eq!(
             infer_one("((lambda (list) (map list '(1) '(\"x\"))) (lambda (x y) x))"),
             "(listof number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (string? x) (if (string? x) (+ x 1) 0))"),
+            "(-> (-> number? t0) number? number?)"
         );
     }
 
