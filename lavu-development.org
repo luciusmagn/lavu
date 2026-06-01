@@ -733,6 +733,9 @@ Scheme value is valid.
   metadata.
 - Add fixed multiple-value expression types for direct =values= and common
   =call-with-values= inference paths.
+- Constrain unknown =call-with-values= producers as nullary procedures,
+  so producer variables receive visible result flow instead of collapsing
+  to =any?=.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.

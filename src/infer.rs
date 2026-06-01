@@ -823,17 +823,8 @@ impl Inferencer {
                     span: span.clone(),
                 })?;
 
-        let produced = match self.resolve(producer_ty) {
-            Type::Procedure(ProcedureType::Fixed { params, result }) if params.is_empty() => {
-                *result
-            }
-            Type::Procedure(ProcedureType::Rest {
-                required,
-                rest: _,
-                result,
-            }) if required.is_empty() => *result,
-            _ => Type::Any,
-        };
+        let produced =
+            self.infer_call_with_values_producer(producer_ty, operands[0].span.clone())?;
         let value_tys = match self.resolve(produced) {
             Type::Values(values) => values,
             value => vec![value],
@@ -844,6 +835,38 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
+    fn infer_call_with_values_producer(
+        &mut self,
+        producer_ty: Type,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        match self.resolve(producer_ty) {
+            Type::Var(name) => {
+                let result = self.fresh_type_var();
+                self.bind_var(name, Type::procedure(vec![], result.clone()))?;
+                Ok(result)
+            }
+            Type::Procedure(ProcedureType::Fixed { params, result }) if params.is_empty() => {
+                Ok(*result)
+            }
+            Type::Procedure(ProcedureType::Optional {
+                required, result, ..
+            }) if required.is_empty() => Ok(*result),
+            Type::Procedure(ProcedureType::UniformVariadic { result, .. }) => Ok(*result),
+            Type::Procedure(ProcedureType::Rest {
+                required, result, ..
+            }) if required.is_empty() => Ok(*result),
+            Type::Procedure(procedure) => {
+                self.infer_application(Type::Procedure(procedure), &[], Vec::new(), span)
+            }
+            Type::Any | Type::Unknown => Ok(Type::Any),
+            actual => Err(TypeError::ExpectedProcedure {
+                actual: Box::new(actual),
+                span,
+            }),
+        }
     }
 
     fn infer_call_cc(
@@ -2574,6 +2597,18 @@ mod tests {
         assert_eq!(
             infer_one("(call-with-values (lambda () (values)) (lambda () 1))"),
             "number?"
+        );
+        assert_eq!(
+            infer_one("(lambda (producer) (call-with-values producer list))"),
+            "(-> (-> t0) (listof t0))"
+        );
+        assert_eq!(
+            infer_one("(lambda (producer) (call-with-values producer +))"),
+            "(-> (-> number?) number?)"
+        );
+        assert_eq!(
+            infer_error("(call-with-values 1 list)").to_string(),
+            "expected a procedure, got number?"
         );
     }
 
