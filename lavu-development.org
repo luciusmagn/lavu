@@ -576,8 +576,8 @@ Scheme value is valid.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
-- Make =equal?= terminate on circular mutable-pair structures by tracking
-  pair-pair comparisons during structural recursion.
+- Make =equal?= terminate on circular mutable pair/vector structures by
+  tracking compound comparisons during structural recursion.
 ** Indexed List Primitives
 - Add typed and native =list-ref= and =list-tail= over proper lists with
   checked exact non-negative indexes.

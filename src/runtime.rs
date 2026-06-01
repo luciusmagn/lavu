@@ -159,6 +159,9 @@ pub struct PairValue {
     cdr: Value,
 }
 
+type PairPointer = *const RefCell<PairValue>;
+type VectorPointer = *const RefCell<Vec<Value>>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Procedure {
     params: Vec<String>,
@@ -3298,14 +3301,16 @@ fn eq_value(left: &Value, right: &Value) -> bool {
 }
 
 fn equal_value(left: &Value, right: &Value) -> bool {
-    equal_value_seen(left, right, &mut HashSet::new())
+    equal_value_seen(left, right, &mut EqualitySeen::default())
 }
 
-fn equal_value_seen(
-    left: &Value,
-    right: &Value,
-    seen: &mut HashSet<(*const RefCell<PairValue>, *const RefCell<PairValue>)>,
-) -> bool {
+#[derive(Default)]
+struct EqualitySeen {
+    pairs: HashSet<(PairPointer, PairPointer)>,
+    vectors: HashSet<(VectorPointer, VectorPointer)>,
+}
+
+fn equal_value_seen(left: &Value, right: &Value, seen: &mut EqualitySeen) -> bool {
     match (left, right) {
         (Value::List(left), Value::List(right)) => {
             left.iter()
@@ -3327,7 +3332,7 @@ fn equal_value_seen(
         }
         (Value::Pair(left), Value::Pair(right)) => {
             let key = (Rc::as_ptr(left), Rc::as_ptr(right));
-            if !seen.insert(key) {
+            if !seen.pairs.insert(key) {
                 return true;
             }
             let (left_car, left_cdr, right_car, right_cdr) = {
@@ -3342,16 +3347,23 @@ fn equal_value_seen(
             };
             let equal = equal_value_seen(&left_car, &right_car, seen)
                 && equal_value_seen(&left_cdr, &right_cdr, seen);
-            seen.remove(&key);
+            seen.pairs.remove(&key);
             equal
         }
         (Value::Vector(left), Value::Vector(right)) => {
+            let key = (Rc::as_ptr(left), Rc::as_ptr(right));
+            if !seen.vectors.insert(key) {
+                return true;
+            }
             let left = left.borrow();
             let right = right.borrow();
-            left.iter()
+            let equal = left
+                .iter()
                 .zip(right.iter())
                 .all(|(left, right)| equal_value_seen(left, right, seen))
-                && left.len() == right.len()
+                && left.len() == right.len();
+            seen.vectors.remove(&key);
+            equal
         }
         _ => eqv_value(left, right),
     }
@@ -4098,8 +4110,8 @@ impl fmt::Display for Value {
 
 #[derive(Default)]
 struct WriteStack {
-    pairs: HashSet<*const RefCell<PairValue>>,
-    vectors: HashSet<*const RefCell<Vec<Value>>>,
+    pairs: HashSet<PairPointer>,
+    vectors: HashSet<VectorPointer>,
 }
 
 fn write_value(value: &Value, f: &mut fmt::Formatter<'_>, stack: &mut WriteStack) -> fmt::Result {
@@ -4237,7 +4249,7 @@ fn write_pair_value(
     }
 }
 
-fn remove_pair_stack_entries(stack: &mut WriteStack, inserted: Vec<*const RefCell<PairValue>>) {
+fn remove_pair_stack_entries(stack: &mut WriteStack, inserted: Vec<PairPointer>) {
     for pointer in inserted {
         stack.pairs.remove(&pointer);
     }
@@ -4835,6 +4847,29 @@ mod tests {
                  (define q (cons 1 '()))
                  (set-cdr! p p)
                  (equal? p q)"
+            ),
+            "#f"
+        );
+        assert_eq!(
+            eval_one("(define v (vector 1)) (vector-set! v 0 v) (equal? v v)"),
+            "#t"
+        );
+        assert_eq!(
+            eval_one(
+                "(define v (vector 1))
+                 (define w (vector 1))
+                 (vector-set! v 0 v)
+                 (vector-set! w 0 w)
+                 (equal? v w)"
+            ),
+            "#t"
+        );
+        assert_eq!(
+            eval_one(
+                "(define v (vector 1))
+                 (define w (vector 1))
+                 (vector-set! v 0 v)
+                 (equal? v w)"
             ),
             "#f"
         );
