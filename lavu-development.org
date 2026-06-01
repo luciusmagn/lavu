@@ -231,6 +231,11 @@ Scheme value is valid.
 - Add exact integer and rational utilities: =abs=, =max=, =min=,
   =quotient=, =remainder=, =modulo=, =gcd=, =lcm=, =numerator=, and
   =denominator=.
+** Character Library
+- Add R5RS character classification and case primitives to the native
+  runtime and type metadata: =char-alphabetic?=, =char-numeric?=,
+  =char-whitespace?=, =char-upper-case?=, =char-lower-case?=,
+  =char-upcase=, and =char-downcase=.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.

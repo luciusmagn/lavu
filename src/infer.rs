@@ -762,6 +762,15 @@ mod tests {
     }
 
     #[test]
+    fn infers_character_classification_and_case() {
+        assert_eq!(
+            infer_one("(lambda (c) (char-alphabetic? c))"),
+            "(-> char? boolean?)"
+        );
+        assert_eq!(infer_one("(char-upcase #\\a)"), "char?");
+    }
+
+    #[test]
     fn infers_union_parameters_from_predicate_branches() {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) (+ x 1)))"),

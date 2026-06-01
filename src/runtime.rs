@@ -204,6 +204,13 @@ impl Env {
             "numerator",
             "denominator",
             "char?",
+            "char-alphabetic?",
+            "char-numeric?",
+            "char-whitespace?",
+            "char-upper-case?",
+            "char-lower-case?",
+            "char-upcase",
+            "char-downcase",
             "string?",
             "symbol?",
             "pair?",
@@ -479,6 +486,13 @@ fn apply_primitive(
         "numerator" => numerator(args, span),
         "denominator" => denominator(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
+        "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
+        "char-numeric?" => char_predicate(args, span, char::is_numeric),
+        "char-whitespace?" => char_predicate(args, span, char::is_whitespace),
+        "char-upper-case?" => char_predicate(args, span, char::is_uppercase),
+        "char-lower-case?" => char_predicate(args, span, char::is_lowercase),
+        "char-upcase" => char_map(args, span, |c| c.to_uppercase().next().unwrap_or(c)),
+        "char-downcase" => char_map(args, span, |c| c.to_lowercase().next().unwrap_or(c)),
         "string?" => predicate(args, span, |value| matches!(value, Value::String(_))),
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
         "pair?" => predicate(args, span, |value| match value {
@@ -1157,6 +1171,34 @@ fn complex_one() -> Complex<BigDecimal> {
 
 fn char_eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     char_compare(args, span, |left, right| left == right)
+}
+
+fn char_predicate(
+    args: Vec<Value>,
+    span: SourceSpan,
+    pred: impl FnOnce(char) -> bool,
+) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Character(c) => Ok(Value::Boolean(pred(c))),
+        _ => Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        }),
+    })
+}
+
+fn char_map(
+    args: Vec<Value>,
+    span: SourceSpan,
+    f: impl FnOnce(char) -> char,
+) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Character(c) => Ok(Value::Character(f(c))),
+        _ => Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        }),
+    })
 }
 
 fn char_compare(
@@ -2143,6 +2185,17 @@ mod tests {
         assert_eq!(eval_one("(char-ci=? #\\A #\\a)"), "#t");
         assert_eq!(eval_one("(char-ci<? #\\a #\\B)"), "#t");
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
+    }
+
+    #[test]
+    fn evaluates_character_classification_and_case() {
+        assert_eq!(eval_one("(char-alphabetic? #\\a)"), "#t");
+        assert_eq!(eval_one("(char-numeric? #\\7)"), "#t");
+        assert_eq!(eval_one("(char-whitespace? #\\space)"), "#t");
+        assert_eq!(eval_one("(char-upper-case? #\\A)"), "#t");
+        assert_eq!(eval_one("(char-lower-case? #\\a)"), "#t");
+        assert_eq!(eval_one("(char-upcase #\\a)"), "#\\A");
+        assert_eq!(eval_one("(char-downcase #\\A)"), "#\\a");
     }
 
     #[test]

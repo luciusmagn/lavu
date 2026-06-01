@@ -108,6 +108,16 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "integer->char",
             Type::procedure(vec![Type::Number], Type::Char),
         ),
+        Primitive::new("char-alphabetic?", char_predicate()),
+        Primitive::new("char-numeric?", char_predicate()),
+        Primitive::new("char-whitespace?", char_predicate()),
+        Primitive::new("char-upper-case?", char_predicate()),
+        Primitive::new("char-lower-case?", char_predicate()),
+        Primitive::new("char-upcase", Type::procedure(vec![Type::Char], Type::Char)),
+        Primitive::new(
+            "char-downcase",
+            Type::procedure(vec![Type::Char], Type::Char),
+        ),
         Primitive::new(
             "number->string",
             Type::procedure(vec![Type::Number], Type::String),
@@ -415,6 +425,10 @@ fn number_predicate() -> Type {
     Type::procedure(vec![Type::Number], Type::Boolean)
 }
 
+fn char_predicate() -> Type {
+    Type::procedure(vec![Type::Char], Type::Boolean)
+}
+
 #[cfg(test)]
 mod tests {
     use super::primitive;
@@ -485,6 +499,14 @@ mod tests {
         assert_eq!(
             primitive("char=?").unwrap().signature.to_string(),
             "(-> char? char? char? * boolean?)"
+        );
+        assert_eq!(
+            primitive("char-alphabetic?").unwrap().signature.to_string(),
+            "(-> char? boolean?)"
+        );
+        assert_eq!(
+            primitive("char-upcase").unwrap().signature.to_string(),
+            "(-> char? char?)"
         );
         assert_eq!(
             primitive("char-ci<=?").unwrap().signature.to_string(),
