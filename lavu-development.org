@@ -725,3 +725,6 @@ Scheme value is valid.
 - Infer callback and thunk result flow through file port combinators and
   =dynamic-wind= instead of collapsing those higher-order results to
   =any?=.
+- Give those higher-order combinators polymorphic standard-library
+  metadata too, so querying the primitive value shows the callback result
+  relationship directly.

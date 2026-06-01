@@ -38,6 +38,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
     let a = Type::Var("a".to_string());
     let b = Type::Var("b".to_string());
     let thunk = Type::procedure(vec![], Type::Any);
+    let result_thunk = Type::procedure(vec![], a.clone());
     let continuation = Type::procedure(vec![Type::Any], Type::Any);
     let continuation_receiver = Type::procedure(vec![continuation], Type::Any);
 
@@ -154,9 +155,9 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(
                 vec![
                     Type::String,
-                    Type::procedure(vec![Type::InputPort], Type::Any),
+                    Type::procedure(vec![Type::InputPort], a.clone()),
                 ],
-                Type::Any,
+                a.clone(),
             ),
         ),
         Primitive::new(
@@ -164,18 +165,18 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(
                 vec![
                     Type::String,
-                    Type::procedure(vec![Type::OutputPort], Type::Any),
+                    Type::procedure(vec![Type::OutputPort], a.clone()),
                 ],
-                Type::Any,
+                a.clone(),
             ),
         ),
         Primitive::new(
             "with-input-from-file",
-            Type::procedure(vec![Type::String, thunk.clone()], Type::Any),
+            Type::procedure(vec![Type::String, result_thunk.clone()], a.clone()),
         ),
         Primitive::new(
             "with-output-to-file",
-            Type::procedure(vec![Type::String, thunk.clone()], Type::Any),
+            Type::procedure(vec![Type::String, result_thunk.clone()], a.clone()),
         ),
         Primitive::new("load", Type::procedure(vec![Type::String], Type::Unknown)),
         Primitive::new(
@@ -196,7 +197,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "dynamic-wind",
-            Type::procedure(vec![thunk.clone(), thunk.clone(), thunk], Type::Any),
+            Type::procedure(vec![thunk.clone(), result_thunk, thunk], a.clone()),
         ),
         Primitive::new(
             "call-with-current-continuation",
@@ -1035,28 +1036,28 @@ mod tests {
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? (-> input-port? any?) any?)"
+            "(-> string? (-> input-port? a) a)"
         );
         assert_eq!(
             primitive("call-with-output-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? (-> output-port? any?) any?)"
+            "(-> string? (-> output-port? a) a)"
         );
         assert_eq!(
             primitive("with-input-from-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? (-> any?) any?)"
+            "(-> string? (-> a) a)"
         );
         assert_eq!(
             primitive("with-output-to-file")
                 .unwrap()
                 .signature
                 .to_string(),
-            "(-> string? (-> any?) any?)"
+            "(-> string? (-> a) a)"
         );
         assert_eq!(
             primitive("load").unwrap().signature.to_string(),
@@ -1075,7 +1076,7 @@ mod tests {
         );
         assert_eq!(
             primitive("dynamic-wind").unwrap().signature.to_string(),
-            "(-> (-> any?) (-> any?) (-> any?) any?)"
+            "(-> (-> any?) (-> a) (-> any?) a)"
         );
         assert_eq!(
             primitive("call/cc").unwrap().signature.to_string(),

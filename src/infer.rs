@@ -2689,6 +2689,10 @@ mod tests {
     #[test]
     fn infers_output_primitives() {
         assert_eq!(infer_one("(current-input-port)"), "input-port?");
+        assert_eq!(
+            infer_one("call-with-input-file"),
+            "(-> string? (-> input-port? t0) t0)"
+        );
         assert_eq!(infer_one("(input-port? (current-input-port))"), "boolean?");
         assert_eq!(infer_one("(read)"), "any?");
         assert_eq!(infer_one("(read-char)"), "(U char? eof-object?)");
@@ -2705,11 +2709,11 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-input-file \"x\" f))"),
-            "(-> (-> input-port? t0) t0)"
+            "(-> (-> input-port? t1) t1)"
         );
         assert_eq!(
             infer_one("(lambda (f) (call-with-output-file \"x\" f))"),
-            "(-> (-> output-port? t0) t0)"
+            "(-> (-> output-port? t1) t1)"
         );
         assert_eq!(infer_one("(with-input-from-file \"x\" read)"), "any?");
         assert_eq!(
@@ -2718,7 +2722,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (thunk) (with-output-to-file \"x\" thunk))"),
-            "(-> (-> t0) t0)"
+            "(-> (-> t1) t1)"
         );
         assert_eq!(infer_one("(load \"x\")"), "unknown?");
         assert_eq!(
@@ -2731,8 +2735,12 @@ mod tests {
             "number?"
         );
         assert_eq!(
-            infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
+            infer_one("dynamic-wind"),
             "(-> (-> any?) (-> t0) (-> any?) t0)"
+        );
+        assert_eq!(
+            infer_one("(lambda (before thunk after) (dynamic-wind before thunk after))"),
+            "(-> (-> any?) (-> t1) (-> any?) t1)"
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "number?");
         assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");
