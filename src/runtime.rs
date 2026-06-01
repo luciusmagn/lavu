@@ -4304,6 +4304,33 @@ mod tests {
             ),
             "11"
         );
+        assert_eq!(
+            eval_one(
+                "(define-syntax tail
+                   (syntax-rules ()
+                     ((tail head . rest) 'rest)))
+                 (tail 1 2 3)"
+            ),
+            "(2 3)"
+        );
+        assert_eq!(
+            eval_one(
+                "(define-syntax tail
+                   (syntax-rules ()
+                     ((tail head . rest) 'rest)))
+                 (tail 1 . 2)"
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(define-syntax split
+                   (syntax-rules ()
+                     ((split x ... . rest) (list 'x ... 'rest))))
+                 (split 1 2 . 3)"
+            ),
+            "(1 2 3)"
+        );
     }
 
     #[test]

@@ -299,6 +299,8 @@ Scheme value is valid.
   and templates. Full R5RS hygiene remains future work.
 - Treat =_= as an ordinary R5RS pattern variable rather than a
   non-standard wildcard.
+- Support R5RS dotted =syntax-rules= patterns, including improper macro
+  uses and ellipsis prefixes before the dotted tail.
 - Process top-level =begin= forms in macro-expansion order so syntax
   definitions can affect later forms in the same top-level sequence.
 - Expand =let-syntax= and =letrec-syntax= with scoped local

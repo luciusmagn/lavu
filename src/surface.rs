@@ -180,6 +180,12 @@ enum Capture {
     Repeated(Vec<Spanned<Datum>>),
 }
 
+struct DottedDatum<'a> {
+    items: &'a [Spanned<Datum>],
+    tail: Option<&'a Spanned<Datum>>,
+    original: &'a Spanned<Datum>,
+}
+
 impl MacroExpander {
     fn define(&mut self, name: String, rules: SyntaxRules) {
         self.bindings.insert(name, rules);
@@ -264,6 +270,13 @@ impl MacroExpander {
                     })
             }
             Datum::DottedList(items, tail) => {
+                if let Some(name) = items.first().and_then(identifier_name)
+                    && let Some(rules) = self.bindings.get(&name)
+                {
+                    let expanded = apply_syntax_rules(&name, rules, datum)?;
+                    return self.expand_with_depth(&expanded, depth + 1);
+                }
+
                 let items = items
                     .iter()
                     .map(|item| self.expand_with_depth(item, depth))
@@ -921,9 +934,14 @@ fn match_pattern(
             };
             match_pattern(pattern_inner, datum_inner, literals, keyword, captures)
         }
-        Datum::DottedList(_, _) => Err(SurfaceError::UnsupportedMacroPattern {
-            span: pattern.span.clone(),
-        }),
+        Datum::DottedList(pattern_items, pattern_tail) => match_dotted_pattern_list(
+            pattern_items,
+            pattern_tail,
+            datum,
+            literals,
+            keyword,
+            captures,
+        ),
     }
 }
 
@@ -975,6 +993,121 @@ fn match_pattern_list(
     }
 
     Ok(datum_index == datum_items.len())
+}
+
+fn match_dotted_pattern_list(
+    pattern_items: &[Spanned<Datum>],
+    pattern_tail: &Spanned<Datum>,
+    datum: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    match &datum.node {
+        Datum::List(datum_items) => match_pattern_list_with_tail(
+            pattern_items,
+            pattern_tail,
+            DottedDatum {
+                items: datum_items,
+                tail: None,
+                original: datum,
+            },
+            literals,
+            keyword,
+            captures,
+        ),
+        Datum::DottedList(datum_items, datum_tail) => match_pattern_list_with_tail(
+            pattern_items,
+            pattern_tail,
+            DottedDatum {
+                items: datum_items,
+                tail: Some(datum_tail.as_ref()),
+                original: datum,
+            },
+            literals,
+            keyword,
+            captures,
+        ),
+        _ => Ok(false),
+    }
+}
+
+fn match_pattern_list_with_tail(
+    pattern_items: &[Spanned<Datum>],
+    pattern_tail: &Spanned<Datum>,
+    datum: DottedDatum<'_>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    captures: &mut BTreeMap<String, Capture>,
+) -> Result<bool, SurfaceError> {
+    let mut pattern_index = 0;
+    let mut datum_index = 0;
+
+    while pattern_index < pattern_items.len() {
+        let pattern = &pattern_items[pattern_index];
+        let repeated = pattern_items
+            .get(pattern_index + 1)
+            .is_some_and(is_ellipsis);
+
+        if repeated {
+            let rest = &pattern_items[pattern_index + 2..];
+            let minimum_rest = minimum_pattern_items(rest);
+            if datum.items.len() < datum_index + minimum_rest {
+                return Ok(false);
+            }
+
+            let repeat_count = datum.items.len() - datum_index - minimum_rest;
+            seed_repeated_captures(pattern, literals, keyword, captures)?;
+            for datum in &datum.items[datum_index..datum_index + repeat_count] {
+                let mut local = BTreeMap::new();
+                if !match_pattern(pattern, datum, literals, keyword, &mut local)? {
+                    return Ok(false);
+                }
+                merge_repeated_captures(captures, local, pattern.span.clone())?;
+            }
+            datum_index += repeat_count;
+            pattern_index += 2;
+            continue;
+        }
+
+        let Some(datum) = datum.items.get(datum_index) else {
+            return Ok(false);
+        };
+        if !match_pattern(pattern, datum, literals, keyword, captures)? {
+            return Ok(false);
+        }
+        datum_index += 1;
+        pattern_index += 1;
+    }
+
+    let tail = datum_tail_after(&datum, datum_index);
+    match_pattern(pattern_tail, &tail, literals, keyword, captures)
+}
+
+fn datum_tail_after(datum: &DottedDatum<'_>, index: usize) -> Spanned<Datum> {
+    if index < datum.items.len() {
+        return Spanned {
+            node: datum.tail.map_or_else(
+                || Datum::List(datum.items[index..].to_vec()),
+                |tail| Datum::DottedList(datum.items[index..].to_vec(), Box::new(tail.clone())),
+            ),
+            span: tail_span(
+                &datum.items[index],
+                datum.tail.unwrap_or(&datum.items[datum.items.len() - 1]),
+            ),
+            origin: datum.original.origin,
+        };
+    }
+
+    datum.tail.cloned().unwrap_or_else(|| Spanned {
+        node: Datum::List(Vec::new()),
+        span: datum.original.span.clone(),
+        origin: datum.original.origin,
+    })
+}
+
+fn tail_span(first: &Spanned<Datum>, last: &Spanned<Datum>) -> SourceSpan {
+    first.span.start..last.span.end
 }
 
 fn minimum_pattern_items(patterns: &[Spanned<Datum>]) -> usize {
