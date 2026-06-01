@@ -314,6 +314,8 @@ Scheme value is valid.
   definitions can affect later forms in the same top-level sequence.
 - Expand =let-syntax= and =letrec-syntax= with scoped local
   =syntax-rules= bindings before surface AST classification.
+- Reject duplicate local syntax binding names in =let-syntax= and
+  =letrec-syntax= instead of silently overwriting the earlier binding.
 - Install top-level =define-syntax= forms produced by macro expansion so
   generated syntax bindings can affect following forms.
 - Add a reusable surface classification context so the REPL can keep

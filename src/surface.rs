@@ -807,29 +807,35 @@ fn parse_syntax_bindings(
         });
     };
 
-    bindings
-        .iter()
-        .map(|binding| {
-            let Datum::List(items) = &binding.node else {
-                return Err(SurfaceError::ExpectedList {
-                    context: "syntax binding",
-                    span: binding.span.clone(),
-                });
-            };
-            if items.len() != 2 {
-                return Err(SurfaceError::BadArity {
-                    form: "syntax binding",
-                    expected: "a keyword and syntax-rules transformer",
-                    span: binding.span.clone(),
-                });
-            }
+    let mut names = BTreeSet::new();
+    let mut parsed = Vec::new();
+    for binding in bindings {
+        let Datum::List(items) = &binding.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "syntax binding",
+                span: binding.span.clone(),
+            });
+        };
+        if items.len() != 2 {
+            return Err(SurfaceError::BadArity {
+                form: "syntax binding",
+                expected: "a keyword and syntax-rules transformer",
+                span: binding.span.clone(),
+            });
+        }
 
-            Ok((
-                expect_identifier(&items[0], "syntax binding")?.node,
-                parse_syntax_rules(&items[1])?,
-            ))
-        })
-        .collect()
+        let name = expect_identifier(&items[0], "syntax binding")?;
+        if !names.insert(name.node.clone()) {
+            return Err(SurfaceError::DuplicateIdentifier {
+                context: "syntax bindings",
+                name: name.node,
+                span: name.span,
+            });
+        }
+        parsed.push((name.node, parse_syntax_rules(&items[1])?));
+    }
+
+    Ok(parsed)
 }
 
 fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>, SurfaceError> {
@@ -2734,6 +2740,26 @@ mod tests {
             classify_top_level(&datums[0]),
             Err(SurfaceError::DuplicateIdentifier { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_duplicate_local_syntax_names() {
+        for input in [
+            "(let-syntax
+               ((x (syntax-rules () ((x) 1)))
+                (x (syntax-rules () ((x) 2))))
+               (x))",
+            "(letrec-syntax
+               ((x (syntax-rules () ((x) 1)))
+                (x (syntax-rules () ((x) 2))))
+               (x))",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_program(&datums),
+                Err(SurfaceError::DuplicateIdentifier { .. })
+            ));
+        }
     }
 
     #[test]
