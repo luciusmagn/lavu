@@ -143,7 +143,8 @@ pub struct OutputFilePort {
 }
 
 thread_local! {
-    static CURRENT_INPUT_PORT: InputPort = InputPort::stdin();
+    static CURRENT_INPUT_PORT: RefCell<InputPort> = RefCell::new(InputPort::stdin());
+    static CURRENT_OUTPUT_PORT: RefCell<OutputPort> = const { RefCell::new(OutputPort::Stdout) };
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -369,6 +370,8 @@ impl Env {
             "open-output-file",
             "call-with-input-file",
             "call-with-output-file",
+            "with-input-from-file",
+            "with-output-to-file",
             "close-input-port",
             "close-output-port",
             "read",
@@ -783,6 +786,8 @@ fn apply_primitive(
         "open-output-file" => open_output_file(args, span),
         "call-with-input-file" => call_with_input_file(args, span),
         "call-with-output-file" => call_with_output_file(args, span),
+        "with-input-from-file" => with_input_from_file(args, span),
+        "with-output-to-file" => with_output_to_file(args, span),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -2277,7 +2282,7 @@ fn current_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalE
         });
     }
 
-    CURRENT_INPUT_PORT.with(|port| Ok(Value::InputPort(port.clone())))
+    CURRENT_INPUT_PORT.with(|port| Ok(Value::InputPort(port.borrow().clone())))
 }
 
 fn open_input_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -2368,7 +2373,7 @@ fn optional_input_port(args: Vec<Value>, span: SourceSpan) -> Result<InputPort, 
     let mut args = args.into_iter();
     let port = match args.next() {
         Some(port) => input_port(port, span.clone())?,
-        None => CURRENT_INPUT_PORT.with(Clone::clone),
+        None => CURRENT_INPUT_PORT.with(|port| port.borrow().clone()),
     };
     if args.next().is_some() {
         return Err(EvalError::ArityMismatch {
@@ -2441,7 +2446,7 @@ fn current_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eval
         });
     }
 
-    Ok(Value::OutputPort(OutputPort::Stdout))
+    CURRENT_OUTPUT_PORT.with(|port| Ok(Value::OutputPort(port.borrow().clone())))
 }
 
 fn open_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -2518,6 +2523,54 @@ fn call_with_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, Ev
     result
 }
 
+fn with_input_from_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(path) = path else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+
+    let port = input_port_from_path(path.borrow().as_str(), span.clone())?;
+    let old = CURRENT_INPUT_PORT.with(|current| current.replace(port.clone()));
+    let result = apply(thunk, Vec::new(), span);
+    CURRENT_INPUT_PORT.with(|current| {
+        current.replace(old);
+    });
+    port.0.borrow_mut().closed = true;
+    result
+}
+
+fn with_output_to_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(path) = path else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+
+    let port = output_port_from_path(path.borrow().as_str(), span.clone())?;
+    let old = CURRENT_OUTPUT_PORT.with(|current| current.replace(port.clone()));
+    let result = apply(thunk, Vec::new(), span);
+    CURRENT_OUTPUT_PORT.with(|current| {
+        current.replace(old);
+    });
+    close_output_port_value(port);
+    result
+}
+
 fn close_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let port = output_port(value, span)?;
@@ -2573,7 +2626,7 @@ fn value_and_optional_output_port(
     })?;
     let port = match args.next() {
         Some(port) => output_port(port, span.clone())?,
-        None => OutputPort::Stdout,
+        None => CURRENT_OUTPUT_PORT.with(|port| port.borrow().clone()),
     };
     if args.next().is_some() {
         return Err(EvalError::ArityMismatch {
@@ -2591,7 +2644,7 @@ fn optional_output_port(args: Vec<Value>, span: SourceSpan) -> Result<OutputPort
     let mut args = args.into_iter();
     let port = match args.next() {
         Some(port) => output_port(port, span.clone())?,
-        None => OutputPort::Stdout,
+        None => CURRENT_OUTPUT_PORT.with(|port| port.borrow().clone()),
     };
     if args.next().is_some() {
         return Err(EvalError::ArityMismatch {
@@ -3868,6 +3921,17 @@ mod tests {
 
         assert_eq!(eval_one(&input), "(ok 1)");
         std::fs::remove_file(call_path).unwrap();
+
+        let with_path =
+            std::env::temp_dir().join(format!("lavu-with-input-{}.ss", std::process::id()));
+        std::fs::write(&with_path, "(current 2)").unwrap();
+        let input = format!(
+            "(with-input-from-file \"{}\" (lambda () (read)))",
+            with_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "(current 2)");
+        std::fs::remove_file(with_path).unwrap();
     }
 
     #[test]
@@ -3942,6 +4006,17 @@ mod tests {
         assert_eq!(eval_one(&input), "#<unspecified>");
         assert_eq!(std::fs::read_to_string(&call_path).unwrap(), "y(b 2)");
         std::fs::remove_file(call_path).unwrap();
+
+        let with_path =
+            std::env::temp_dir().join(format!("lavu-with-output-{}.ss", std::process::id()));
+        let input = format!(
+            "(with-output-to-file \"{}\" (lambda () (display \"z\") (write '(c 3))))",
+            with_path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "#<unspecified>");
+        assert_eq!(std::fs::read_to_string(&with_path).unwrap(), "z(c 3)");
+        std::fs::remove_file(with_path).unwrap();
     }
 
     #[test]

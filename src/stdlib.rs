@@ -152,6 +152,14 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::String, Type::Any], Type::Any),
         ),
         Primitive::new(
+            "with-input-from-file",
+            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+        ),
+        Primitive::new(
+            "with-output-to-file",
+            Type::procedure(vec![Type::String, Type::Any], Type::Any),
+        ),
+        Primitive::new(
             "close-output-port",
             Type::procedure(vec![Type::OutputPort], Type::Unknown),
         ),
@@ -921,6 +929,20 @@ mod tests {
         );
         assert_eq!(
             primitive("call-with-output-file")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> string? any? any?)"
+        );
+        assert_eq!(
+            primitive("with-input-from-file")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> string? any? any?)"
+        );
+        assert_eq!(
+            primitive("with-output-to-file")
                 .unwrap()
                 .signature
                 .to_string(),
