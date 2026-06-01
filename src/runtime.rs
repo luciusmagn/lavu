@@ -23,6 +23,7 @@ use crate::types::{ProcedureType, Type};
 pub enum Value {
     Integer(BigInt),
     Rational(BigRational),
+    ExactComplex(Complex<BigRational>),
     Decimal(BigDecimal),
     Complex(Complex<BigDecimal>),
     Boolean(bool),
@@ -50,6 +51,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Integer(left), Value::Integer(right)) => left == right,
             (Value::Rational(left), Value::Rational(right)) => left == right,
+            (Value::ExactComplex(left), Value::ExactComplex(right)) => left == right,
             (Value::Decimal(left), Value::Decimal(right)) => left == right,
             (Value::Complex(left), Value::Complex(right)) => left == right,
             (Value::Boolean(left), Value::Boolean(right)) => left == right,
@@ -632,7 +634,11 @@ fn apply_primitive(
         "number?" => predicate(args, span, |value| {
             matches!(
                 value,
-                Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_)
+                Value::Integer(_)
+                    | Value::Rational(_)
+                    | Value::Decimal(_)
+                    | Value::Complex(_)
+                    | Value::ExactComplex(_)
             )
         }),
         "complex?" => predicate(args, span, number_value),
@@ -891,6 +897,7 @@ fn apply_primitive(
 #[derive(Debug, Clone)]
 enum NumberValue {
     Exact(BigRational),
+    ExactComplex(Complex<BigRational>),
     Decimal(BigDecimal),
     Complex(Complex<BigDecimal>),
 }
@@ -898,12 +905,21 @@ enum NumberValue {
 fn add(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     let numbers = numeric_args(args, span)?;
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if promotes_to_decimal_complex(&numbers) {
         return Ok(Value::Complex(
             numbers
                 .iter()
-                .map(NumberValue::to_complex)
+                .map(NumberValue::to_complex_decimal)
                 .fold(complex_zero(), |sum, number| sum + number),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_exact_complex) {
+        return Ok(exact_complex_value(
+            numbers
+                .iter()
+                .map(NumberValue::to_complex_exact)
+                .fold(exact_complex_zero(), |sum, number| sum + number),
         ));
     }
 
@@ -934,9 +950,18 @@ fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         });
     }
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if promotes_to_decimal_complex(&numbers) {
         return Ok(Value::Complex(fold_subtract(
-            numbers.iter().map(NumberValue::to_complex).collect(),
+            numbers
+                .iter()
+                .map(NumberValue::to_complex_decimal)
+                .collect(),
+        )));
+    }
+
+    if numbers.iter().any(NumberValue::is_exact_complex) {
+        return Ok(exact_complex_value(fold_subtract(
+            numbers.iter().map(NumberValue::to_complex_exact).collect(),
         )));
     }
 
@@ -954,12 +979,21 @@ fn subtract(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 fn multiply(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     let numbers = numeric_args(args, span)?;
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if promotes_to_decimal_complex(&numbers) {
         return Ok(Value::Complex(
             numbers
                 .iter()
-                .map(NumberValue::to_complex)
+                .map(NumberValue::to_complex_decimal)
                 .fold(complex_one(), |product, number| product * number),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_exact_complex) {
+        return Ok(exact_complex_value(
+            numbers
+                .iter()
+                .map(NumberValue::to_complex_exact)
+                .fold(exact_complex_one(), |product, number| product * number),
         ));
     }
 
@@ -998,10 +1032,20 @@ fn divide(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         });
     }
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if promotes_to_decimal_complex(&numbers) {
         return Ok(Value::Complex(fold_divide(
-            numbers.iter().map(NumberValue::to_complex).collect(),
+            numbers
+                .iter()
+                .map(NumberValue::to_complex_decimal)
+                .collect(),
             complex_one(),
+        )));
+    }
+
+    if numbers.iter().any(NumberValue::is_exact_complex) {
+        return Ok(exact_complex_value(fold_divide(
+            numbers.iter().map(NumberValue::to_complex_exact).collect(),
+            exact_complex_one(),
         )));
     }
 
@@ -1050,7 +1094,7 @@ fn numeric_compare(
 
     if numbers
         .iter()
-        .any(|number| number.is_decimal() || number.is_complex())
+        .any(|number| number.is_decimal() || number.is_inexact_complex())
     {
         let numbers = numbers
             .iter()
@@ -1084,10 +1128,20 @@ fn numeric_equal(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError>
         });
     }
 
-    if numbers.iter().any(NumberValue::is_complex) {
+    if promotes_to_decimal_complex(&numbers) {
         let numbers = numbers
             .iter()
-            .map(NumberValue::to_complex)
+            .map(NumberValue::to_complex_decimal)
+            .collect::<Vec<_>>();
+        return Ok(Value::Boolean(
+            numbers.windows(2).all(|pair| pair[0] == pair[1]),
+        ));
+    }
+
+    if numbers.iter().any(NumberValue::is_exact_complex) {
+        let numbers = numbers
+            .iter()
+            .map(NumberValue::to_complex_exact)
             .collect::<Vec<_>>();
         return Ok(Value::Boolean(
             numbers.windows(2).all(|pair| pair[0] == pair[1]),
@@ -1118,6 +1172,7 @@ fn numeric_args(args: Vec<Value>, span: SourceSpan) -> Result<Vec<NumberValue>, 
         .map(|value| match value {
             Value::Integer(n) => Ok(NumberValue::Exact(BigRational::from_integer(n))),
             Value::Rational(n) => Ok(NumberValue::Exact(n)),
+            Value::ExactComplex(n) => Ok(NumberValue::ExactComplex(n)),
             Value::Decimal(n) => Ok(NumberValue::Decimal(n)),
             Value::Complex(n) => Ok(NumberValue::Complex(n)),
             _ => Err(EvalError::TypeError {
@@ -1141,13 +1196,18 @@ fn numeric_predicate(
 fn number_value(value: &Value) -> bool {
     matches!(
         value,
-        Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_)
+        Value::Integer(_)
+            | Value::Rational(_)
+            | Value::ExactComplex(_)
+            | Value::Decimal(_)
+            | Value::Complex(_)
     )
 }
 
 fn real_number_value(value: &Value) -> bool {
     match value {
         Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => true,
+        Value::ExactComplex(n) => n.im.is_zero(),
         Value::Complex(n) => n.im.is_zero(),
         _ => false,
     }
@@ -1156,6 +1216,7 @@ fn real_number_value(value: &Value) -> bool {
 fn rational_number_value(value: &Value) -> bool {
     match value {
         Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => true,
+        Value::ExactComplex(n) => n.im.is_zero(),
         Value::Complex(n) => n.im.is_zero(),
         _ => false,
     }
@@ -1165,6 +1226,7 @@ fn integer_number_value(value: &Value) -> bool {
     match value {
         Value::Integer(_) => true,
         Value::Rational(n) => n.is_integer(),
+        Value::ExactComplex(n) => n.im.is_zero() && n.re.is_integer(),
         Value::Decimal(n) => n.is_integer(),
         Value::Complex(n) => n.im.is_zero() && n.re.is_integer(),
         _ => false,
@@ -1173,7 +1235,7 @@ fn integer_number_value(value: &Value) -> bool {
 
 fn exact_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
     match value {
-        Value::Integer(_) | Value::Rational(_) => Ok(true),
+        Value::Integer(_) | Value::Rational(_) | Value::ExactComplex(_) => Ok(true),
         Value::Decimal(_) | Value::Complex(_) => Ok(false),
         _ => Err(EvalError::TypeError {
             expected: "number?",
@@ -1190,6 +1252,7 @@ fn zero_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError>
     match value {
         Value::Integer(n) => Ok(n.is_zero()),
         Value::Rational(n) => Ok(n.is_zero()),
+        Value::ExactComplex(n) => Ok(n.re.is_zero() && n.im.is_zero()),
         Value::Decimal(n) => Ok(n.is_zero()),
         Value::Complex(n) => Ok(n.re.is_zero() && n.im.is_zero()),
         _ => Err(EvalError::TypeError {
@@ -1219,6 +1282,11 @@ fn real_ordering(value: &Value, span: SourceSpan) -> Result<Ordering, EvalError>
     match value {
         Value::Integer(n) => Ok(n.cmp(&BigInt::zero())),
         Value::Rational(n) => Ok(n.cmp(&BigRational::zero())),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(n.re.cmp(&BigRational::zero())),
+        Value::ExactComplex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
         Value::Decimal(n) => Ok(decimal_ordering(n)),
         Value::Complex(n) if n.im.is_zero() => Ok(decimal_ordering(&n.re)),
         Value::Complex(_) => Err(EvalError::TypeError {
@@ -1246,6 +1314,11 @@ fn numeric_abs(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Integer(n) => Ok(Value::Integer(n.abs())),
         Value::Rational(n) => Ok(exact_number(n.abs())),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(exact_number(n.re.abs())),
+        Value::ExactComplex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
         Value::Decimal(n) => Ok(Value::Decimal(n.abs())),
         Value::Complex(n) if n.im.is_zero() => Ok(Value::Decimal(n.re.abs())),
         Value::Complex(_) => Err(EvalError::TypeError {
@@ -1283,7 +1356,7 @@ fn numeric_extreme(
 
     if numbers
         .iter()
-        .any(|number| number.is_decimal() || number.is_complex())
+        .any(|number| number.is_decimal() || number.is_inexact_complex())
     {
         let mut numbers = numbers.iter().map(NumberValue::to_decimal);
         let first = numbers
@@ -1372,6 +1445,11 @@ fn numeric_round(
     unary(args, span.clone(), |value| match value {
         Value::Integer(n) => Ok(Value::Integer(n)),
         Value::Rational(n) => Ok(exact_number(exact(&n))),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(exact_number(exact(&n.re))),
+        Value::ExactComplex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
         Value::Decimal(n) => Ok(Value::Decimal(n.with_scale_round(0, decimal))),
         Value::Complex(n) if n.im.is_zero() => {
             Ok(Value::Decimal(n.re.with_scale_round(0, decimal)))
@@ -1405,6 +1483,7 @@ fn exact_to_inexact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
     unary(args, span.clone(), |value| match value {
         Value::Integer(n) => Ok(Value::Decimal(BigDecimal::from(n))),
         Value::Rational(n) => Ok(Value::Decimal(rational_to_decimal(&n))),
+        Value::ExactComplex(n) => Ok(Value::Complex(exact_complex_to_decimal(&n))),
         Value::Decimal(_) | Value::Complex(_) => Ok(value),
         _ => Err(EvalError::TypeError {
             expected: "number?",
@@ -1416,12 +1495,12 @@ fn exact_to_inexact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
 fn inexact_to_exact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Integer(_) | Value::Rational(_) => Ok(value),
+        Value::ExactComplex(_) => Ok(value),
         Value::Decimal(n) => decimal_to_rational(&n, span).map(exact_number),
-        Value::Complex(n) if n.im.is_zero() => decimal_to_rational(&n.re, span).map(exact_number),
-        Value::Complex(_) => Err(EvalError::TypeError {
-            expected: "real number?",
-            span,
-        }),
+        Value::Complex(n) => Ok(exact_complex_value(Complex::new(
+            decimal_to_rational(&n.re, span.clone())?,
+            decimal_to_rational(&n.im, span)?,
+        ))),
         _ => Err(EvalError::TypeError {
             expected: "number?",
             span,
@@ -1436,6 +1515,10 @@ fn make_rectangular(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
         actual,
         span: span.clone(),
     })?;
+
+    if let (Some(real), Some(imaginary)) = (real_to_exact(&real), real_to_exact(&imaginary)) {
+        return Ok(exact_complex_value(Complex::new(real, imaginary)));
+    }
 
     Ok(Value::Complex(Complex::new(
         real_to_decimal(real, span.clone())?,
@@ -1462,6 +1545,7 @@ fn make_polar(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 fn real_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) => Ok(value),
+        Value::ExactComplex(n) => Ok(exact_number(n.re)),
         Value::Complex(n) => Ok(Value::Decimal(n.re)),
         _ => Err(EvalError::TypeError {
             expected: "number?",
@@ -1473,6 +1557,7 @@ fn real_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 fn imag_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Integer(_) | Value::Rational(_) => Ok(Value::Integer(BigInt::zero())),
+        Value::ExactComplex(n) => Ok(exact_number(n.im)),
         Value::Decimal(_) => Ok(Value::Decimal(decimal_zero())),
         Value::Complex(n) => Ok(Value::Decimal(n.im)),
         _ => Err(EvalError::TypeError {
@@ -1626,6 +1711,7 @@ fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
     match base {
         Value::Integer(n) => Ok(exact_number(BigRational::from_integer(n).pow(exponent))),
         Value::Rational(n) => Ok(exact_number(n.pow(exponent))),
+        Value::ExactComplex(n) => Ok(exact_complex_value(exact_complex_pow(n, exponent))),
         Value::Decimal(n) => Ok(Value::Decimal(decimal_pow(n, exponent))),
         Value::Complex(n) => Ok(Value::Complex(complex_pow(n, exponent))),
         _ => Err(EvalError::TypeError {
@@ -1639,6 +1725,7 @@ fn value_is_numeric_zero(value: &Value) -> bool {
     match value {
         Value::Integer(n) => n.is_zero(),
         Value::Rational(n) => n.is_zero(),
+        Value::ExactComplex(n) => n.re.is_zero() && n.im.is_zero(),
         Value::Decimal(n) => n.is_zero(),
         Value::Complex(n) => n.re.is_zero() && n.im.is_zero(),
         _ => false,
@@ -1649,6 +1736,15 @@ fn decimal_pow(base: BigDecimal, exponent: i32) -> BigDecimal {
     let power = pow_nonnegative(base, exponent.unsigned_abs(), decimal_one());
     if exponent.is_negative() {
         decimal_one() / power
+    } else {
+        power
+    }
+}
+
+fn exact_complex_pow(base: Complex<BigRational>, exponent: i32) -> Complex<BigRational> {
+    let power = pow_nonnegative(base, exponent.unsigned_abs(), exact_complex_one());
+    if exponent.is_negative() {
+        exact_complex_one() / power
     } else {
         power
     }
@@ -1692,6 +1788,11 @@ fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalErr
     match value {
         Value::Integer(n) => Ok(BigDecimal::from(n)),
         Value::Rational(n) => Ok(rational_to_decimal(&n)),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(rational_to_decimal(&n.re)),
+        Value::ExactComplex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
         Value::Decimal(n) => Ok(n),
         Value::Complex(n) if n.im.is_zero() => Ok(n.re),
         Value::Complex(_) => Err(EvalError::TypeError {
@@ -1709,6 +1810,11 @@ fn real_to_rational(value: Value, span: SourceSpan) -> Result<BigRational, EvalE
     match value {
         Value::Integer(n) => Ok(BigRational::from_integer(n)),
         Value::Rational(n) => Ok(n),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(n.re),
+        Value::ExactComplex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
         Value::Decimal(n) => decimal_to_rational(&n, span),
         Value::Complex(n) if n.im.is_zero() => decimal_to_rational(&n.re, span),
         Value::Complex(_) => Err(EvalError::TypeError {
@@ -1722,6 +1828,15 @@ fn real_to_rational(value: Value, span: SourceSpan) -> Result<BigRational, EvalE
     }
 }
 
+fn real_to_exact(value: &Value) -> Option<BigRational> {
+    match value {
+        Value::Integer(n) => Some(BigRational::from_integer(n.clone())),
+        Value::Rational(n) => Some(n.clone()),
+        Value::ExactComplex(n) if n.im.is_zero() => Some(n.re.clone()),
+        _ => None,
+    }
+}
+
 fn number_to_complex_decimal(
     value: Value,
     span: SourceSpan,
@@ -1729,6 +1844,7 @@ fn number_to_complex_decimal(
     match value {
         Value::Integer(n) => Ok(Complex::new(BigDecimal::from(n), decimal_zero())),
         Value::Rational(n) => Ok(Complex::new(rational_to_decimal(&n), decimal_zero())),
+        Value::ExactComplex(n) => Ok(exact_complex_to_decimal(&n)),
         Value::Decimal(n) => Ok(Complex::new(n, decimal_zero())),
         Value::Complex(n) => Ok(n),
         _ => Err(EvalError::TypeError {
@@ -1803,6 +1919,7 @@ fn exact_integer(value: &Value, span: SourceSpan) -> Result<BigInt, EvalError> {
     match value {
         Value::Integer(n) => Ok(n.clone()),
         Value::Rational(n) if n.is_integer() => Ok(n.to_integer()),
+        Value::ExactComplex(n) if n.im.is_zero() && n.re.is_integer() => Ok(n.re.to_integer()),
         _ => Err(EvalError::TypeError {
             expected: "exact integer?",
             span,
@@ -1814,6 +1931,7 @@ fn exact_rational(value: &Value, span: SourceSpan) -> Result<BigRational, EvalEr
     match value {
         Value::Integer(n) => Ok(BigRational::from_integer(n.clone())),
         Value::Rational(n) => Ok(n.clone()),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(n.re.clone()),
         _ => Err(EvalError::TypeError {
             expected: "exact rational?",
             span,
@@ -1826,17 +1944,23 @@ impl NumberValue {
         matches!(self, Self::Decimal(_))
     }
 
-    fn is_complex(&self) -> bool {
+    fn is_exact_complex(&self) -> bool {
+        matches!(self, Self::ExactComplex(_))
+    }
+
+    fn is_inexact_complex(&self) -> bool {
         matches!(self, Self::Complex(_))
     }
 
     fn is_non_real_complex(&self) -> bool {
-        matches!(self, Self::Complex(n) if !n.im.is_zero())
+        matches!(self, Self::ExactComplex(n) if !n.im.is_zero())
+            || matches!(self, Self::Complex(n) if !n.im.is_zero())
     }
 
     fn is_zero(&self) -> bool {
         match self {
             Self::Exact(n) => n.is_zero(),
+            Self::ExactComplex(n) => n.re.is_zero() && n.im.is_zero(),
             Self::Decimal(n) => n.is_zero(),
             Self::Complex(n) => n.re.is_zero() && n.im.is_zero(),
         }
@@ -1845,7 +1969,8 @@ impl NumberValue {
     fn into_exact(self) -> BigRational {
         match self {
             Self::Exact(n) => n,
-            Self::Decimal(_) | Self::Complex(_) => {
+            Self::ExactComplex(n) if n.im.is_zero() => n.re,
+            Self::ExactComplex(_) | Self::Decimal(_) | Self::Complex(_) => {
                 unreachable!("numeric promotion should handle inexact numbers first")
             }
         }
@@ -1854,19 +1979,39 @@ impl NumberValue {
     fn to_decimal(&self) -> BigDecimal {
         match self {
             Self::Exact(n) => rational_to_decimal(n),
+            Self::ExactComplex(n) if n.im.is_zero() => rational_to_decimal(&n.re),
             Self::Decimal(n) => n.clone(),
             Self::Complex(n) if n.im.is_zero() => n.re.clone(),
-            Self::Complex(_) => unreachable!("non-real complex numbers should be rejected"),
+            Self::ExactComplex(_) | Self::Complex(_) => {
+                unreachable!("non-real complex numbers should be rejected")
+            }
         }
     }
 
-    fn to_complex(&self) -> Complex<BigDecimal> {
+    fn to_complex_exact(&self) -> Complex<BigRational> {
+        match self {
+            Self::Exact(n) => Complex::new(n.clone(), BigRational::zero()),
+            Self::ExactComplex(n) => n.clone(),
+            Self::Decimal(_) | Self::Complex(_) => {
+                unreachable!("numeric promotion should handle inexact numbers first")
+            }
+        }
+    }
+
+    fn to_complex_decimal(&self) -> Complex<BigDecimal> {
         match self {
             Self::Exact(n) => Complex::new(rational_to_decimal(n), decimal_zero()),
+            Self::ExactComplex(n) => exact_complex_to_decimal(n),
             Self::Decimal(n) => Complex::new(n.clone(), decimal_zero()),
             Self::Complex(n) => n.clone(),
         }
     }
+}
+
+fn promotes_to_decimal_complex(numbers: &[NumberValue]) -> bool {
+    numbers.iter().any(NumberValue::is_inexact_complex)
+        || (numbers.iter().any(NumberValue::is_exact_complex)
+            && numbers.iter().any(NumberValue::is_decimal))
 }
 
 fn fold_subtract<T>(numbers: Vec<T>) -> T
@@ -1903,12 +2048,35 @@ fn rational_to_decimal(number: &BigRational) -> BigDecimal {
     BigDecimal::from(number.numer().clone()) / BigDecimal::from(number.denom().clone())
 }
 
+fn exact_rational_to_string(number: &BigRational) -> String {
+    if number.denom() == &BigInt::one() {
+        number.numer().to_string()
+    } else {
+        format!("{}/{}", number.numer(), number.denom())
+    }
+}
+
+fn exact_complex_to_decimal(number: &Complex<BigRational>) -> Complex<BigDecimal> {
+    Complex::new(
+        rational_to_decimal(&number.re),
+        rational_to_decimal(&number.im),
+    )
+}
+
 fn decimal_zero() -> BigDecimal {
     BigDecimal::from(0)
 }
 
 fn decimal_one() -> BigDecimal {
     BigDecimal::from(1)
+}
+
+fn exact_complex_zero() -> Complex<BigRational> {
+    Complex::new(BigRational::zero(), BigRational::zero())
+}
+
+fn exact_complex_one() -> Complex<BigRational> {
+    Complex::new(BigRational::one(), BigRational::zero())
 }
 
 fn complex_zero() -> Complex<BigDecimal> {
@@ -3051,9 +3219,11 @@ fn number_to_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
 
     if radix == 10 {
         return match number {
-            Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_) => {
-                Ok(string_value(number.to_string()))
-            }
+            Value::Integer(_)
+            | Value::Rational(_)
+            | Value::ExactComplex(_)
+            | Value::Decimal(_)
+            | Value::Complex(_) => Ok(string_value(number.to_string())),
             _ => Err(EvalError::TypeError {
                 expected: "number?",
                 span,
@@ -3221,6 +3391,18 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Integer(left), Value::Rational(right))
         | (Value::Rational(right), Value::Integer(left)) => {
             &BigRational::from_integer(left.clone()) == right
+        }
+        (Value::ExactComplex(left), Value::ExactComplex(right)) => left == right,
+        (Value::ExactComplex(left), Value::Integer(right))
+        | (Value::Integer(right), Value::ExactComplex(left)) => {
+            left == &Complex::new(
+                BigRational::from_integer(right.clone()),
+                BigRational::zero(),
+            )
+        }
+        (Value::ExactComplex(left), Value::Rational(right))
+        | (Value::Rational(right), Value::ExactComplex(left)) => {
+            left == &Complex::new(right.clone(), BigRational::zero())
         }
         (Value::Decimal(left), Value::Decimal(right)) => left == right,
         (Value::Complex(left), Value::Complex(right)) => left == right,
@@ -3864,6 +4046,7 @@ fn value_to_datum(value: Value, span: SourceSpan) -> Result<Spanned<Datum>, Eval
     let datum = match value {
         Value::Integer(n) => Datum::Atom(Atom::Integer(n)),
         Value::Rational(n) => Datum::Atom(Atom::Real(n.numer().clone(), n.denom().clone())),
+        Value::ExactComplex(n) => Datum::Atom(Atom::Complex(exact_complex_to_decimal(&n))),
         Value::Decimal(n) => Datum::Atom(Atom::Decimal(n)),
         Value::Complex(n) => Datum::Atom(Atom::Complex(n)),
         Value::Boolean(value) => Datum::Atom(Atom::Boolean(value)),
@@ -4030,6 +4213,14 @@ fn exact_number(number: BigRational) -> Value {
     }
 }
 
+fn exact_complex_value(number: Complex<BigRational>) -> Value {
+    if number.im.is_zero() {
+        exact_number(number.re)
+    } else {
+        Value::ExactComplex(number)
+    }
+}
+
 fn empty_list() -> Value {
     Value::List(Vec::new())
 }
@@ -4139,6 +4330,14 @@ fn write_value(value: &Value, f: &mut fmt::Formatter<'_>, stack: &mut WriteStack
     match value {
         Value::Integer(n) => write!(f, "{n}"),
         Value::Rational(n) => write!(f, "{}/{}", n.numer(), n.denom()),
+        Value::ExactComplex(n) => {
+            let real = exact_rational_to_string(&n.re);
+            if n.im.is_negative() {
+                write!(f, "{}-{}i", real, exact_rational_to_string(&n.im.abs()))
+            } else {
+                write!(f, "{}+{}i", real, exact_rational_to_string(&n.im))
+            }
+        }
         Value::Decimal(n) => write!(f, "{n}"),
         Value::Complex(n) => {
             let imaginary = n.im.to_string();
@@ -4651,6 +4850,16 @@ mod tests {
         assert_eq!(eval_one("(inexact? (exact->inexact 1))"), "#t");
         assert_eq!(eval_one("(exact? (inexact->exact 1.25))"), "#t");
         assert_eq!(eval_one("(make-rectangular 1 2)"), "1+2i");
+        assert_eq!(eval_one("(exact? (make-rectangular 1 2))"), "#t");
+        assert_eq!(eval_one("(inexact? (make-rectangular 1 2))"), "#f");
+        assert_eq!(eval_one("(exact? (+ (make-rectangular 1 2) 3))"), "#t");
+        assert_eq!(eval_one("(real-part (make-rectangular 3/2 5/2))"), "3/2");
+        assert_eq!(eval_one("(imag-part (make-rectangular 3/2 5/2))"), "5/2");
+        assert_eq!(eval_one("(inexact->exact 1.5+2.5i)"), "3/2+5/2i");
+        assert_eq!(
+            eval_one("(inexact? (exact->inexact (make-rectangular 1 2)))"),
+            "#t"
+        );
         assert_eq!(eval_one("(make-polar 2 0)"), "2+0i");
         assert_eq!(eval_one("(real-part 1+2i)"), "1");
         assert_eq!(eval_one("(imag-part 1+2i)"), "2");
