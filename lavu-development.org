@@ -267,6 +267,9 @@ Scheme value is valid.
   other.
 - Treat =(not (predicate? x))= as a positive refinement for the alternate
   branch.
+** REPL Highlighting
+- Keep highlighter categories current with the active syntax, including
+  =set!= and quote/quasiquote/unquote spellings.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.

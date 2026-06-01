@@ -171,7 +171,7 @@ pub enum Token {
 pub fn special_forms() -> &'static [&'static str] {
     &[
         "define",
-        //"set!",
+        "set!",
         "lambda",
         "if",
         "cond",
@@ -184,10 +184,10 @@ pub fn special_forms() -> &'static [&'static str] {
         "begin",
         "do",
         "delay",
-        "qoute",
-        "quasiqoute",
-        "unqoute",
-        "unqoute-splicing",
+        "quote",
+        "quasiquote",
+        "unquote",
+        "unquote-splicing",
         "else",
     ]
 }
@@ -362,6 +362,17 @@ mod tests {
         assert_eq!(tokens[5].0, Token::Backquote);
         assert_eq!(tokens[10].0, Token::Unquote);
         assert_eq!(tokens[15].0, Token::UnquoteSplicing);
+    }
+
+    #[test]
+    fn recognizes_highlight_categories() {
+        assert!(is_special_form("set!"));
+        assert!(is_special_form("quote"));
+        assert!(is_special_form("quasiquote"));
+        assert!(is_special_form("unquote"));
+        assert!(is_special_form("unquote-splicing"));
+        assert!(is_predicate("number?"));
+        assert!(is_conversion("exact->inexact"));
     }
 
     #[test]
