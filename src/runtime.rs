@@ -209,7 +209,7 @@ pub enum EvalError {
     #[error("cannot apply non-procedure")]
     NotProcedure { span: SourceSpan },
 
-    #[error("wrong number of arguments")]
+    #[error("wrong number of arguments: expected {expected}, got {actual}")]
     ArityMismatch {
         expected: usize,
         actual: usize,
@@ -3993,6 +3993,14 @@ mod tests {
         let program = classify_program(&datums).unwrap();
         let env = Env::new();
         eval_program(&program, &env).unwrap_err()
+    }
+
+    #[test]
+    fn displays_eval_error_details() {
+        assert_eq!(
+            eval_error("(car)").to_string(),
+            "wrong number of arguments: expected 1, got 0"
+        );
     }
 
     #[test]
