@@ -161,6 +161,22 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new("load", Type::procedure(vec![Type::String], Type::Unknown)),
         Primitive::new(
+            "eval",
+            Type::procedure(vec![Type::Any, Type::Any], Type::Any),
+        ),
+        Primitive::new(
+            "scheme-report-environment",
+            Type::procedure(vec![Type::Number], Type::Any),
+        ),
+        Primitive::new(
+            "null-environment",
+            Type::procedure(vec![Type::Number], Type::Any),
+        ),
+        Primitive::new(
+            "interaction-environment",
+            Type::procedure(vec![], Type::Any),
+        ),
+        Primitive::new(
             "close-output-port",
             Type::procedure(vec![Type::OutputPort], Type::Unknown),
         ),
@@ -952,6 +968,17 @@ mod tests {
         assert_eq!(
             primitive("load").unwrap().signature.to_string(),
             "(-> string? unknown?)"
+        );
+        assert_eq!(
+            primitive("eval").unwrap().signature.to_string(),
+            "(-> any? any? any?)"
+        );
+        assert_eq!(
+            primitive("interaction-environment")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> any?)"
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),

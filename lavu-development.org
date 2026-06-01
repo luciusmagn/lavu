@@ -414,6 +414,10 @@ Scheme value is valid.
 ** Load
 - Add native =load= over the current evaluator environment, so loaded
   top-level definitions are visible to following expressions.
+** Eval Environments
+- Add conservative environment values with =scheme-report-environment=,
+  =null-environment=, =interaction-environment=, and native =eval= over
+  datum-shaped runtime values.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
   =display= raw.

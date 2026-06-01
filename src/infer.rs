@@ -1110,6 +1110,11 @@ mod tests {
             "any?"
         );
         assert_eq!(infer_one("(load \"x\")"), "unknown?");
+        assert_eq!(
+            infer_one("(eval '(+ 1 2) (scheme-report-environment 5))"),
+            "any?"
+        );
+        assert_eq!(infer_one("(interaction-environment)"), "any?");
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 

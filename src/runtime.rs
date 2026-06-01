@@ -35,6 +35,7 @@ pub enum Value {
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
+    Environment(Env),
     Values(Vec<Value>),
     EofObject,
     Unspecified,
@@ -64,6 +65,7 @@ impl PartialEq for Value {
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
+            (Value::Environment(left), Value::Environment(right)) => Rc::ptr_eq(&left.0, &right.0),
             (Value::Values(left), Value::Values(right)) => left == right,
             (Value::EofObject, Value::EofObject)
             | (Value::Unspecified, Value::Unspecified)
@@ -229,11 +231,15 @@ struct Frame {
 }
 
 impl Env {
-    pub fn new() -> Self {
-        let env = Self(Rc::new(RefCell::new(Frame {
+    pub fn empty() -> Self {
+        Self(Rc::new(RefCell::new(Frame {
             bindings: HashMap::new(),
             parent: None,
-        })));
+        })))
+    }
+
+    pub fn new() -> Self {
+        let env = Self::empty();
         env.install_primitives();
         env
     }
@@ -373,6 +379,10 @@ impl Env {
             "with-input-from-file",
             "with-output-to-file",
             "load",
+            "eval",
+            "scheme-report-environment",
+            "null-environment",
+            "interaction-environment",
             "close-input-port",
             "close-output-port",
             "read",
@@ -564,6 +574,9 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
                 .collect::<Result<Vec<_>, _>>()?;
             match procedure {
                 Value::Primitive("load") => load(args, expr.span.clone(), env),
+                Value::Primitive("interaction-environment") => {
+                    interaction_environment(args, expr.span.clone(), env)
+                }
                 procedure => apply(procedure, args, expr.span.clone()),
             }
         }
@@ -794,6 +807,13 @@ fn apply_primitive(
         "with-output-to-file" => with_output_to_file(args, span),
         "load" => Err(EvalError::TypeError {
             expected: "direct load call?",
+            span,
+        }),
+        "eval" => eval_value(args, span),
+        "scheme-report-environment" => scheme_report_environment(args, span),
+        "null-environment" => null_environment(args, span),
+        "interaction-environment" => Err(EvalError::TypeError {
+            expected: "direct interaction-environment call?",
             span,
         }),
         "close-input-port" => close_input_port(args, span),
@@ -2605,6 +2625,68 @@ fn load(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalErro
     })
 }
 
+fn eval_value(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [expr, environment]: [Value; 2] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 2,
+            actual,
+            span: span.clone(),
+        })?;
+    let Value::Environment(env) = environment else {
+        return Err(EvalError::TypeError {
+            expected: "environment?",
+            span,
+        });
+    };
+
+    let datum = value_to_datum(expr, span.clone())?;
+    let expr = classify_expr(&datum).map_err(|error| EvalError::ReadError {
+        message: error.to_string(),
+        span: span.clone(),
+    })?;
+    eval_expr(&expr, &env)
+}
+
+fn scheme_report_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    require_environment_version(args, span)?;
+    Ok(Value::Environment(Env::new()))
+}
+
+fn null_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    require_environment_version(args, span)?;
+    Ok(Value::Environment(Env::empty()))
+}
+
+fn interaction_environment(
+    args: Vec<Value>,
+    span: SourceSpan,
+    env: &Env,
+) -> Result<Value, EvalError> {
+    if !args.is_empty() {
+        return Err(EvalError::ArityMismatch {
+            expected: 0,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    Ok(Value::Environment(env.clone()))
+}
+
+fn require_environment_version(args: Vec<Value>, span: SourceSpan) -> Result<(), EvalError> {
+    let version = unary(args, span.clone(), |value| {
+        exact_integer(&value, span.clone()).map(Value::Integer)
+    })?;
+    match version {
+        Value::Integer(version) if version == BigInt::from(5) => Ok(()),
+        _ => Err(EvalError::TypeError {
+            expected: "R5RS version 5?",
+            span,
+        }),
+    }
+}
+
 fn close_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         let port = output_port(value, span)?;
@@ -2940,6 +3022,7 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
         (Value::InputPort(left), Value::InputPort(right)) => left == right,
         (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
+        (Value::Environment(left), Value::Environment(right)) => Rc::ptr_eq(&left.0, &right.0),
         (Value::EofObject, Value::EofObject) => true,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
@@ -3451,6 +3534,73 @@ fn abbreviation_to_value(name: &'static str, datum: &Spanned<Datum>) -> Result<V
     ]))
 }
 
+fn value_to_datum(value: Value, span: SourceSpan) -> Result<Spanned<Datum>, EvalError> {
+    let datum = match value {
+        Value::Integer(n) => Datum::Atom(Atom::Integer(n)),
+        Value::Rational(n) => Datum::Atom(Atom::Real(n.numer().clone(), n.denom().clone())),
+        Value::Decimal(n) => Datum::Atom(Atom::Decimal(n)),
+        Value::Complex(n) => Datum::Atom(Atom::Complex(n)),
+        Value::Boolean(value) => Datum::Atom(Atom::Boolean(value)),
+        Value::Character(ch) => Datum::Atom(Atom::Character(ch)),
+        Value::String(text) => Datum::Atom(Atom::String(text.borrow().clone())),
+        Value::Symbol(name) => Datum::Atom(Atom::Identifier(name)),
+        Value::List(items) => Datum::List(
+            items
+                .into_iter()
+                .map(|item| value_to_datum(item, span.clone()))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Pair(pair) => {
+            let pair = pair.borrow();
+            return pair_to_datum(pair.car.clone(), pair.cdr.clone(), span);
+        }
+        Value::Vector(items) => Datum::Vector(
+            items
+                .borrow()
+                .clone()
+                .into_iter()
+                .map(|item| value_to_datum(item, span.clone()))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        _ => {
+            return Err(EvalError::TypeError {
+                expected: "datum?",
+                span,
+            });
+        }
+    };
+
+    Ok(Spanned::new(datum, span))
+}
+
+fn pair_to_datum(car: Value, cdr: Value, span: SourceSpan) -> Result<Spanned<Datum>, EvalError> {
+    let mut items = vec![value_to_datum(car, span.clone())?];
+    let mut tail = cdr;
+
+    loop {
+        match tail {
+            Value::List(values) => {
+                items.extend(
+                    values
+                        .into_iter()
+                        .map(|value| value_to_datum(value, span.clone()))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                return Ok(Spanned::new(Datum::List(items), span));
+            }
+            Value::Pair(pair) => {
+                let pair = pair.borrow();
+                items.push(value_to_datum(pair.car.clone(), span.clone())?);
+                tail = pair.cdr.clone();
+            }
+            value => {
+                let tail = value_to_datum(value, span.clone())?;
+                return Ok(Spanned::new(Datum::DottedList(items, Box::new(tail)), span));
+            }
+        }
+    }
+}
+
 fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Value, EvalError> {
     match &datum.node {
         Datum::Unquote(inner) if level == 0 => eval_unquoted(inner, env),
@@ -3624,6 +3774,7 @@ impl fmt::Display for Value {
                 write!(f, ")")
             }
             Value::EofObject => write!(f, "#<eof>"),
+            Value::Environment(_) => write!(f, "#<environment>"),
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
@@ -3994,6 +4145,23 @@ mod tests {
 
         assert_eq!(eval_one(&input), "41");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn evaluates_eval_with_environments() {
+        assert_eq!(
+            eval_one("(eval '(+ 1 2) (scheme-report-environment 5))"),
+            "3"
+        );
+        assert_eq!(
+            eval_one("(eval '((lambda (x) x) 7) (null-environment 5))"),
+            "7"
+        );
+        assert_eq!(
+            eval_one("(define x 4) (eval 'x (interaction-environment))"),
+            "4"
+        );
+        assert_eq!(eval_one("(interaction-environment)"), "#<environment>");
     }
 
     #[test]
