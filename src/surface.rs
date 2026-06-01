@@ -21,6 +21,7 @@ pub enum Expr {
     Literal(Atom),
     Variable(String),
     Quote(Box<Spanned<Datum>>),
+    Quasiquote(Box<Spanned<Datum>>),
     Lambda {
         params: Vec<Spanned<String>>,
         body: Vec<Spanned<Expr>>,
@@ -100,10 +101,10 @@ pub fn classify_expr(datum: &Spanned<Datum>) -> Result<Spanned<Expr>, SurfaceErr
         Datum::Atom(Atom::Identifier(name)) => Expr::Variable(name.clone()),
         Datum::Atom(atom) => Expr::Literal(atom.clone()),
         Datum::Quote(inner) => Expr::Quote(inner.clone()),
+        Datum::Quasiquote(inner) => Expr::Quasiquote(inner.clone()),
         Datum::List(items) => classify_list(datum.span.clone(), datum.origin, items)?,
         Datum::DottedList(_, _)
         | Datum::Vector(_)
-        | Datum::Quasiquote(_)
         | Datum::Unquote(_)
         | Datum::UnquoteSplicing(_) => {
             return Err(SurfaceError::UnsupportedDatum {
@@ -131,6 +132,7 @@ fn classify_list(
     let head_name = identifier_name(head);
     match head_name.as_deref() {
         Some("quote") => parse_quote(span, rest),
+        Some("quasiquote") => parse_quasiquote(span, rest),
         Some("lambda") => parse_lambda(rest),
         Some("if") => parse_if(rest),
         Some("begin") => parse_begin(rest),
@@ -226,6 +228,18 @@ fn parse_quote(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfac
     }
 
     Ok(Expr::Quote(Box::new(rest[0].clone())))
+}
+
+fn parse_quasiquote(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+    if rest.len() != 1 {
+        return Err(SurfaceError::BadArity {
+            form: "quasiquote",
+            expected: "one datum",
+            span,
+        });
+    }
+
+    Ok(Expr::Quasiquote(Box::new(rest[0].clone())))
 }
 
 fn parse_lambda(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
@@ -1096,6 +1110,18 @@ mod tests {
         };
 
         assert_eq!(payload.span, 1..10);
+    }
+
+    #[test]
+    fn classifies_quasiquote_payload_as_datum() {
+        let datums = parse("`(a ,b)").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        let TopLevel::Expr(Expr::Quasiquote(payload)) = form.node else {
+            panic!("expected quasiquote");
+        };
+
+        assert_eq!(payload.span, 1..7);
     }
 
     #[test]

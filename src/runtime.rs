@@ -7,7 +7,7 @@ use bigdecimal::BigDecimal;
 use num::{BigInt, BigRational, Complex};
 use thiserror::Error;
 
-use crate::surface::{Expr, Program, TopLevel};
+use crate::surface::{Expr, Program, TopLevel, classify_expr};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
 #[derive(Debug, Clone)]
@@ -252,6 +252,7 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
             }),
         },
         Expr::Quote(datum) => datum_to_value(datum),
+        Expr::Quasiquote(datum) => eval_quasiquote(datum, env, 0),
         Expr::Lambda { params, body } => Ok(Value::Procedure(Rc::new(Procedure {
             params: params.iter().map(|param| param.node.clone()).collect(),
             body: body.to_vec(),
@@ -850,14 +851,94 @@ fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
             .map(datum_to_value)
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Vector),
-        Datum::Quote(inner) => datum_to_value(inner),
-        Datum::Quasiquote(_) | Datum::Unquote(_) | Datum::UnquoteSplicing(_) => {
-            Err(EvalError::TypeError {
-                expected: "implemented quote datum",
-                span: datum.span.clone(),
-            })
+        Datum::Quote(inner) => abbreviation_to_value("quote", inner),
+        Datum::Quasiquote(inner) => abbreviation_to_value("quasiquote", inner),
+        Datum::Unquote(inner) => abbreviation_to_value("unquote", inner),
+        Datum::UnquoteSplicing(inner) => abbreviation_to_value("unquote-splicing", inner),
+    }
+}
+
+fn abbreviation_to_value(name: &'static str, datum: &Spanned<Datum>) -> Result<Value, EvalError> {
+    Ok(Value::List(vec![
+        Value::Symbol(name.to_string()),
+        datum_to_value(datum)?,
+    ]))
+}
+
+fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Value, EvalError> {
+    match &datum.node {
+        Datum::Unquote(inner) if level == 0 => eval_unquoted(inner, env),
+        Datum::Unquote(inner) => Ok(Value::List(vec![
+            Value::Symbol("unquote".to_string()),
+            eval_quasiquote(inner, env, level - 1)?,
+        ])),
+        Datum::UnquoteSplicing(_) if level == 0 => Err(EvalError::TypeError {
+            expected: "unquote-splicing inside quasiquote list",
+            span: datum.span.clone(),
+        }),
+        Datum::UnquoteSplicing(inner) => Ok(Value::List(vec![
+            Value::Symbol("unquote-splicing".to_string()),
+            eval_quasiquote(inner, env, level - 1)?,
+        ])),
+        Datum::Quasiquote(inner) => Ok(Value::List(vec![
+            Value::Symbol("quasiquote".to_string()),
+            eval_quasiquote(inner, env, level + 1)?,
+        ])),
+        Datum::List(items) => eval_quasiquote_list(items, None, env, level),
+        Datum::DottedList(items, tail) => {
+            eval_quasiquote_list(items, Some(tail.as_ref()), env, level)
+        }
+        Datum::Vector(items) => items
+            .iter()
+            .map(|item| eval_quasiquote(item, env, level))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Vector),
+        Datum::Atom(_) | Datum::Quote(_) => datum_to_value(datum),
+    }
+}
+
+fn eval_quasiquote_list(
+    items: &[Spanned<Datum>],
+    tail: Option<&Spanned<Datum>>,
+    env: &Env,
+    level: usize,
+) -> Result<Value, EvalError> {
+    let mut values = Vec::new();
+
+    for item in items {
+        match &item.node {
+            Datum::UnquoteSplicing(inner) if level == 0 => match eval_unquoted(inner, env)? {
+                Value::List(spliced) => values.extend(spliced),
+                _ => {
+                    return Err(EvalError::TypeError {
+                        expected: "list?",
+                        span: inner.span.clone(),
+                    });
+                }
+            },
+            _ => values.push(eval_quasiquote(item, env, level)?),
         }
     }
+
+    match tail {
+        Some(tail) => {
+            let tail = eval_quasiquote(tail, env, level)?;
+            Ok(values
+                .into_iter()
+                .rev()
+                .fold(tail, |tail, head| cons_value(head, tail)))
+        }
+        None => Ok(Value::List(values)),
+    }
+}
+
+fn eval_unquoted(datum: &Spanned<Datum>, env: &Env) -> Result<Value, EvalError> {
+    let expr = classify_expr(datum).map_err(|_| EvalError::TypeError {
+        expected: "valid unquote expression",
+        span: datum.span.clone(),
+    })?;
+
+    eval_expr(&expr, env)
 }
 
 fn atom_to_value(atom: &Atom) -> Value {
@@ -1063,6 +1144,14 @@ mod tests {
     fn evaluates_quoted_dotted_lists() {
         assert_eq!(eval_one("'(1 . 2)"), "(1 . 2)");
         assert_eq!(eval_one("'(1 2 . ())"), "(1 2)");
+        assert_eq!(eval_one("''a"), "(quote a)");
+    }
+
+    #[test]
+    fn evaluates_quasiquote() {
+        assert_eq!(eval_one("`(1 ,(+ 1 2) 4)"), "(1 3 4)");
+        assert_eq!(eval_one("`(a ,@(list 1 2) b)"), "(a 1 2 b)");
+        assert_eq!(eval_one("`(1 . ,(+ 1 1))"), "(1 . 2)");
     }
 
     #[test]

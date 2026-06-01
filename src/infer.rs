@@ -112,6 +112,7 @@ impl Inferencer {
                     span: expr.span.clone(),
                 }),
             Expr::Quote(_) => Ok(Type::Any),
+            Expr::Quasiquote(_) => Ok(Type::Any),
             Expr::Lambda { params, body } => self.infer_lambda(params, body, env),
             Expr::If {
                 condition,
@@ -709,5 +710,10 @@ mod tests {
     #[test]
     fn infers_delay_conservatively() {
         assert_eq!(infer_one("(delay (+ 1 2))"), "any?");
+    }
+
+    #[test]
+    fn infers_quasiquote_conservatively() {
+        assert_eq!(infer_one("`(1 ,(+ 1 2))"), "any?");
     }
 }
