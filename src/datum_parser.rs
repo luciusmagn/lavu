@@ -46,10 +46,17 @@ pub fn parse_one(input: &str) -> Result<Option<Spanned<Datum>>, DatumParseError>
 
     while let Some(token) = lexer.next() {
         let span = lexer.span();
-        let token = token.map_err(|error| DatumParseError::Lexer {
-            error,
-            span: span.clone(),
-        })?;
+        let token = match token {
+            Ok(token) => token,
+            Err(error) => {
+                if lexer_error_starts_delimiter(input, &span)
+                    && let Some(datum) = complete_prefix_datum(&tokens)?
+                {
+                    return Ok(Some(datum));
+                }
+                return Err(DatumParseError::Lexer { error, span });
+            }
+        };
         delimiters
             .observe(&token, span.clone())
             .map_err(|error| DatumParseError::Lexer {
@@ -86,6 +93,23 @@ fn is_incomplete_prefix(error: &DatumParseError) -> bool {
         error,
         DatumParseError::UnexpectedEnd { .. } | DatumParseError::UnclosedDelimiter { .. }
     )
+}
+
+fn lexer_error_starts_delimiter(input: &str, span: &LogosSpan) -> bool {
+    input
+        .get(span.clone())
+        .is_some_and(|text| text.starts_with('"'))
+}
+
+fn complete_prefix_datum(
+    tokens: &[(Token, &str, LogosSpan)],
+) -> Result<Option<Spanned<Datum>>, DatumParseError> {
+    let mut parser = Parser::new(tokens);
+    match parser.parse_datum() {
+        Ok(datum) => Ok(Some(datum)),
+        Err(error) if is_incomplete_prefix(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 struct Parser {
@@ -376,6 +400,10 @@ mod tests {
         let datum = parse_one("  ; skip\n 2 \"unterminated").unwrap().unwrap();
         assert_eq!(datum.node, Datum::Atom(Atom::Integer(2.into())));
         assert_eq!(datum.span, 10..11);
+
+        let datum = parse_one("1\"unterminated").unwrap().unwrap();
+        assert_eq!(datum.node, Datum::Atom(Atom::Integer(1.into())));
+        assert_eq!(datum.span, 0..1);
 
         assert!(parse_one(" ; only trivia\n").unwrap().is_none());
     }
