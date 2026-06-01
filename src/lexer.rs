@@ -9,6 +9,12 @@ use std::str::FromStr;
 
 use crate::chars::{ParseCharError, parse_char};
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct SpannedLexerError {
+    pub error: LexerError,
+    pub span: Span,
+}
+
 #[derive(Error, PartialEq, Debug, Clone, Default)]
 pub enum LexerError {
     #[error("decimal parse error: {0}")]
@@ -267,6 +273,21 @@ pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
     }
 
     tokens
+}
+
+pub fn tokenize_checked(input: &str) -> Result<Vec<(Token, &str, Span)>, SpannedLexerError> {
+    let mut lexer = Token::lexer(input);
+    let mut tokens = Vec::new();
+
+    while let Some(token) = lexer.next() {
+        let span = lexer.span();
+        match token {
+            Ok(token) => tokens.push((token, &input[span.clone()], span)),
+            Err(error) => return Err(SpannedLexerError { error, span }),
+        }
+    }
+
+    Ok(tokens)
 }
 
 #[cfg(test)]

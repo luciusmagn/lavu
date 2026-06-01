@@ -69,7 +69,8 @@ fn normalize_span(input: &str, span: SourceSpan) -> SourceSpan {
 
 fn datum_span(error: &DatumParseError) -> SourceSpan {
     match error {
-        DatumParseError::UnexpectedEnd { span, .. }
+        DatumParseError::Lexer { span, .. }
+        | DatumParseError::UnexpectedEnd { span, .. }
         | DatumParseError::UnexpectedToken { span, .. }
         | DatumParseError::UnclosedDelimiter { span } => span.clone(),
     }

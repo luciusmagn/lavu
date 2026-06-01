@@ -1,11 +1,14 @@
 use logos::Span as LogosSpan;
 use thiserror::Error;
 
-use crate::lexer::{Token, tokenize};
+use crate::lexer::{LexerError, Token, tokenize_checked};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum DatumParseError {
+    #[error("lexer error: {error}")]
+    Lexer { error: LexerError, span: SourceSpan },
+
     #[error("unexpected end of input while parsing {context}")]
     UnexpectedEnd {
         context: &'static str,
@@ -29,7 +32,11 @@ struct Lexeme {
 }
 
 pub fn parse(input: &str) -> Result<Vec<Spanned<Datum>>, DatumParseError> {
-    parse_tokens(&tokenize(input))
+    let tokens = tokenize_checked(input).map_err(|error| DatumParseError::Lexer {
+        error: error.error,
+        span: error.span,
+    })?;
+    parse_tokens(&tokens)
 }
 
 pub fn parse_tokens(
@@ -254,6 +261,7 @@ fn unescape_string_token(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{DatumParseError, parse};
+    use crate::lexer::LexerError;
     use crate::syntax::{Atom, Datum};
 
     #[test]
@@ -334,5 +342,22 @@ mod tests {
                 span: 0..1
             }
         );
+    }
+
+    #[test]
+    fn reports_lexer_errors_with_spans() {
+        assert_eq!(
+            parse("#| unclosed").unwrap_err(),
+            DatumParseError::Lexer {
+                error: LexerError::UnclosedBlockComment,
+                span: 0..2,
+            }
+        );
+
+        let DatumParseError::Lexer { error, span } = parse("#\\notachar").unwrap_err() else {
+            panic!("expected lexer error");
+        };
+        assert!(matches!(error, LexerError::CharParseError(_)));
+        assert_eq!(span, 0..10);
     }
 }
