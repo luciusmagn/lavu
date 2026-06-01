@@ -4118,6 +4118,30 @@ mod tests {
             ),
             "4"
         );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((x (syntax-rules () ((x) 9))))
+                   (let ((x 4)) x))"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((x (syntax-rules () ((x) 9))))
+                   (let* ((x 4)) x))"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((x (syntax-rules () ((x) 9))))
+                   (letrec ((x (lambda () 4))) (x)))"
+            ),
+            "4"
+        );
     }
 
     #[test]

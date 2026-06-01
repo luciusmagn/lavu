@@ -185,6 +185,14 @@ impl MacroExpander {
         self.bindings.insert(name, rules);
     }
 
+    fn without_syntax_names(&self, names: &BTreeSet<String>) -> Self {
+        let mut expander = self.clone();
+        for name in names {
+            expander.bindings.remove(name);
+        }
+        expander
+    }
+
     fn expand(&self, datum: &Spanned<Datum>) -> Result<Spanned<Datum>, SurfaceError> {
         self.expand_with_depth(datum, 0)
     }
@@ -217,7 +225,7 @@ impl MacroExpander {
                             return self.expand_let_form(datum, items, depth);
                         }
                         "let*" | "letrec" => {
-                            return self.expand_prefixed_body_form(datum, 2, depth);
+                            return self.expand_binding_body_form(datum, items, 1, 2, depth);
                         }
                         "let-syntax" => {
                             return self.expand_local_syntax("let-syntax", datum, items, depth);
@@ -343,7 +351,8 @@ impl MacroExpander {
         } else {
             2
         };
-        self.expand_prefixed_body_form(datum, body_start, depth)
+        let binding_index = if body_start == 3 { 2 } else { 1 };
+        self.expand_binding_body_form(datum, items, binding_index, body_start, depth)
     }
 
     fn expand_literal_prefixed_body_form(
@@ -369,39 +378,75 @@ impl MacroExpander {
         })
     }
 
-    fn expand_prefixed_body_form(
-        &self,
-        datum: &Spanned<Datum>,
-        body_start: usize,
-        depth: usize,
-    ) -> Result<Spanned<Datum>, SurfaceError> {
-        let Datum::List(items) = &datum.node else {
-            return Ok(datum.clone());
-        };
-        self.expand_prefixed_body_form_from_items(datum, items, body_start, depth)
-    }
-
-    fn expand_prefixed_body_form_from_items(
+    fn expand_binding_body_form(
         &self,
         datum: &Spanned<Datum>,
         items: &[Spanned<Datum>],
+        binding_index: usize,
         body_start: usize,
         depth: usize,
     ) -> Result<Spanned<Datum>, SurfaceError> {
-        if items.len() <= body_start {
+        if items.len() <= body_start || items.len() <= binding_index {
             return self.expand_ordinary_list(datum, items, depth);
         }
 
-        let prefix = items[..body_start]
-            .iter()
-            .map(|item| self.expand_with_depth(item, depth))
-            .collect::<Result<Vec<_>, _>>()?;
-        let body = self.expand_body_items(&items[body_start..], depth + 1)?;
+        let binding_names = binding_names(&items[binding_index]);
+        let body_expander = self.without_syntax_names(&binding_names);
+        let mut expanded = items[..binding_index].to_vec();
+        expanded.push(self.expand_binding_list(&items[binding_index], depth)?);
+        expanded.extend(body_expander.expand_body_items(&items[body_start..], depth + 1)?);
 
         Ok(Spanned {
-            node: Datum::List(prefix.into_iter().chain(body).collect()),
+            node: Datum::List(expanded),
             span: datum.span.clone(),
             origin: datum.origin,
+        })
+    }
+
+    fn expand_binding_list(
+        &self,
+        datum: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(bindings) = &datum.node else {
+            return self.expand_with_depth(datum, depth);
+        };
+
+        bindings
+            .iter()
+            .map(|binding| self.expand_binding(binding, depth))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|bindings| Spanned {
+                node: Datum::List(bindings),
+                span: datum.span.clone(),
+                origin: datum.origin,
+            })
+    }
+
+    fn expand_binding(
+        &self,
+        binding: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(parts) = &binding.node else {
+            return self.expand_with_depth(binding, depth);
+        };
+        let Some((name, values)) = parts.split_first() else {
+            return Ok(binding.clone());
+        };
+
+        let mut expanded = vec![name.clone()];
+        expanded.extend(
+            values
+                .iter()
+                .map(|value| self.expand_with_depth(value, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: binding.span.clone(),
+            origin: binding.origin,
         })
     }
 
@@ -1012,6 +1057,22 @@ fn is_definition_form(datum: &Spanned<Datum>) -> bool {
         .first()
         .and_then(identifier_name)
         .is_some_and(|name| matches!(name.as_str(), "define" | "define-syntax"))
+}
+
+fn binding_names(datum: &Spanned<Datum>) -> BTreeSet<String> {
+    let Datum::List(bindings) = &datum.node else {
+        return BTreeSet::new();
+    };
+
+    bindings
+        .iter()
+        .filter_map(|binding| {
+            let Datum::List(parts) = &binding.node else {
+                return None;
+            };
+            parts.first().and_then(identifier_name)
+        })
+        .collect()
 }
 
 fn top_level_begin_body(datum: &Spanned<Datum>) -> Option<&[Spanned<Datum>]> {

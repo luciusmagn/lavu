@@ -300,6 +300,9 @@ Scheme value is valid.
   context instead of mutating it.
 - Expand body-leading internal =define-syntax= forms before parsing
   internal value definitions and body expressions.
+- Keep lambda/procedure formals and =let=/=let*=/=letrec= binding names
+  as binding syntax during macro expansion so local syntax keywords do
+  not rewrite variable binders or their scoped references.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the
