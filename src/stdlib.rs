@@ -140,6 +140,14 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::InputPort], Type::Unknown),
         ),
         Primitive::new(
+            "open-output-file",
+            Type::procedure(vec![Type::String], Type::OutputPort),
+        ),
+        Primitive::new(
+            "close-output-port",
+            Type::procedure(vec![Type::OutputPort], Type::Unknown),
+        ),
+        Primitive::new(
             "read",
             Type::rest_procedure(vec![], Type::InputPort, Type::Any),
         ),
@@ -891,6 +899,10 @@ mod tests {
         assert_eq!(
             primitive("write").unwrap().signature.to_string(),
             "(-> any? output-port? * unknown?)"
+        );
+        assert_eq!(
+            primitive("open-output-file").unwrap().signature.to_string(),
+            "(-> string? output-port?)"
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),

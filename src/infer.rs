@@ -1098,6 +1098,7 @@ mod tests {
             infer_one("(output-port? (current-output-port))"),
             "boolean?"
         );
+        assert_eq!(infer_one("(open-output-file \"x\")"), "output-port?");
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 

@@ -116,11 +116,30 @@ enum InputPortKind {
     Buffer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum OutputPort {
     Stdout,
+    File(Rc<RefCell<OutputFilePort>>),
     #[cfg(test)]
     Buffer(Rc<RefCell<String>>),
+}
+
+impl PartialEq for OutputPort {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Stdout, Self::Stdout) => true,
+            (Self::File(left), Self::File(right)) => Rc::ptr_eq(left, right),
+            #[cfg(test)]
+            (Self::Buffer(left), Self::Buffer(right)) => Rc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct OutputFilePort {
+    file: fs::File,
+    closed: bool,
 }
 
 thread_local! {
@@ -347,7 +366,9 @@ impl Env {
             "current-input-port",
             "current-output-port",
             "open-input-file",
+            "open-output-file",
             "close-input-port",
+            "close-output-port",
             "read",
             "read-char",
             "peek-char",
@@ -757,7 +778,9 @@ fn apply_primitive(
         "current-input-port" => current_input_port(args, span),
         "current-output-port" => current_output_port(args, span),
         "open-input-file" => open_input_file(args, span),
+        "open-output-file" => open_output_file(args, span),
         "close-input-port" => close_input_port(args, span),
+        "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
         "read-char" => read_char(args, span),
         "peek-char" => peek_char(args, span),
@@ -2413,6 +2436,43 @@ fn current_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, Eval
     Ok(Value::OutputPort(OutputPort::Stdout))
 }
 
+fn open_output_file(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let Value::String(path) = value else {
+            return Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            });
+        };
+        fs::File::create(path.borrow().as_str())
+            .map(|file| {
+                Value::OutputPort(OutputPort::File(Rc::new(RefCell::new(OutputFilePort {
+                    file,
+                    closed: false,
+                }))))
+            })
+            .map_err(|error| EvalError::IoError {
+                message: error.to_string(),
+                span,
+            })
+    })
+}
+
+fn close_output_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let port = output_port(value, span)?;
+        match port {
+            OutputPort::Stdout => Ok(Value::Unspecified),
+            OutputPort::File(file) => {
+                file.borrow_mut().closed = true;
+                Ok(Value::Unspecified)
+            }
+            #[cfg(test)]
+            OutputPort::Buffer(_) => Ok(Value::Unspecified),
+        }
+    })
+}
+
 fn output_value(args: Vec<Value>, span: SourceSpan, mode: OutputMode) -> Result<Value, EvalError> {
     let (value, port) = value_and_optional_output_port(args, span.clone())?;
     let text = match mode {
@@ -2507,6 +2567,23 @@ fn write_output(text: &str, port: &OutputPort, span: SourceSpan) -> Result<Value
             stdout
                 .write_all(text.as_bytes())
                 .and_then(|_| stdout.flush())
+                .map_err(|error| EvalError::IoError {
+                    message: error.to_string(),
+                    span,
+                })?;
+            Ok(Value::Unspecified)
+        }
+        OutputPort::File(file) => {
+            let mut port = file.borrow_mut();
+            if port.closed {
+                return Err(EvalError::TypeError {
+                    expected: "open output-port?",
+                    span,
+                });
+            }
+            port.file
+                .write_all(text.as_bytes())
+                .and_then(|_| port.file.flush())
                 .map_err(|error| EvalError::IoError {
                     message: error.to_string(),
                     span,
@@ -3765,6 +3842,22 @@ mod tests {
         write_char(vec![Value::Character('z'), port], 0..0).unwrap();
 
         assert_eq!(*output.borrow(), "\"x\"\nyz");
+    }
+
+    #[test]
+    fn writes_to_output_files() {
+        let path = std::env::temp_dir().join(format!("lavu-output-{}.ss", std::process::id()));
+        let input = format!(
+            "(define p (open-output-file \"{}\"))
+             (display \"x\" p)
+             (write '(a 1) p)
+             (close-output-port p)",
+            path.to_string_lossy()
+        );
+
+        assert_eq!(eval_one(&input), "#<unspecified>");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x(a 1)");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

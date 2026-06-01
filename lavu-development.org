@@ -412,7 +412,9 @@ Scheme value is valid.
 ** Output Ports
 - Add a first stdout-backed output port, plus native =current-output-port=,
   =write=, =display=, =newline=, and =write-char= with conservative
-  type metadata. File and input ports remain future R5RS work.
+  type metadata.
+- Add file-backed output ports with =open-output-file= and
+  =close-output-port=.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.
