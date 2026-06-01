@@ -4883,6 +4883,10 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#i#b101/10\")"), "2.5");
         assert_eq!(eval_one("(string->number \".5\")"), "0.5");
         assert_eq!(eval_one("(string->number \"1.\")"), "1");
+        assert_eq!(eval_one("(= (string->number \"1e2\") 100)"), "#t");
+        assert_eq!(eval_one("(string->number \"#e1e2\")"), "100");
+        assert_eq!(eval_one("(string->number \"#e1.25e1\")"), "25/2");
+        assert_eq!(eval_one("(string->number \"#e1.25e-1\")"), "1/8");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
         assert_eq!(eval_one("(string->number \"101\" 2)"), "5");
         assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
