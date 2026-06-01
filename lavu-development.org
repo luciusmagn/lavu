@@ -343,3 +343,6 @@ Scheme value is valid.
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill
   primitives with matching typed metadata.
+** Equality Primitives
+- Add typed and native =eq?= and =equal?= alongside =eqv?=, using
+  runtime identity where available and structural equality for =equal?=.

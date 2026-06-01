@@ -202,6 +202,8 @@ impl Env {
             "eof-object?",
             "not",
             "eqv?",
+            "eq?",
+            "equal?",
             "force",
             "apply",
             "cons",
@@ -437,6 +439,8 @@ fn apply_primitive(
         }
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
+        "eq?" => eq(args, span),
+        "equal?" => equal(args, span),
         "force" => force(args, span),
         "apply" => apply_procedure_argument(args, span),
         "cons" => cons(args, span),
@@ -818,6 +822,28 @@ fn eqv(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::Boolean(eqv_value(&left, &right)))
 }
 
+fn eq(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [left, right]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span,
+    })?;
+
+    Ok(Value::Boolean(eq_value(&left, &right)))
+}
+
+fn equal(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [left, right]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span,
+    })?;
+
+    Ok(Value::Boolean(equal_value(&left, &right)))
+}
+
 fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| match value {
         Value::Promise(promise) => promise.force(),
@@ -872,6 +898,38 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
+    }
+}
+
+fn eq_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Vector(left), Value::Vector(right)) => Rc::ptr_eq(left, right),
+        (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
+        (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
+        _ => eqv_value(left, right),
+    }
+}
+
+fn equal_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::List(left), Value::List(right)) => {
+            left.iter()
+                .zip(right)
+                .all(|(left, right)| equal_value(left, right))
+                && left.len() == right.len()
+        }
+        (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
+            equal_value(left_car, right_car) && equal_value(left_cdr, right_cdr)
+        }
+        (Value::Vector(left), Value::Vector(right)) => {
+            let left = left.borrow();
+            let right = right.borrow();
+            left.iter()
+                .zip(right.iter())
+                .all(|(left, right)| equal_value(left, right))
+                && left.len() == right.len()
+        }
+        _ => eqv_value(left, right),
     }
 }
 
@@ -1358,6 +1416,15 @@ mod tests {
         assert_eq!(eval_one("(char=? #\\a #\\a)"), "#t");
         assert_eq!(eval_one("(char<? #\\a #\\b)"), "#t");
         assert_eq!(eval_one("(eqv? 'a 'a)"), "#t");
+    }
+
+    #[test]
+    fn evaluates_equality_predicates() {
+        assert_eq!(eval_one("(eq? 'a 'a)"), "#t");
+        assert_eq!(eval_one("(equal? '(1 (2)) '(1 (2)))"), "#t");
+        assert_eq!(eval_one("(equal? (vector 1 2) (vector 1 2))"), "#t");
+        assert_eq!(eval_one("(eq? (vector 1 2) (vector 1 2))"), "#f");
+        assert_eq!(eval_one("(define v (vector 1 2)) (eq? v v)"), "#t");
     }
 
     #[test]

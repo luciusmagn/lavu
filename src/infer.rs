@@ -825,4 +825,9 @@ mod tests {
         assert_eq!(infer_one("(vector-ref (vector 1 2 3) 0)"), "any?");
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
     }
+
+    #[test]
+    fn infers_equality_predicates() {
+        assert_eq!(infer_one("(equal? '(1) '(1))"), "boolean?");
+    }
 }
