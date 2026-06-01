@@ -385,6 +385,9 @@ Scheme value is valid.
 - Preserve =do= loop binding syntax during macro expansion, expanding
   init expressions outside the loop-variable syntax scope and
   steps/tests/commands inside it.
+- Preserve enclosing source origins when a =letrec= body with internal
+  definitions lowers to an inner recursive binding wrapper, keeping later
+  diagnostics tied back to the user form.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

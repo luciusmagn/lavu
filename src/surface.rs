@@ -1793,7 +1793,7 @@ fn classify_list(
         Some("delay") => parse_delay(span, rest),
         Some("let") => parse_let(span, origin, rest),
         Some("let*") => parse_let_star(span, origin, rest),
-        Some("letrec") => parse_letrec(span, rest),
+        Some("letrec") => parse_letrec(span, origin, rest),
         Some("and") => parse_and(span, origin, rest),
         Some("or") => parse_or(span, origin, rest),
         Some("cond") => parse_cond(span, origin, rest),
@@ -2173,7 +2173,11 @@ fn ensure_distinct_bindings(
     ensure_distinct_names(&names, context)
 }
 
-fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_letrec(
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    rest: &[Spanned<Datum>],
+) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
             form: "letrec",
@@ -2187,7 +2191,7 @@ fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfa
 
     Ok(Expr::LetRec {
         bindings,
-        body: parse_body(&rest[1..], span.clone(), None)?,
+        body: parse_body(&rest[1..], span.clone(), origin)?,
     })
 }
 
@@ -2966,6 +2970,7 @@ mod tests {
     use crate::surface::{
         Expr, SurfaceContext, SurfaceError, TopLevel, classify_program, classify_top_level,
     };
+    use crate::syntax::NodeId;
 
     #[test]
     fn classifies_define_and_lambda() {
@@ -3353,6 +3358,21 @@ mod tests {
         let form = classify_top_level(&datums[0]).unwrap();
 
         assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
+    }
+
+    #[test]
+    fn preserves_letrec_body_origin_through_internal_definition_lowering() {
+        let datum = parse("(letrec ((f (lambda () x))) (define x 1) (f))")
+            .unwrap()
+            .remove(0)
+            .with_origin(NodeId(9));
+        let form = classify_top_level(&datum).unwrap();
+
+        let TopLevel::Expr(Expr::LetRec { body, .. }) = form.node else {
+            panic!("expected letrec");
+        };
+
+        assert_eq!(body[0].origin, Some(NodeId(9)));
     }
 
     #[test]
