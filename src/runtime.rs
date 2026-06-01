@@ -3285,11 +3285,38 @@ fn string_to_number_with_radix(text: &str, radix: u32) -> Value {
     }
     let (exactness, digits) = split_exactness_prefix(text);
 
+    if let Some((numerator, denominator)) = digits.split_once('/') {
+        return string_to_rational_with_radix(numerator, denominator, radix, exactness);
+    }
+
     match BigInt::from_str_radix(digits, radix) {
         Ok(number) if exactness == Some(Exactness::Inexact) => Value::Decimal(number.into()),
         Ok(number) => Value::Integer(number),
         Err(_) => Value::Boolean(false),
     }
+}
+
+fn string_to_rational_with_radix(
+    numerator: &str,
+    denominator: &str,
+    radix: u32,
+    exactness: Option<Exactness>,
+) -> Value {
+    let Ok(numerator) = BigInt::from_str_radix(numerator, radix) else {
+        return Value::Boolean(false);
+    };
+    let Ok(denominator) = BigInt::from_str_radix(denominator, radix) else {
+        return Value::Boolean(false);
+    };
+    if denominator.is_zero() {
+        return Value::Boolean(false);
+    }
+
+    if exactness == Some(Exactness::Inexact) {
+        return Value::Decimal(BigDecimal::from(numerator) / BigDecimal::from(denominator));
+    }
+
+    exact_number(BigRational::new(numerator, denominator))
 }
 
 fn text_has_explicit_radix(text: &str) -> bool {
@@ -5098,6 +5125,9 @@ mod tests {
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
         assert_eq!(eval_one("(string->number \"#e10\" 16)"), "16");
         assert_eq!(eval_one("(inexact? (string->number \"#i10\" 16))"), "#t");
+        assert_eq!(eval_one("(string->number \"10/4\" 16)"), "4");
+        assert_eq!(eval_one("(inexact? (string->number \"#i10/4\" 16))"), "#t");
+        assert_eq!(eval_one("(string->number \"10/0\" 16)"), "#f");
         assert_eq!(eval_one("(string->number \"101\" 2)"), "5");
         assert_eq!(eval_one("(string->number \"1.5\" 10)"), "1.5");
         assert_eq!(eval_one("(string->number \"12\" 2)"), "#f");
