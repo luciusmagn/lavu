@@ -523,3 +523,7 @@ Scheme value is valid.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.
+** Type Inference Maintenance
+- Centralize primitive-specific application inference behind a small
+  classifier so new educational special cases do not grow a long
+  repeated operator-name chain.

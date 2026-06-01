@@ -78,6 +78,44 @@ enum MembershipResult {
     Entry,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrimitiveApplication {
+    Apply,
+    Values,
+    CallWithValues,
+    Map,
+    ForEach,
+    ListRef,
+    ListTail,
+    Car,
+    Cdr,
+    Member,
+    Assoc,
+}
+
+impl PrimitiveApplication {
+    fn classify(expr: &Expr) -> Option<Self> {
+        let Expr::Variable(name) = expr else {
+            return None;
+        };
+
+        match name.as_str() {
+            "apply" => Some(Self::Apply),
+            "values" => Some(Self::Values),
+            "call-with-values" => Some(Self::CallWithValues),
+            "map" => Some(Self::Map),
+            "for-each" => Some(Self::ForEach),
+            "list-ref" => Some(Self::ListRef),
+            "list-tail" => Some(Self::ListTail),
+            "car" => Some(Self::Car),
+            "cdr" => Some(Self::Cdr),
+            "memq" | "memv" | "member" => Some(Self::Member),
+            "assq" | "assv" | "assoc" => Some(Self::Assoc),
+            _ => None,
+        }
+    }
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -161,92 +199,67 @@ impl Inferencer {
                     .map(|operand| self.infer_expr(operand, env))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                if matches!(&operator.node, Expr::Variable(name) if name == "apply") {
-                    return self.infer_apply_primitive(operands, operand_tys, expr.span.clone());
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "values") {
-                    return Ok(Type::Values(
-                        operand_tys
-                            .into_iter()
-                            .map(|ty| self.resolve(ty))
-                            .collect::<Vec<_>>(),
-                    ));
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "call-with-values") {
-                    return self.infer_call_with_values(operands, operand_tys, expr.span.clone());
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "map") {
-                    return self.infer_higher_order_list(
+                if let Some(application) = PrimitiveApplication::classify(&operator.node) {
+                    return self.infer_primitive_application(
+                        application,
                         operands,
                         operand_tys,
                         expr.span.clone(),
-                        HigherOrderListResult::Mapped,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "for-each") {
-                    return self.infer_higher_order_list(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        HigherOrderListResult::Unspecified,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "list-ref") {
-                    return self.infer_indexed_list(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        ListAccessResult::Element,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "list-tail") {
-                    return self.infer_indexed_list(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        ListAccessResult::Tail,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "car") {
-                    return self.infer_pair_accessor(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        ListAccessResult::Element,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if name == "cdr") {
-                    return self.infer_pair_accessor(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        ListAccessResult::Tail,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if matches!(
-                    name.as_str(),
-                    "memq" | "memv" | "member"
-                )) {
-                    return self.infer_membership(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        MembershipResult::Tail,
-                    );
-                }
-                if matches!(&operator.node, Expr::Variable(name) if matches!(
-                    name.as_str(),
-                    "assq" | "assv" | "assoc"
-                )) {
-                    return self.infer_membership(
-                        operands,
-                        operand_tys,
-                        expr.span.clone(),
-                        MembershipResult::Entry,
                     );
                 }
 
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
+            }
+        }
+    }
+
+    fn infer_primitive_application(
+        &mut self,
+        application: PrimitiveApplication,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        match application {
+            PrimitiveApplication::Apply => self.infer_apply_primitive(operands, operand_tys, span),
+            PrimitiveApplication::Values => Ok(Type::Values(
+                operand_tys
+                    .into_iter()
+                    .map(|ty| self.resolve(ty))
+                    .collect::<Vec<_>>(),
+            )),
+            PrimitiveApplication::CallWithValues => {
+                self.infer_call_with_values(operands, operand_tys, span)
+            }
+            PrimitiveApplication::Map => self.infer_higher_order_list(
+                operands,
+                operand_tys,
+                span,
+                HigherOrderListResult::Mapped,
+            ),
+            PrimitiveApplication::ForEach => self.infer_higher_order_list(
+                operands,
+                operand_tys,
+                span,
+                HigherOrderListResult::Unspecified,
+            ),
+            PrimitiveApplication::ListRef => {
+                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Element)
+            }
+            PrimitiveApplication::ListTail => {
+                self.infer_indexed_list(operands, operand_tys, span, ListAccessResult::Tail)
+            }
+            PrimitiveApplication::Car => {
+                self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Element)
+            }
+            PrimitiveApplication::Cdr => {
+                self.infer_pair_accessor(operands, operand_tys, span, ListAccessResult::Tail)
+            }
+            PrimitiveApplication::Member => {
+                self.infer_membership(operands, operand_tys, span, MembershipResult::Tail)
+            }
+            PrimitiveApplication::Assoc => {
+                self.infer_membership(operands, operand_tys, span, MembershipResult::Entry)
             }
         }
     }
