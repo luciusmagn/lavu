@@ -419,6 +419,9 @@ Scheme value is valid.
 ** Typed Standard Library Metadata
 - Add initial R5RS primitive type metadata and predicate refinements for
   future occurrence typing.
+- Install runtime primitives from the same metadata table so newly typed
+  standard-library entries become visible to evaluation without a second
+  hand-maintained name list.
 ** Initial Type Inference
 - Add a first constraint-based inference pass for literals, variables,
   primitive applications, lambdas, definitions, begin, set!, and if.
