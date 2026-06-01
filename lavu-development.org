@@ -242,6 +242,11 @@ Scheme value is valid.
 - Add R5RS string construction, access, conversion, copying, appending,
   substring, and mutation primitives to the native runtime and type
   metadata.
+** Procedure Formals
+- Add R5RS rest and dotted formals for =lambda= and =define= procedure
+  shorthand.
+- Bind rest arguments as proper lists at runtime and expose rest
+  procedure types in inference.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.

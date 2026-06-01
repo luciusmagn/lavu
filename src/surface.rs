@@ -9,6 +9,12 @@ pub struct Program {
 
 pub type Binding = (Spanned<String>, Spanned<Expr>);
 type DefineBinding = (Spanned<String>, Spanned<Expr>);
+type Formals = (Vec<Spanned<String>>, Option<Spanned<String>>);
+type DefineFormals<'a> = (
+    &'a Spanned<Datum>,
+    &'a [Spanned<Datum>],
+    Option<Spanned<String>>,
+);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopLevel {
@@ -27,6 +33,7 @@ pub enum Expr {
     Quasiquote(Box<Spanned<Datum>>),
     Lambda {
         params: Vec<Spanned<String>>,
+        rest: Option<Spanned<String>>,
         body: Vec<Spanned<Expr>>,
     },
     If {
@@ -187,25 +194,41 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
             Ok(Some((name, value)))
         }
         Datum::List(formals) => {
-            let Some((name_datum, params)) = formals.split_first() else {
-                return Err(SurfaceError::BadArity {
-                    form: "define",
-                    expected: "a procedure name",
-                    span: rest[0].span.clone(),
-                });
-            };
-
+            let (name_datum, params, rest_param) =
+                define_formals_from_list(formals, None, &rest[0])?;
             let name = expect_identifier(name_datum, "define procedure")?;
-            let params = params
-                .iter()
-                .map(|param| expect_identifier(param, "define procedure formals"))
-                .collect::<Result<Vec<_>, _>>()?;
+            let params = parse_required_formals(params, "define procedure formals")?;
             let body = rest[1..]
                 .iter()
                 .map(classify_expr)
                 .collect::<Result<Vec<_>, _>>()?;
             let value = Spanned {
-                node: Expr::Lambda { params, body },
+                node: Expr::Lambda {
+                    params,
+                    rest: rest_param,
+                    body,
+                },
+                span: datum.span.clone(),
+                origin: datum.origin,
+            };
+
+            Ok(Some((name, value)))
+        }
+        Datum::DottedList(formals, tail) => {
+            let (name_datum, params, rest_param) =
+                define_formals_from_list(formals, Some(tail.as_ref()), &rest[0])?;
+            let name = expect_identifier(name_datum, "define procedure")?;
+            let params = parse_required_formals(params, "define procedure formals")?;
+            let body = rest[1..]
+                .iter()
+                .map(classify_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = Spanned {
+                node: Expr::Lambda {
+                    params,
+                    rest: rest_param,
+                    body,
+                },
                 span: datum.span.clone(),
                 origin: datum.origin,
             };
@@ -253,13 +276,17 @@ fn parse_lambda(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
         });
     }
 
-    let params = parse_fixed_formals(&rest[0])?;
+    let (params, rest_param) = parse_formals(&rest[0])?;
     let body = rest[1..]
         .iter()
         .map(classify_expr)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(Expr::Lambda { params, body })
+    Ok(Expr::Lambda {
+        params,
+        rest: rest_param,
+        body,
+    })
 }
 
 fn parse_if(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
@@ -341,7 +368,11 @@ fn parse_let(
 
     Ok(Expr::Apply {
         operator: Box::new(Spanned {
-            node: Expr::Lambda { params, body },
+            node: Expr::Lambda {
+                params,
+                rest: None,
+                body,
+            },
             span: span.clone(),
             origin,
         }),
@@ -394,6 +425,7 @@ fn parse_named_let(
             Spanned {
                 node: Expr::Lambda {
                     params,
+                    rest: None,
                     body: lambda_body,
                 },
                 span: span.clone(),
@@ -430,6 +462,7 @@ fn parse_let_star(
                 operator: Box::new(Spanned {
                     node: Expr::Lambda {
                         params: vec![name],
+                        rest: None,
                         body: vec![current],
                     },
                     span: span.clone(),
@@ -556,6 +589,7 @@ fn parse_or(
                 operator: Box::new(Spanned {
                     node: Expr::Lambda {
                         params: vec![temp.clone()],
+                        rest: None,
                         body: vec![Spanned {
                             node: Expr::If {
                                 condition: Box::new(condition),
@@ -731,6 +765,7 @@ fn parse_case(
         operator: Box::new(Spanned {
             node: Expr::Lambda {
                 params: vec![temp],
+                rest: None,
                 body: vec![result],
             },
             span: span.clone(),
@@ -882,6 +917,7 @@ fn parse_do(
             Spanned {
                 node: Expr::Lambda {
                     params,
+                    rest: None,
                     body: vec![loop_body],
                 },
                 span: span.clone(),
@@ -1014,17 +1050,50 @@ fn parse_apply(
     })
 }
 
-fn parse_fixed_formals(formals: &Spanned<Datum>) -> Result<Vec<Spanned<String>>, SurfaceError> {
+fn parse_formals(formals: &Spanned<Datum>) -> Result<Formals, SurfaceError> {
     match &formals.node {
-        Datum::List(items) => items
-            .iter()
-            .map(|item| expect_identifier(item, "lambda formals"))
-            .collect(),
+        Datum::Atom(Atom::Identifier(_)) => Ok((
+            Vec::new(),
+            Some(expect_identifier(formals, "lambda formals")?),
+        )),
+        Datum::List(items) => Ok((parse_required_formals(items, "lambda formals")?, None)),
+        Datum::DottedList(items, tail) => Ok((
+            parse_required_formals(items, "lambda formals")?,
+            Some(expect_identifier(tail, "lambda rest formal")?),
+        )),
         _ => Err(SurfaceError::ExpectedList {
             context: "lambda formals",
             span: formals.span.clone(),
         }),
     }
+}
+
+fn define_formals_from_list<'a>(
+    formals: &'a [Spanned<Datum>],
+    rest: Option<&'a Spanned<Datum>>,
+    original: &Spanned<Datum>,
+) -> Result<DefineFormals<'a>, SurfaceError> {
+    let Some((name_datum, params)) = formals.split_first() else {
+        return Err(SurfaceError::BadArity {
+            form: "define",
+            expected: "a procedure name",
+            span: original.span.clone(),
+        });
+    };
+    let rest = rest
+        .map(|tail| expect_identifier(tail, "define procedure rest formal"))
+        .transpose()?;
+    Ok((name_datum, params, rest))
+}
+
+fn parse_required_formals(
+    formals: &[Spanned<Datum>],
+    context: &'static str,
+) -> Result<Vec<Spanned<String>>, SurfaceError> {
+    formals
+        .iter()
+        .map(|item| expect_identifier(item, context))
+        .collect()
 }
 
 fn expect_identifier(
@@ -1080,6 +1149,36 @@ mod tests {
 
         assert_eq!(name.node, "add1");
         assert!(matches!(value.node, Expr::Lambda { .. }));
+    }
+
+    #[test]
+    fn classifies_rest_lambda_formals() {
+        let datums = parse("(lambda (x . rest) rest)").unwrap();
+        let form = classify_top_level(&datums[0]).unwrap();
+
+        let TopLevel::Expr(Expr::Lambda { params, rest, .. }) = form.node else {
+            panic!("expected lambda");
+        };
+
+        assert_eq!(params[0].node, "x");
+        assert_eq!(rest.unwrap().node, "rest");
+    }
+
+    #[test]
+    fn classifies_rest_define_shorthand() {
+        let datums = parse("(define (collect x . rest) rest)").unwrap();
+        let program = classify_program(&datums).unwrap();
+
+        let TopLevel::Define { name, value } = &program.forms[0].node else {
+            panic!("expected define");
+        };
+        let Expr::Lambda { params, rest, .. } = &value.node else {
+            panic!("expected lambda");
+        };
+
+        assert_eq!(name.node, "collect");
+        assert_eq!(params[0].node, "x");
+        assert_eq!(rest.as_ref().unwrap().node, "rest");
     }
 
     #[test]

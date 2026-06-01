@@ -113,7 +113,9 @@ impl Inferencer {
                 }),
             Expr::Quote(datum) => Ok(type_of_datum(datum)),
             Expr::Quasiquote(_) => Ok(Type::Any),
-            Expr::Lambda { params, body } => self.infer_lambda(params, body, env),
+            Expr::Lambda { params, rest, body } => {
+                self.infer_lambda(params, rest.as_ref(), body, env)
+            }
             Expr::If {
                 condition,
                 consequent,
@@ -149,12 +151,19 @@ impl Inferencer {
     fn infer_lambda(
         &mut self,
         params: &[Spanned<String>],
+        rest: Option<&Spanned<String>>,
         body: &[Spanned<Expr>],
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         let mut local = env.clone();
         for param in params {
             local.define(param.node.clone(), Type::Var(param.node.clone()));
+        }
+        if let Some(rest) = rest {
+            local.define(
+                rest.node.clone(),
+                Type::ListOf(Box::new(Type::Var(rest.node.clone()))),
+            );
         }
 
         let result = self.infer_sequence(body, &local)?;
@@ -163,7 +172,15 @@ impl Inferencer {
             .map(|param| self.resolve(Type::Var(param.node.clone())))
             .collect::<Vec<_>>();
 
-        Ok(Type::procedure(param_types, self.resolve(result)))
+        let result = self.resolve(result);
+        Ok(match rest {
+            Some(rest) => Type::rest_procedure(
+                param_types,
+                self.resolve(Type::Var(rest.node.clone())),
+                result,
+            ),
+            None => Type::procedure(param_types, result),
+        })
     }
 
     fn infer_letrec(
@@ -685,8 +702,9 @@ fn predicate_refinement(condition: &Spanned<Expr>) -> Option<(String, Type)> {
 fn expr_mentions_variable(expr: &Spanned<Expr>, name: &str) -> bool {
     match &expr.node {
         Expr::Variable(variable) => variable == name,
-        Expr::Lambda { params, body } => {
+        Expr::Lambda { params, rest, body } => {
             !params.iter().any(|param| param.node == name)
+                && rest.as_ref().is_none_or(|param| param.node != name)
                 && body.iter().any(|expr| expr_mentions_variable(expr, name))
         }
         Expr::If {
@@ -743,6 +761,15 @@ mod tests {
     #[test]
     fn infers_primitive_arithmetic_lambda() {
         assert_eq!(infer_one("(lambda (x) (+ x 1))"), "(-> number? number?)");
+    }
+
+    #[test]
+    fn infers_rest_lambda_formals() {
+        assert_eq!(infer_one("(lambda args args)"), "(-> args * (listof args))");
+        assert_eq!(
+            infer_one("(lambda (x . rest) (reverse rest))"),
+            "(-> x a * (listof a))"
+        );
     }
 
     #[test]

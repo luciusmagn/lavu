@@ -61,6 +61,7 @@ impl PartialEq for Value {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Procedure {
     params: Vec<String>,
+    rest: Option<String>,
     body: Vec<Spanned<Expr>>,
     env: Env,
 }
@@ -343,8 +344,9 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
         },
         Expr::Quote(datum) => datum_to_value(datum),
         Expr::Quasiquote(datum) => eval_quasiquote(datum, env, 0),
-        Expr::Lambda { params, body } => Ok(Value::Procedure(Rc::new(Procedure {
+        Expr::Lambda { params, rest, body } => Ok(Value::Procedure(Rc::new(Procedure {
             params: params.iter().map(|param| param.node.clone()).collect(),
+            rest: rest.as_ref().map(|param| param.node.clone()),
             body: body.to_vec(),
             env: env.clone(),
         }))),
@@ -419,7 +421,14 @@ fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, 
     match procedure {
         Value::Primitive(name) => apply_primitive(name, args, span),
         Value::Procedure(procedure) => {
-            if procedure.params.len() != args.len() {
+            if procedure.rest.is_none() && procedure.params.len() != args.len() {
+                return Err(EvalError::ArityMismatch {
+                    expected: procedure.params.len(),
+                    actual: args.len(),
+                    span,
+                });
+            }
+            if procedure.rest.is_some() && args.len() < procedure.params.len() {
                 return Err(EvalError::ArityMismatch {
                     expected: procedure.params.len(),
                     actual: args.len(),
@@ -428,8 +437,14 @@ fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, 
             }
 
             let env = Env::child(procedure.env.clone());
-            for (name, value) in procedure.params.iter().zip(args) {
-                env.define(name.clone(), value);
+            for (name, value) in procedure.params.iter().zip(args.iter()) {
+                env.define(name.clone(), value.clone());
+            }
+            if let Some(rest) = &procedure.rest {
+                env.define(
+                    rest.clone(),
+                    Value::List(args[procedure.params.len()..].to_vec()),
+                );
             }
 
             eval_sequence(&procedure.body, &env)
@@ -2372,6 +2387,17 @@ mod tests {
     #[test]
     fn evaluates_define_procedure_shorthand() {
         assert_eq!(eval_one("(define (add1 x) (+ x 1)) (add1 4)"), "5");
+    }
+
+    #[test]
+    fn evaluates_rest_lambda_formals() {
+        assert_eq!(eval_one("((lambda args args) 1 2 3)"), "(1 2 3)");
+        assert_eq!(eval_one("((lambda (x y . rest) rest) 1 2 3 4)"), "(3 4)");
+        assert_eq!(
+            eval_one("(define (collect x . rest) rest) (collect 1 2 3)"),
+            "(2 3)"
+        );
+        assert_eq!(eval_one("((lambda (x . rest) rest) 1)"), "()");
     }
 
     #[test]
