@@ -397,6 +397,8 @@ Scheme value is valid.
 ** Quasiquote Runtime
 - Preserve quote abbreviations as data under quoted data and evaluate
   quasiquote, unquote, and unquote-splicing directly over stable datums.
+- Support unquote-splicing in quasiquoted vector templates, sharing the
+  same proper-list splice validation used for list templates.
 ** Quoted Datum Types
 - Infer structural types for quoted data, including proper lists,
   dotted pairs, heterogeneous list element unions, and =null?=.

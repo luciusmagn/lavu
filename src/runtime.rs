@@ -3677,10 +3677,7 @@ fn eval_quasiquote(datum: &Spanned<Datum>, env: &Env, level: usize) -> Result<Va
         Datum::DottedList(items, tail) => {
             eval_quasiquote_list(items, Some(tail.as_ref()), env, level)
         }
-        Datum::Vector(items) => items
-            .iter()
-            .map(|item| eval_quasiquote(item, env, level))
-            .collect::<Result<Vec<_>, _>>()
+        Datum::Vector(items) => eval_quasiquote_items(items, env, level)
             .map(|items| Value::Vector(Rc::new(RefCell::new(items)))),
         Datum::Atom(_) | Datum::Quote(_) => datum_to_value(datum),
     }
@@ -3692,6 +3689,25 @@ fn eval_quasiquote_list(
     env: &Env,
     level: usize,
 ) -> Result<Value, EvalError> {
+    let values = eval_quasiquote_items(items, env, level)?;
+
+    match tail {
+        Some(tail) => {
+            let tail = eval_quasiquote(tail, env, level)?;
+            Ok(values
+                .into_iter()
+                .rev()
+                .fold(tail, |tail, head| cons_value(head, tail)))
+        }
+        None => Ok(list_value(values)),
+    }
+}
+
+fn eval_quasiquote_items(
+    items: &[Spanned<Datum>],
+    env: &Env,
+    level: usize,
+) -> Result<Vec<Value>, EvalError> {
     let mut values = Vec::new();
 
     for item in items {
@@ -3704,16 +3720,7 @@ fn eval_quasiquote_list(
         }
     }
 
-    match tail {
-        Some(tail) => {
-            let tail = eval_quasiquote(tail, env, level)?;
-            Ok(values
-                .into_iter()
-                .rev()
-                .fold(tail, |tail, head| cons_value(head, tail)))
-        }
-        None => Ok(list_value(values)),
-    }
+    Ok(values)
 }
 
 fn eval_unquoted(datum: &Spanned<Datum>, env: &Env) -> Result<Value, EvalError> {
@@ -4640,6 +4647,8 @@ mod tests {
         assert_eq!(eval_one("`(1 ,(+ 1 2) 4)"), "(1 3 4)");
         assert_eq!(eval_one("`(a ,@(list 1 2) b)"), "(a 1 2 b)");
         assert_eq!(eval_one("`(1 . ,(+ 1 1))"), "(1 . 2)");
+        assert_eq!(eval_one("`#(1 ,(+ 1 1) 3)"), "#(1 2 3)");
+        assert_eq!(eval_one("(let ((xs '(2 3))) `#(1 ,@xs 4))"), "#(1 2 3 4)");
     }
 
     #[test]
