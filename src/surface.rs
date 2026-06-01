@@ -93,6 +93,12 @@ pub enum SurfaceError {
     #[error("unsupported datum in expression position")]
     UnsupportedDatum { span: SourceSpan },
 
+    #[error("{form} is only valid in definition context")]
+    DefinitionContext {
+        form: &'static str,
+        span: SourceSpan,
+    },
+
     #[error("unsupported macro pattern")]
     UnsupportedMacroPattern { span: SourceSpan },
 
@@ -1688,6 +1694,14 @@ fn classify_list(
     match head_name.as_deref() {
         Some("quote") => parse_quote(span, rest),
         Some("quasiquote") => parse_quasiquote(span, rest),
+        Some("define") => Err(SurfaceError::DefinitionContext {
+            form: "define",
+            span,
+        }),
+        Some("define-syntax") => Err(SurfaceError::DefinitionContext {
+            form: "define-syntax",
+            span,
+        }),
         Some("lambda") => parse_lambda(span, origin, rest),
         Some("if") => parse_if(rest),
         Some("begin") => parse_begin(span, rest),
@@ -3067,6 +3081,21 @@ mod tests {
             classify_top_level(&datums[0]),
             Err(SurfaceError::BadArity { form: "begin", .. })
         ));
+    }
+
+    #[test]
+    fn rejects_definitions_in_expression_position() {
+        for input in [
+            "(+ (define x 1) 2)",
+            "(lambda () 1 (define x 2) x)",
+            "(+ (define-syntax id (syntax-rules () ((id x) x))) 1)",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_top_level(&datums[0]),
+                Err(SurfaceError::DefinitionContext { .. })
+            ));
+        }
     }
 
     #[test]

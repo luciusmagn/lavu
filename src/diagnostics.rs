@@ -84,6 +84,7 @@ fn surface_span(error: &SurfaceError) -> SourceSpan {
         | SurfaceError::DuplicateIdentifier { span, .. }
         | SurfaceError::EmptyApplication { span }
         | SurfaceError::UnsupportedDatum { span }
+        | SurfaceError::DefinitionContext { span, .. }
         | SurfaceError::UnsupportedMacroPattern { span }
         | SurfaceError::InvalidMacroTemplate { span }
         | SurfaceError::NoMatchingMacroRule { span, .. }
