@@ -188,6 +188,10 @@ impl Env {
             "list?",
             "vector?",
             "procedure?",
+            "port?",
+            "input-port?",
+            "output-port?",
+            "eof-object?",
             "not",
             "eqv?",
             "force",
@@ -393,6 +397,9 @@ fn apply_primitive(
         "procedure?" => predicate(args, span, |value| {
             matches!(value, Value::Procedure(_) | Value::Primitive(_))
         }),
+        "port?" | "input-port?" | "output-port?" | "eof-object?" => {
+            predicate(args, span, |_| false)
+        }
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
         "force" => force(args, span),
@@ -1186,6 +1193,14 @@ mod tests {
         assert_eq!(eval_one("(string=? \"a\" \"a\")"), "#t");
         assert_eq!(eval_one("(string<? \"a\" \"b\")"), "#t");
         assert_eq!(eval_one("(string>? \"b\" \"a\")"), "#t");
+    }
+
+    #[test]
+    fn evaluates_unimplemented_resource_predicates_conservatively() {
+        assert_eq!(eval_one("(port? 1)"), "#f");
+        assert_eq!(eval_one("(input-port? 1)"), "#f");
+        assert_eq!(eval_one("(output-port? 1)"), "#f");
+        assert_eq!(eval_one("(eof-object? 1)"), "#f");
     }
 
     #[test]

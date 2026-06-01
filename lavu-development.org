@@ -329,3 +329,6 @@ Scheme value is valid.
 ** Character And String Primitives
 - Add native runtime support for the typed R5RS character and string
   comparison primitives already listed in standard-library metadata.
+** Resource Predicates
+- Bind conservative runtime predicates for port and EOF object metadata
+  so typed names are available even before resource values exist.
