@@ -307,6 +307,9 @@ Scheme value is valid.
   instead of silently collapsing them into a set.
 - Match a =syntax-rules= rule head as the macro keyword itself, so a typo
   in the rule head cannot accidentally become a pattern variable.
+- Reject duplicate =syntax-rules= pattern variables at macro definition
+  time, while leaving literals, the rule keyword, and ellipses out of the
+  variable set.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.

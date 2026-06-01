@@ -791,7 +791,7 @@ fn parse_syntax_rules(datum: &Spanned<Datum>) -> Result<SyntaxRules, SurfaceErro
     let literals = parse_literal_identifiers(&rest[0])?;
     let rules = rest[1..]
         .iter()
-        .map(parse_syntax_rule)
+        .map(|datum| parse_syntax_rule(datum, &literals))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(SyntaxRules { literals, rules })
@@ -860,7 +860,10 @@ fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>,
     Ok(literals)
 }
 
-fn parse_syntax_rule(datum: &Spanned<Datum>) -> Result<SyntaxRule, SurfaceError> {
+fn parse_syntax_rule(
+    datum: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+) -> Result<SyntaxRule, SurfaceError> {
     let Datum::List(items) = &datum.node else {
         return Err(SurfaceError::ExpectedList {
             context: "syntax-rules rule",
@@ -875,10 +878,94 @@ fn parse_syntax_rule(datum: &Spanned<Datum>) -> Result<SyntaxRule, SurfaceError>
         });
     }
 
+    ensure_distinct_pattern_variables(&items[0], literals)?;
+
     Ok(SyntaxRule {
         pattern: items[0].clone(),
         template: items[1].clone(),
     })
+}
+
+fn ensure_distinct_pattern_variables(
+    pattern: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+) -> Result<(), SurfaceError> {
+    let keyword = syntax_rule_keyword(pattern)?;
+    let mut seen = BTreeSet::new();
+
+    match &pattern.node {
+        Datum::List(items) => {
+            for item in &items[1..] {
+                collect_unique_pattern_variables(item, literals, &keyword, &mut seen)?;
+            }
+        }
+        Datum::DottedList(items, tail) => {
+            for item in &items[1..] {
+                collect_unique_pattern_variables(item, literals, &keyword, &mut seen)?;
+            }
+            collect_unique_pattern_variables(tail, literals, &keyword, &mut seen)?;
+        }
+        _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
+    }
+
+    Ok(())
+}
+
+fn syntax_rule_keyword(pattern: &Spanned<Datum>) -> Result<String, SurfaceError> {
+    match &pattern.node {
+        Datum::List(items) | Datum::DottedList(items, _) => {
+            let Some(head) = items.first() else {
+                return Err(SurfaceError::UnsupportedMacroPattern {
+                    span: pattern.span.clone(),
+                });
+            };
+            expect_identifier(head, "syntax-rules pattern").map(|name| name.node)
+        }
+        _ => Err(SurfaceError::UnsupportedMacroPattern {
+            span: pattern.span.clone(),
+        }),
+    }
+}
+
+fn collect_unique_pattern_variables(
+    pattern: &Spanned<Datum>,
+    literals: &BTreeSet<String>,
+    keyword: &str,
+    seen: &mut BTreeSet<String>,
+) -> Result<(), SurfaceError> {
+    match &pattern.node {
+        Datum::Atom(Atom::Identifier(name))
+            if name != "..." && name != keyword && !literals.contains(name) =>
+        {
+            if !seen.insert(name.clone()) {
+                return Err(SurfaceError::DuplicateIdentifier {
+                    context: "syntax-rules pattern",
+                    name: name.clone(),
+                    span: pattern.span.clone(),
+                });
+            }
+        }
+        Datum::List(items) | Datum::Vector(items) => {
+            for item in items {
+                collect_unique_pattern_variables(item, literals, keyword, seen)?;
+            }
+        }
+        Datum::DottedList(items, tail) => {
+            for item in items {
+                collect_unique_pattern_variables(item, literals, keyword, seen)?;
+            }
+            collect_unique_pattern_variables(tail, literals, keyword, seen)?;
+        }
+        Datum::Quote(inner)
+        | Datum::Quasiquote(inner)
+        | Datum::Unquote(inner)
+        | Datum::UnquoteSplicing(inner) => {
+            collect_unique_pattern_variables(inner, literals, keyword, seen)?;
+        }
+        Datum::Atom(_) => {}
+    }
+
+    Ok(())
 }
 
 fn apply_syntax_rules(
@@ -2895,6 +2982,24 @@ mod tests {
             assert!(matches!(
                 classify_program(&datums),
                 Err(SurfaceError::NoMatchingMacroRule { name, .. }) if name == "m"
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_syntax_rule_pattern_variables() {
+        for input in [
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m x x) x)))",
+            "(define-syntax m
+               (syntax-rules ()
+                 ((m (x) . x) x)))",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_program(&datums),
+                Err(SurfaceError::DuplicateIdentifier { .. })
             ));
         }
     }
