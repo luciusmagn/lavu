@@ -241,6 +241,8 @@ Scheme value is valid.
 - Add conservative =sqrt= for real inputs, including negative reals as
   decimal complex results; full complex transcendental behavior remains
   future numeric-tower work.
+- Add conservative =expt= for exact integer exponents across exact
+  rationals, decimals, and the current decimal complex representation.
 ** Character Library
 - Add R5RS character classification and case primitives to the native
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,

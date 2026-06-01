@@ -222,6 +222,7 @@ impl Env {
             "real-part",
             "imag-part",
             "sqrt",
+            "expt",
             "char?",
             "char-alphabetic?",
             "char-numeric?",
@@ -569,6 +570,7 @@ fn apply_primitive(
         "real-part" => real_part(args, span),
         "imag-part" => imag_part(args, span),
         "sqrt" => numeric_sqrt(args, span),
+        "expt" => numeric_expt(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
         "char-numeric?" => char_predicate(args, span, char::is_numeric),
@@ -1281,6 +1283,64 @@ fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
 
         decimal_sqrt(decimal, span).map(Value::Decimal)
     })
+}
+
+fn numeric_expt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [base, exponent]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let exponent = exact_integer(&exponent, span.clone())?;
+    let exponent = exponent.to_i32().ok_or(EvalError::TypeError {
+        expected: "small integer exponent?",
+        span: span.clone(),
+    })?;
+
+    match base {
+        Value::Integer(n) => Ok(exact_number(BigRational::from_integer(n).pow(exponent))),
+        Value::Rational(n) => Ok(exact_number(n.pow(exponent))),
+        Value::Decimal(n) => Ok(Value::Decimal(decimal_pow(n, exponent))),
+        Value::Complex(n) => Ok(Value::Complex(complex_pow(n, exponent))),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
+}
+
+fn decimal_pow(base: BigDecimal, exponent: i32) -> BigDecimal {
+    let power = pow_nonnegative(base, exponent.unsigned_abs(), decimal_one());
+    if exponent.is_negative() {
+        decimal_one() / power
+    } else {
+        power
+    }
+}
+
+fn complex_pow(base: Complex<BigDecimal>, exponent: i32) -> Complex<BigDecimal> {
+    let power = pow_nonnegative(base, exponent.unsigned_abs(), complex_one());
+    if exponent.is_negative() {
+        complex_one() / power
+    } else {
+        power
+    }
+}
+
+fn pow_nonnegative<T>(mut base: T, mut exponent: u32, one: T) -> T
+where
+    T: Clone + std::ops::Mul<Output = T>,
+{
+    let mut result = one;
+    while exponent > 0 {
+        if exponent % 2 == 1 {
+            result = result * base.clone();
+        }
+        base = base.clone() * base;
+        exponent /= 2;
+    }
+    result
 }
 
 fn decimal_sqrt(number: BigDecimal, span: SourceSpan) -> Result<BigDecimal, EvalError> {
@@ -2705,6 +2765,10 @@ mod tests {
         );
         assert_eq!(eval_one("(sqrt 4)"), "2");
         assert_eq!(eval_one("(sqrt -4)"), "0+2i");
+        assert_eq!(eval_one("(expt 2 3)"), "8");
+        assert_eq!(eval_one("(expt 2 -1)"), "1/2");
+        assert_eq!(eval_one("(expt 1.5 2)"), "2.25");
+        assert_eq!(eval_one("(expt 1+2i 2)"), "-3+4i");
     }
 
     #[test]
