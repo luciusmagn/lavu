@@ -306,6 +306,9 @@ Scheme value is valid.
 - Preserve =cond= and =case= clause syntax during macro expansion, so
   local syntax bindings named =else=, ===>=, or datum-list symbols do not
   rewrite clause literals.
+- Preserve =do= loop binding syntax during macro expansion, expanding
+  init expressions outside the loop-variable syntax scope and
+  steps/tests/commands inside it.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

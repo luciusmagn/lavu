@@ -4181,6 +4181,19 @@ mod tests {
     }
 
     #[test]
+    fn preserves_do_binding_syntax_during_macro_expansion() {
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((i (syntax-rules () ((i) 99))))
+                   (do ((i 0 (+ i 1)))
+                       ((= i 3) i)))"
+            ),
+            "3"
+        );
+    }
+
+    #[test]
     fn evaluates_primitive_arithmetic() {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
         assert_eq!(eval_one("(- 10 3 2)"), "5");

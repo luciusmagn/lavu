@@ -233,6 +233,9 @@ impl MacroExpander {
                         "case" => {
                             return self.expand_case_form(datum, items, depth);
                         }
+                        "do" => {
+                            return self.expand_do_form(datum, items, depth);
+                        }
                         "let-syntax" => {
                             return self.expand_local_syntax("let-syntax", datum, items, depth);
                         }
@@ -570,6 +573,104 @@ impl MacroExpander {
             span: clause.span.clone(),
             origin: clause.origin,
         })
+    }
+
+    fn expand_do_form(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if items.len() < 3 {
+            return self.expand_ordinary_list(datum, items, depth);
+        }
+
+        let binding_names = binding_names(&items[1]);
+        let body_expander = self.without_syntax_names(&binding_names);
+        let mut expanded = vec![
+            items[0].clone(),
+            self.expand_do_binding_list(&items[1], &body_expander, depth)?,
+            body_expander.expand_do_test_clause(&items[2], depth)?,
+        ];
+        expanded.extend(body_expander.expand_body_items(&items[3..], depth + 1)?);
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
+    }
+
+    fn expand_do_binding_list(
+        &self,
+        datum: &Spanned<Datum>,
+        body_expander: &MacroExpander,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(bindings) = &datum.node else {
+            return self.expand_with_depth(datum, depth);
+        };
+
+        bindings
+            .iter()
+            .map(|binding| self.expand_do_binding(binding, body_expander, depth))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|bindings| Spanned {
+                node: Datum::List(bindings),
+                span: datum.span.clone(),
+                origin: datum.origin,
+            })
+    }
+
+    fn expand_do_binding(
+        &self,
+        binding: &Spanned<Datum>,
+        body_expander: &MacroExpander,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(parts) = &binding.node else {
+            return self.expand_with_depth(binding, depth);
+        };
+        let Some((name, values)) = parts.split_first() else {
+            return Ok(binding.clone());
+        };
+
+        let mut expanded = vec![name.clone()];
+        if let Some(init) = values.first() {
+            expanded.push(self.expand_with_depth(init, depth)?);
+        }
+        expanded.extend(
+            values[1..]
+                .iter()
+                .map(|step| body_expander.expand_with_depth(step, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: binding.span.clone(),
+            origin: binding.origin,
+        })
+    }
+
+    fn expand_do_test_clause(
+        &self,
+        clause: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(items) = &clause.node else {
+            return self.expand_with_depth(clause, depth);
+        };
+
+        items
+            .iter()
+            .map(|item| self.expand_with_depth(item, depth))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|items| Spanned {
+                node: Datum::List(items),
+                span: clause.span.clone(),
+                origin: clause.origin,
+            })
     }
 
     fn expand_body_items(
