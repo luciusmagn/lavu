@@ -736,6 +736,9 @@ Scheme value is valid.
 - Constrain unknown =call-with-values= producers as nullary procedures,
   so producer variables receive visible result flow instead of collapsing
   to =any?=.
+- Infer unknown producer value arity from fixed =call-with-values=
+  consumers, so producer variables can be typed as returning
+  =(values ...)= when the consumer requires multiple arguments.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.

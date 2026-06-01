@@ -823,8 +823,12 @@ impl Inferencer {
                     span: span.clone(),
                 })?;
 
-        let produced =
-            self.infer_call_with_values_producer(producer_ty, operands[0].span.clone())?;
+        let expected_produced = self.expected_call_with_values_result(&consumer_ty);
+        let produced = self.infer_call_with_values_producer(
+            producer_ty,
+            expected_produced,
+            operands[0].span.clone(),
+        )?;
         let value_tys = match self.resolve(produced) {
             Type::Values(values) => values,
             value => vec![value],
@@ -840,11 +844,12 @@ impl Inferencer {
     fn infer_call_with_values_producer(
         &mut self,
         producer_ty: Type,
+        expected: Option<Type>,
         span: SourceSpan,
     ) -> Result<Type, TypeError> {
         match self.resolve(producer_ty) {
             Type::Var(name) => {
-                let result = self.fresh_type_var();
+                let result = expected.unwrap_or_else(|| self.fresh_type_var());
                 self.bind_var(name, Type::procedure(vec![], result.clone()))?;
                 Ok(result)
             }
@@ -866,6 +871,15 @@ impl Inferencer {
                 actual: Box::new(actual),
                 span,
             }),
+        }
+    }
+
+    fn expected_call_with_values_result(&self, consumer_ty: &Type) -> Option<Type> {
+        match self.resolve(consumer_ty.clone()) {
+            Type::Procedure(ProcedureType::Fixed { params, .. }) => {
+                Some(call_with_values_result_for_params(params))
+            }
+            _ => None,
         }
     }
 
@@ -2071,6 +2085,13 @@ fn call_cc_receiver_type() -> Type {
     )
 }
 
+fn call_with_values_result_for_params(params: Vec<Type>) -> Type {
+    match params.as_slice() {
+        [single] => single.clone(),
+        _ => Type::Values(params),
+    }
+}
+
 fn same_type_var(left: &Type, right: &Type) -> bool {
     matches!((left, right), (Type::Var(left), Type::Var(right)) if left == right)
 }
@@ -2605,6 +2626,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (producer) (call-with-values producer +))"),
             "(-> (-> number?) number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (producer) (call-with-values producer (lambda (x y) (+ x y))))"),
+            "(-> (-> (values number? number?)) number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (producer) (call-with-values producer (lambda () 1)))"),
+            "(-> (-> (values)) number?)"
         );
         assert_eq!(
             infer_error("(call-with-values 1 list)").to_string(),
