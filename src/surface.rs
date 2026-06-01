@@ -2415,6 +2415,7 @@ fn parse_body(
     if bindings.is_empty() {
         return body.iter().map(classify_expr).collect();
     }
+    ensure_distinct_bindings(&bindings, "internal definitions")?;
     if index == body.len() {
         return Err(SurfaceError::BadArity {
             form: "body",
@@ -2724,6 +2725,15 @@ mod tests {
 
         let datums = parse("(let* ((x 1) (x 2)) x)").unwrap();
         assert!(classify_top_level(&datums[0]).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_internal_definition_names() {
+        let datums = parse("(lambda () (define x 1) (define x 2) x)").unwrap();
+        assert!(matches!(
+            classify_top_level(&datums[0]),
+            Err(SurfaceError::DuplicateIdentifier { .. })
+        ));
     }
 
     #[test]

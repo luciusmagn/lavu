@@ -273,6 +273,8 @@ Scheme value is valid.
 - Reject duplicate binders in lambda/procedure formals and in R5RS
   binding forms that require distinct names, while preserving =let*=
   sequential shadowing.
+- Reject duplicate internal definition names before lowering body-leading
+  definitions to =letrec=.
 ** List Library
 - Add =length= and the R5RS composed =car=/=cdr= accessors through four
   levels, with conservative =any?= metadata for the composed accessors.
