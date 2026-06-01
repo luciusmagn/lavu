@@ -4002,6 +4002,27 @@ mod tests {
             ),
             "3"
         );
+        assert_eq!(
+            eval_one(
+                "(begin
+                   (define-syntax id
+                     (syntax-rules ()
+                       ((id x) x)))
+                   (define x (id 4)))
+                 x"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
+                "(define-syntax defs
+                   (syntax-rules ()
+                     ((defs) (begin (define x 1) (define y 2)))))
+                 (defs)
+                 (+ x y)"
+            ),
+            "3"
+        );
     }
 
     #[test]

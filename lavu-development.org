@@ -290,6 +290,8 @@ Scheme value is valid.
 - Support literal identifiers and simple list ellipses in macro patterns
   and templates. Full R5RS hygiene and internal syntax definitions remain
   future work.
+- Process top-level =begin= forms in macro-expansion order so syntax
+  definitions can affect later forms in the same top-level sequence.
 ** Occurrence Typing
 - Infer both =if= branches in isolated inference states and merge their
   substitutions, so constraints from one branch do not leak into the

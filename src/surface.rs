@@ -104,16 +104,39 @@ pub fn classify_program(datums: &[Spanned<Datum>]) -> Result<Program, SurfaceErr
     let mut forms = Vec::new();
 
     for datum in datums {
-        if let Some((name, rules)) = parse_define_syntax(datum)? {
-            expander.define(name, rules);
-            continue;
-        }
-
-        let expanded = expander.expand(datum)?;
-        forms.extend(classify_top_level_forms(&expanded)?);
+        classify_top_level_with_macros(&mut expander, datum, &mut forms)?;
     }
 
     Ok(Program { forms })
+}
+
+fn classify_top_level_with_macros(
+    expander: &mut MacroExpander,
+    datum: &Spanned<Datum>,
+    forms: &mut Vec<Spanned<TopLevel>>,
+) -> Result<(), SurfaceError> {
+    if let Some(body) = top_level_begin_body(datum) {
+        for datum in body {
+            classify_top_level_with_macros(expander, datum, forms)?;
+        }
+        return Ok(());
+    }
+
+    if let Some((name, rules)) = parse_define_syntax(datum)? {
+        expander.define(name, rules);
+        return Ok(());
+    }
+
+    let expanded = expander.expand(datum)?;
+    if let Some(body) = top_level_begin_body(&expanded) {
+        for datum in body {
+            classify_top_level_with_macros(expander, datum, forms)?;
+        }
+        return Ok(());
+    }
+
+    forms.push(classify_top_level(&expanded)?);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -729,20 +752,15 @@ fn is_quoted_list(items: &[Spanned<Datum>]) -> bool {
         .is_some_and(|name| matches!(name.as_str(), "quote" | "quasiquote"))
 }
 
-fn classify_top_level_forms(
-    datum: &Spanned<Datum>,
-) -> Result<Vec<Spanned<TopLevel>>, SurfaceError> {
+fn top_level_begin_body(datum: &Spanned<Datum>) -> Option<&[Spanned<Datum>]> {
     if let Datum::List(items) = &datum.node
         && let Some((head, rest)) = items.split_first()
         && identifier_name(head).as_deref() == Some("begin")
     {
-        return rest.iter().try_fold(Vec::new(), |mut forms, datum| {
-            forms.extend(classify_top_level_forms(datum)?);
-            Ok(forms)
-        });
+        return Some(rest);
     }
 
-    classify_top_level(datum).map(|form| vec![form])
+    None
 }
 
 pub fn classify_top_level(datum: &Spanned<Datum>) -> Result<Spanned<TopLevel>, SurfaceError> {
