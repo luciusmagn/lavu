@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -3985,6 +3985,7 @@ fn is_empty_list(value: &Value) -> bool {
 fn list_items(value: &Value) -> Option<Vec<Value>> {
     let mut items = Vec::new();
     let mut tail = value.clone();
+    let mut seen = HashSet::new();
 
     loop {
         match tail {
@@ -3993,6 +3994,9 @@ fn list_items(value: &Value) -> Option<Vec<Value>> {
                 return Some(items);
             }
             Value::Pair(pair) => {
+                if !seen.insert(Rc::as_ptr(&pair)) {
+                    return None;
+                }
                 let (car, cdr) = {
                     let pair = pair.borrow();
                     (pair.car.clone(), pair.cdr.clone())
@@ -5061,6 +5065,10 @@ mod tests {
         assert_eq!(eval_one("(pair? (list 1))"), "#t");
         assert_eq!(eval_one("(list? (cons 1 (cons 2 '())))"), "#t");
         assert_eq!(eval_one("(list? (cons 1 2))"), "#f");
+        assert_eq!(
+            eval_one("(define p (cons 1 '())) (set-cdr! p p) (list? p)"),
+            "#f"
+        );
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(length (list 1 2 3))"), "3");

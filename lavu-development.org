@@ -282,6 +282,8 @@ Scheme value is valid.
   access path while keeping their primitive metadata conservative.
 - Represent constructed proper lists as shared cons cells so mutating a
   list or one of its tails is visible through aliases.
+- Make =list?= detect mutable-pair cycles and return =#f= instead of
+  walking forever.
 ** Internal Definitions
 - Lower leading internal =define= forms in body contexts to =letrec= so
   lambda, let, let*, and letrec bodies can use R5RS-style local
