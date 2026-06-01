@@ -212,6 +212,8 @@ impl Env {
             "list",
             "reverse",
             "append",
+            "list-ref",
+            "list-tail",
             "string-length",
             "char=?",
             "char<?",
@@ -458,6 +460,8 @@ fn apply_primitive(
             }),
         }),
         "append" => append(args, span),
+        "list-ref" => list_ref(args, span),
+        "list-tail" => list_tail(args, span),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -983,6 +987,49 @@ fn append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::List(result))
 }
 
+fn list_ref(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [list, index]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+
+    match list {
+        Value::List(items) => items.get(index).cloned().ok_or(EvalError::TypeError {
+            expected: "valid list index",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        }),
+    }
+}
+
+fn list_tail(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [list, index]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+
+    match list {
+        Value::List(items) if index <= items.len() => Ok(Value::List(items[index..].to_vec())),
+        Value::List(_) => Err(EvalError::TypeError {
+            expected: "valid list index",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        }),
+    }
+}
+
 fn make_vector(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if !(1..=2).contains(&args.len()) {
         return Err(EvalError::ArityMismatch {
@@ -1471,6 +1518,8 @@ mod tests {
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
+        assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1)"), "b");
+        assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1)"), "(b c)");
     }
 
     #[test]

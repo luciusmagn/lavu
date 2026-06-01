@@ -395,6 +395,8 @@ impl Inferencer {
         match (actual, expected) {
             (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => Ok(ty),
             (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
+            (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
+            (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
             (Type::Pair(actual_car, actual_cdr), Type::Pair(expected_car, expected_cdr)) => {
                 let car = self.unify(*actual_car, *expected_car, span.clone())?;
@@ -829,5 +831,11 @@ mod tests {
     #[test]
     fn infers_equality_predicates() {
         assert_eq!(infer_one("(equal? '(1) '(1))"), "boolean?");
+    }
+
+    #[test]
+    fn infers_indexed_list_primitives() {
+        assert_eq!(infer_one("(list-ref '(a b c) 1)"), "any?");
+        assert_eq!(infer_one("(list-tail '(a b c) 1)"), "list?");
     }
 }

@@ -201,6 +201,14 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "append",
             Type::uniform_variadic(Type::ListOf(Box::new(a.clone())), Type::ListOf(Box::new(a))),
         ),
+        Primitive::new(
+            "list-ref",
+            Type::procedure(vec![Type::List, Type::Number], Type::Any),
+        ),
+        Primitive::new(
+            "list-tail",
+            Type::procedure(vec![Type::List, Type::Number], Type::List),
+        ),
     ]
 }
 
@@ -284,6 +292,18 @@ mod tests {
         assert_eq!(
             primitive("vector-set!").unwrap().signature.to_string(),
             "(-> vector? number? any? unknown?)"
+        );
+    }
+
+    #[test]
+    fn exposes_indexed_list_primitives() {
+        assert_eq!(
+            primitive("list-ref").unwrap().signature.to_string(),
+            "(-> list? number? any?)"
+        );
+        assert_eq!(
+            primitive("list-tail").unwrap().signature.to_string(),
+            "(-> list? number? list?)"
         );
     }
 }
