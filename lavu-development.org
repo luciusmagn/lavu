@@ -324,6 +324,9 @@ Scheme value is valid.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
+** Diagnostics
+- Include expected/actual details in type mismatch, arity, and
+  non-procedure inference errors so Ariadne labels are more informative.
 ** Agent Workflow
 - Add =AGENTS.md= with commit discipline, push discipline, Rust style,
   and project direction preferences.

@@ -12,17 +12,17 @@ pub enum TypeError {
     #[error("unbound variable: {name}")]
     UnboundVariable { name: String, span: SourceSpan },
 
-    #[error("expected a procedure")]
+    #[error("expected a procedure, got {actual}")]
     ExpectedProcedure { actual: Type, span: SourceSpan },
 
-    #[error("wrong number of arguments")]
+    #[error("wrong number of arguments: expected {expected}, got {actual}")]
     ArityMismatch {
         expected: String,
         actual: usize,
         span: SourceSpan,
     },
 
-    #[error("type mismatch")]
+    #[error("type mismatch: expected {expected}, got {actual}")]
     Mismatch {
         expected: Type,
         actual: Type,
@@ -1269,6 +1269,22 @@ mod tests {
         let mut env = TypeEnv::new();
         let mut inferencer = Inferencer::new();
         inferencer.infer_program(&program, &mut env).unwrap_err()
+    }
+
+    #[test]
+    fn displays_type_error_details() {
+        assert_eq!(
+            infer_error("(+ \"x\" 1)").to_string(),
+            "type mismatch: expected number?, got string?"
+        );
+        assert_eq!(
+            infer_error("(car)").to_string(),
+            "wrong number of arguments: expected 1, got 0"
+        );
+        assert_eq!(
+            infer_error("(\"x\" 1)").to_string(),
+            "expected a procedure, got string?"
+        );
     }
 
     #[test]
