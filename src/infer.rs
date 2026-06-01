@@ -917,6 +917,7 @@ mod tests {
     fn infers_numeric_predicates_and_integer_utilities() {
         assert_eq!(infer_one("(zero? 0)"), "boolean?");
         assert_eq!(infer_one("(quotient 5 2)"), "number?");
+        assert_eq!(infer_one("(floor 3/2)"), "number?");
         assert_eq!(
             infer_one("(lambda (x) (if (integer? x) (+ x 1) 0))"),
             "(-> number? number?)"

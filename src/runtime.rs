@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, RoundingMode};
 use num::{BigInt, BigRational, Complex, Integer, One, Signed, ToPrimitive, Zero};
 use thiserror::Error;
 
@@ -204,6 +204,10 @@ impl Env {
             "lcm",
             "numerator",
             "denominator",
+            "floor",
+            "ceiling",
+            "truncate",
+            "round",
             "char?",
             "char-alphabetic?",
             "char-numeric?",
@@ -539,6 +543,10 @@ fn apply_primitive(
         "lcm" => exact_integer_fold(args, span, BigInt::one(), |left, right| left.lcm(&right)),
         "numerator" => numerator(args, span),
         "denominator" => denominator(args, span),
+        "floor" => numeric_round(args, span, BigRational::floor, RoundingMode::Floor),
+        "ceiling" => numeric_round(args, span, BigRational::ceil, RoundingMode::Ceiling),
+        "truncate" => numeric_round(args, span, BigRational::trunc, RoundingMode::Down),
+        "round" => numeric_round(args, span, round_rational_half_even, RoundingMode::HalfEven),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
         "char-numeric?" => char_predicate(args, span, char::is_numeric),
@@ -1138,6 +1146,41 @@ fn denominator(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
         exact_rational(&value, span).map(|n| Value::Integer(n.denom().clone()))
     })
+}
+
+fn numeric_round(
+    args: Vec<Value>,
+    span: SourceSpan,
+    exact: impl FnOnce(&BigRational) -> BigRational,
+    decimal: RoundingMode,
+) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(n) => Ok(Value::Integer(n)),
+        Value::Rational(n) => Ok(exact_number(exact(&n))),
+        Value::Decimal(n) => Ok(Value::Decimal(n.with_scale_round(0, decimal))),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+    })
+}
+
+fn round_rational_half_even(number: &BigRational) -> BigRational {
+    let floor = number.floor();
+    let ceiling = number.ceil();
+    let distance_to_floor = number - floor.clone();
+    let distance_to_ceiling = ceiling.clone() - number;
+
+    match distance_to_floor.cmp(&distance_to_ceiling) {
+        Ordering::Less => floor,
+        Ordering::Greater => ceiling,
+        Ordering::Equal if floor.to_integer().is_even() => floor,
+        Ordering::Equal => ceiling,
+    }
 }
 
 fn exact_integer(value: &Value, span: SourceSpan) -> Result<BigInt, EvalError> {
@@ -2438,6 +2481,13 @@ mod tests {
         assert_eq!(eval_one("(lcm 4 6)"), "12");
         assert_eq!(eval_one("(numerator 6/8)"), "3");
         assert_eq!(eval_one("(denominator 6/8)"), "4");
+        assert_eq!(eval_one("(floor 3/2)"), "1");
+        assert_eq!(eval_one("(ceiling 3/2)"), "2");
+        assert_eq!(eval_one("(truncate -3/2)"), "-1");
+        assert_eq!(eval_one("(round 5/2)"), "2");
+        assert_eq!(eval_one("(round 7/2)"), "4");
+        assert_eq!(eval_one("(floor -1.2)"), "-2");
+        assert_eq!(eval_one("(ceiling -1.2)"), "-1");
     }
 
     #[test]

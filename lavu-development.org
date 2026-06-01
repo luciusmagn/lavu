@@ -231,6 +231,8 @@ Scheme value is valid.
 - Add exact integer and rational utilities: =abs=, =max=, =min=,
   =quotient=, =remainder=, =modulo=, =gcd=, =lcm=, =numerator=, and
   =denominator=.
+- Add integer rounding primitives =floor=, =ceiling=, =truncate=, and
+  =round= over exact rationals and decimals.
 ** Character Library
 - Add R5RS character classification and case primitives to the native
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,
