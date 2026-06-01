@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::stdlib::primitive;
 use crate::surface::{Expr, Program, TopLevel};
-use crate::syntax::{Atom, SourceSpan, Spanned};
+use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 use crate::types::{ProcedureType, Type};
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -111,7 +111,7 @@ impl Inferencer {
                     name: name.clone(),
                     span: expr.span.clone(),
                 }),
-            Expr::Quote(_) => Ok(Type::Any),
+            Expr::Quote(datum) => Ok(type_of_datum(datum)),
             Expr::Quasiquote(_) => Ok(Type::Any),
             Expr::Lambda { params, body } => self.infer_lambda(params, body, env),
             Expr::If {
@@ -613,6 +613,41 @@ fn type_of_atom(atom: &Atom) -> Type {
     }
 }
 
+fn type_of_datum(datum: &Spanned<Datum>) -> Type {
+    match &datum.node {
+        Datum::Atom(Atom::Identifier(_)) => Type::Symbol,
+        Datum::Atom(atom) => type_of_atom(atom),
+        Datum::List(items) => type_of_list_datums(items),
+        Datum::DottedList(items, tail) => {
+            items.iter().rev().fold(type_of_datum(tail), |cdr, car| {
+                Type::Pair(Box::new(type_of_datum(car)), Box::new(cdr))
+            })
+        }
+        Datum::Vector(_) => Type::Vector,
+        Datum::Quote(inner) => abbreviation_datum_type("quote", inner),
+        Datum::Quasiquote(inner) => abbreviation_datum_type("quasiquote", inner),
+        Datum::Unquote(inner) => abbreviation_datum_type("unquote", inner),
+        Datum::UnquoteSplicing(inner) => abbreviation_datum_type("unquote-splicing", inner),
+    }
+}
+
+fn type_of_list_datums(items: &[Spanned<Datum>]) -> Type {
+    if items.is_empty() {
+        return Type::Null;
+    }
+
+    Type::ListOf(Box::new(Type::union(
+        items.iter().map(type_of_datum).collect::<Vec<_>>(),
+    )))
+}
+
+fn abbreviation_datum_type(_name: &'static str, datum: &Spanned<Datum>) -> Type {
+    Type::ListOf(Box::new(Type::union(vec![
+        Type::Symbol,
+        type_of_datum(datum),
+    ])))
+}
+
 fn span_for_operands(operands: &[Spanned<Expr>]) -> SourceSpan {
     match (operands.first(), operands.last()) {
         (Some(first), Some(last)) => first.span.start..last.span.end,
@@ -715,5 +750,13 @@ mod tests {
     #[test]
     fn infers_quasiquote_conservatively() {
         assert_eq!(infer_one("`(1 ,(+ 1 2))"), "any?");
+    }
+
+    #[test]
+    fn infers_quoted_datum_shapes() {
+        assert_eq!(infer_one("'(1 2 3)"), "(listof number?)");
+        assert_eq!(infer_one("'()"), "null?");
+        assert_eq!(infer_one("'(1 . \"x\")"), "(pair? number? string?)");
+        assert_eq!(infer_one("'(1 \"x\")"), "(listof (U number? string?))");
     }
 }

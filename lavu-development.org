@@ -311,3 +311,6 @@ Scheme value is valid.
 ** Quasiquote Runtime
 - Preserve quote abbreviations as data under quoted data and evaluate
   quasiquote, unquote, and unquote-splicing directly over stable datums.
+** Quoted Datum Types
+- Infer structural types for quoted data, including proper lists,
+  dotted pairs, heterogeneous list element unions, and =null?=.
