@@ -3402,6 +3402,14 @@ mod tests {
 
     #[test]
     fn infers_higher_order_iteration_element_flow() {
+        assert_eq!(
+            infer_one("map"),
+            "(-> (-> t0 t0 * t1) (listof t0) (listof t0) * (listof t1))"
+        );
+        assert_eq!(
+            infer_one("for-each"),
+            "(-> (-> t0 t0 * any?) (listof t0) (listof t0) * unknown?)"
+        );
         assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "(listof number?)");
         assert_eq!(
             infer_one("(map string-length '(\"a\" \"bb\"))"),

@@ -748,6 +748,10 @@ Scheme value is valid.
   iteration, so empty input lists do not hide an inapplicable procedure.
 - Preserve visible heterogeneous element unions for =(map list ...)= and
   =(map vector ...)= constructor mappers.
+- Expose =map= and =for-each= primitive metadata with same-element
+  polymorphic list flow. Direct inference remains more precise for
+  heterogeneous multi-list mapping than the current displayed procedure
+  type language can express.
 ** Multiple Values
 - Add native =values= and =call-with-values= with conservative primitive
   metadata.

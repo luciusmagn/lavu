@@ -696,14 +696,8 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
                 Type::union(vec![Type::Boolean, a.clone()]),
             ),
         ),
-        Primitive::new(
-            "map",
-            Type::rest_procedure(vec![Type::Any, Type::List], Type::List, Type::List),
-        ),
-        Primitive::new(
-            "for-each",
-            Type::rest_procedure(vec![Type::Any, Type::List], Type::List, Type::Unknown),
-        ),
+        Primitive::new("map", map_signature()),
+        Primitive::new("for-each", for_each_signature()),
     ];
 
     primitives.extend(composed_accessor_primitives());
@@ -730,6 +724,31 @@ fn number_predicate() -> Type {
 
 fn char_predicate() -> Type {
     Type::procedure(vec![Type::Char], Type::Boolean)
+}
+
+fn map_signature() -> Type {
+    let element = Type::Var("a".to_string());
+    let result = Type::Var("b".to_string());
+    Type::rest_procedure(
+        vec![
+            Type::rest_procedure(vec![element.clone()], element.clone(), result.clone()),
+            Type::ListOf(Box::new(element.clone())),
+        ],
+        Type::ListOf(Box::new(element)),
+        Type::ListOf(Box::new(result)),
+    )
+}
+
+fn for_each_signature() -> Type {
+    let element = Type::Var("a".to_string());
+    Type::rest_procedure(
+        vec![
+            Type::rest_procedure(vec![element.clone()], element.clone(), Type::Any),
+            Type::ListOf(Box::new(element.clone())),
+        ],
+        Type::ListOf(Box::new(element)),
+        Type::Unknown,
+    )
 }
 
 fn composed_accessor_primitives() -> Vec<Primitive> {
@@ -995,11 +1014,11 @@ mod tests {
     fn exposes_higher_order_list_primitives() {
         assert_eq!(
             primitive("map").unwrap().signature.to_string(),
-            "(-> any? list? list? * list?)"
+            "(-> (-> a a * b) (listof a) (listof a) * (listof b))"
         );
         assert_eq!(
             primitive("for-each").unwrap().signature.to_string(),
-            "(-> any? list? list? * unknown?)"
+            "(-> (-> a a * any?) (listof a) (listof a) * unknown?)"
         );
     }
 
