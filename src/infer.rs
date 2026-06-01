@@ -72,6 +72,12 @@ enum ListAccessResult {
     Tail,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MembershipResult {
+    Tail,
+    Entry,
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -215,6 +221,28 @@ impl Inferencer {
                         operand_tys,
                         expr.span.clone(),
                         ListAccessResult::Tail,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if matches!(
+                    name.as_str(),
+                    "memq" | "memv" | "member"
+                )) {
+                    return self.infer_membership(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        MembershipResult::Tail,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if matches!(
+                    name.as_str(),
+                    "assq" | "assv" | "assoc"
+                )) {
+                    return self.infer_membership(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        MembershipResult::Entry,
                     );
                 }
 
@@ -596,6 +624,66 @@ impl Inferencer {
                     operands[0].span.clone(),
                 )?;
                 Ok(Type::Any)
+            }
+        }
+    }
+
+    fn infer_membership(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        result: MembershipResult,
+    ) -> Result<Type, TypeError> {
+        let [_target_ty, list_ty]: [Type; 2] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "2".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        let success = self.infer_membership_success(list_ty, &operands[1], result)?;
+        Ok(match success {
+            Type::Null | Type::Never => Type::Boolean,
+            Type::Any | Type::Unknown => Type::Any,
+            success => Type::union(vec![Type::Boolean, self.resolve(success)]),
+        })
+    }
+
+    fn infer_membership_success(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+        result: MembershipResult,
+    ) -> Result<Type, TypeError> {
+        match self.resolve(actual) {
+            Type::ListOf(element) => Ok(match result {
+                MembershipResult::Tail => Type::ListOf(element),
+                MembershipResult::Entry => self.resolve(*element),
+            }),
+            Type::Null => Ok(Type::Never),
+            Type::List => Ok(match result {
+                MembershipResult::Tail => Type::List,
+                MembershipResult::Entry => Type::Any,
+            }),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(match result {
+                    MembershipResult::Tail => Type::ListOf(Box::new(element)),
+                    MembershipResult::Entry => element,
+                })
+            }
+            Type::Any | Type::Unknown => Ok(Type::Any),
+            actual => {
+                self.unify(actual, Type::List, operand.span.clone())?;
+                Ok(match result {
+                    MembershipResult::Tail => Type::List,
+                    MembershipResult::Entry => Type::Any,
+                })
             }
         }
     }
@@ -1407,9 +1495,19 @@ mod tests {
     }
 
     #[test]
-    fn infers_membership_primitives_conservatively() {
-        assert_eq!(infer_one("(member 'b '(a b c))"), "any?");
-        assert_eq!(infer_one("(assoc 'b '((a 1) (b 2)))"), "any?");
+    fn infers_membership_primitives() {
+        assert_eq!(
+            infer_one("(member 'b '(a b c))"),
+            "(U boolean? (listof symbol?))"
+        );
+        assert_eq!(
+            infer_one("(assoc 'b '((a 1) (b 2)))"),
+            "(U boolean? (listof (U number? symbol?)))"
+        );
+        assert_eq!(
+            infer_one("(lambda (xs) (member 'b xs))"),
+            "(-> (listof t0) (U boolean? (listof t0)))"
+        );
     }
 
     #[test]

@@ -502,6 +502,8 @@ Scheme value is valid.
 ** Membership Primitives
 - Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
   =assoc= using the corresponding equality predicate semantics.
+- Infer membership results as false-or-tail and association results as
+  false-or-entry, preserving visible =listof= element shapes.
 ** Higher-Order List Iteration
 - Add typed and native =map= and =for-each= over equal-length proper
   lists, applying both closures and primitive procedures from Rust.

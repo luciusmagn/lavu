@@ -597,27 +597,54 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "memq",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![Type::Boolean, Type::List]),
+            ),
         ),
         Primitive::new(
             "memv",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![Type::Boolean, Type::List]),
+            ),
         ),
         Primitive::new(
             "member",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![Type::Boolean, Type::List]),
+            ),
         ),
         Primitive::new(
             "assq",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![
+                    Type::Boolean,
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                ]),
+            ),
         ),
         Primitive::new(
             "assv",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![
+                    Type::Boolean,
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                ]),
+            ),
         ),
         Primitive::new(
             "assoc",
-            Type::procedure(vec![Type::Any, Type::List], Type::Any),
+            Type::procedure(
+                vec![Type::Any, Type::List],
+                Type::union(vec![
+                    Type::Boolean,
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                ]),
+            ),
         ),
         Primitive::new(
             "map",
@@ -883,11 +910,11 @@ mod tests {
     fn exposes_membership_primitives() {
         assert_eq!(
             primitive("member").unwrap().signature.to_string(),
-            "(-> any? list? any?)"
+            "(-> any? list? (U boolean? list?))"
         );
         assert_eq!(
             primitive("assoc").unwrap().signature.to_string(),
-            "(-> any? list? any?)"
+            "(-> any? list? (U boolean? (pair? any? any?)))"
         );
     }
 
