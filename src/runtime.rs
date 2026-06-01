@@ -991,6 +991,12 @@ fn divide(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             span,
         });
     }
+    if has_zero_divisor(&numbers) {
+        return Err(EvalError::TypeError {
+            expected: "non-zero number?",
+            span,
+        });
+    }
 
     if numbers.iter().any(NumberValue::is_complex) {
         return Ok(Value::Complex(fold_divide(
@@ -1010,6 +1016,14 @@ fn divide(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         numbers.into_iter().map(NumberValue::into_exact).collect(),
         BigRational::from_integer(BigInt::from(1)),
     )))
+}
+
+fn has_zero_divisor(numbers: &[NumberValue]) -> bool {
+    match numbers {
+        [number] => number.is_zero(),
+        [_, divisors @ ..] => divisors.iter().any(NumberValue::is_zero),
+        [] => false,
+    }
 }
 
 fn numeric_compare(
@@ -1784,6 +1798,14 @@ impl NumberValue {
 
     fn is_complex(&self) -> bool {
         matches!(self, Self::Complex(_))
+    }
+
+    fn is_zero(&self) -> bool {
+        match self {
+            Self::Exact(n) => n.is_zero(),
+            Self::Decimal(n) => n.is_zero(),
+            Self::Complex(n) => n.re.is_zero() && n.im.is_zero(),
+        }
     }
 
     fn into_exact(self) -> BigRational {
@@ -4604,6 +4626,15 @@ mod tests {
         assert_eq!(eval_one("(expt 2 -1)"), "1/2");
         assert_eq!(eval_one("(expt 1.5 2)"), "2.25");
         assert_eq!(eval_one("(expt 1+2i 2)"), "-3+4i");
+        for input in ["(/ 1 0)", "(/ 0)", "(/ 1 0+0i)"] {
+            assert!(matches!(
+                eval_error(input),
+                EvalError::TypeError {
+                    expected: "non-zero number?",
+                    ..
+                }
+            ));
+        }
     }
 
     #[test]
