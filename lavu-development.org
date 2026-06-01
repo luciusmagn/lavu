@@ -355,3 +355,6 @@ Scheme value is valid.
 ** Higher-Order List Iteration
 - Add typed and native =map= and =for-each= over equal-length proper
   lists, applying both closures and primitive procedures from Rust.
+** Conversion Primitives
+- Add typed and native symbol/string, char/integer, and number/string
+  conversion primitives, with =string->number= reusing the lexer.

@@ -7,6 +7,7 @@ use bigdecimal::BigDecimal;
 use num::{BigInt, BigRational, Complex, ToPrimitive};
 use thiserror::Error;
 
+use crate::lexer::{Token, tokenize};
 use crate::surface::{Expr, Program, TopLevel, classify_expr};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
@@ -206,6 +207,12 @@ impl Env {
             "equal?",
             "force",
             "apply",
+            "symbol->string",
+            "string->symbol",
+            "char->integer",
+            "integer->char",
+            "number->string",
+            "string->number",
             "cons",
             "car",
             "cdr",
@@ -453,6 +460,50 @@ fn apply_primitive(
         "equal?" => equal(args, span),
         "force" => force(args, span),
         "apply" => apply_procedure_argument(args, span),
+        "symbol->string" => unary(args, span.clone(), |value| match value {
+            Value::Symbol(name) => Ok(Value::String(name)),
+            _ => Err(EvalError::TypeError {
+                expected: "symbol?",
+                span,
+            }),
+        }),
+        "string->symbol" => unary(args, span.clone(), |value| match value {
+            Value::String(text) => Ok(Value::Symbol(text)),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            }),
+        }),
+        "char->integer" => unary(args, span.clone(), |value| match value {
+            Value::Character(ch) => Ok(Value::Integer(BigInt::from(ch as u32))),
+            _ => Err(EvalError::TypeError {
+                expected: "char?",
+                span,
+            }),
+        }),
+        "integer->char" => unary(args, span.clone(), |value| match value {
+            Value::Integer(n) => integer_to_char(n, span),
+            _ => Err(EvalError::TypeError {
+                expected: "integer?",
+                span,
+            }),
+        }),
+        "number->string" => unary(args, span.clone(), |value| match value {
+            Value::Integer(_) | Value::Rational(_) | Value::Decimal(_) | Value::Complex(_) => {
+                Ok(Value::String(value.to_string()))
+            }
+            _ => Err(EvalError::TypeError {
+                expected: "number?",
+                span,
+            }),
+        }),
+        "string->number" => unary(args, span.clone(), |value| match value {
+            Value::String(text) => Ok(string_to_number(&text)),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            }),
+        }),
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
@@ -900,6 +951,50 @@ fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value,
 
     operands.extend(final_operands);
     apply(procedure, operands, span)
+}
+
+fn integer_to_char(n: BigInt, span: SourceSpan) -> Result<Value, EvalError> {
+    let Some(codepoint) = n.to_u32() else {
+        return Err(EvalError::TypeError {
+            expected: "Unicode scalar value?",
+            span,
+        });
+    };
+    let Some(ch) = char::from_u32(codepoint) else {
+        return Err(EvalError::TypeError {
+            expected: "Unicode scalar value?",
+            span,
+        });
+    };
+
+    Ok(Value::Character(ch))
+}
+
+fn string_to_number(text: &str) -> Value {
+    let tokens = tokenize(text)
+        .into_iter()
+        .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_) | Token::LineComment))
+        .map(|(token, _, _)| token)
+        .collect::<Vec<_>>();
+
+    let [token]: [Token; 1] = match tokens.try_into() {
+        Ok(tokens) => tokens,
+        Err(_) => return Value::Boolean(false),
+    };
+
+    match token {
+        Token::Integer(n)
+        | Token::Binary(n)
+        | Token::Octal(n)
+        | Token::Hex(n)
+        | Token::DecInteger(n) => Value::Integer(n),
+        Token::Real((numerator, denominator)) => {
+            Value::Rational(BigRational::new(numerator, denominator))
+        }
+        Token::Decimal(n) => Value::Decimal(n),
+        Token::Complex(n) => Value::Complex(n),
+        _ => Value::Boolean(false),
+    }
 }
 
 fn eqv_value(left: &Value, right: &Value) -> bool {
@@ -1644,6 +1739,17 @@ mod tests {
         assert_eq!(eval_one("(input-port? 1)"), "#f");
         assert_eq!(eval_one("(output-port? 1)"), "#f");
         assert_eq!(eval_one("(eof-object? 1)"), "#f");
+    }
+
+    #[test]
+    fn evaluates_conversion_primitives() {
+        assert_eq!(eval_one("(symbol->string 'hello)"), "\"hello\"");
+        assert_eq!(eval_one("(string->symbol \"hello\")"), "hello");
+        assert_eq!(eval_one("(char->integer #\\A)"), "65");
+        assert_eq!(eval_one("(integer->char 65)"), "#\\A");
+        assert_eq!(eval_one("(number->string 1/2)"), "\"1/2\"");
+        assert_eq!(eval_one("(string->number \"#x10\")"), "16");
+        assert_eq!(eval_one("(string->number \"wat\")"), "#f");
     }
 
     #[test]

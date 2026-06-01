@@ -850,4 +850,10 @@ mod tests {
         assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "list?");
         assert_eq!(infer_one("(for-each + '(1 2) '(3 4))"), "unknown?");
     }
+
+    #[test]
+    fn infers_conversion_primitives() {
+        assert_eq!(infer_one("(symbol->string 'hello)"), "string?");
+        assert_eq!(infer_one("(string->number \"1\")"), "(U boolean? number?)");
+    }
 }

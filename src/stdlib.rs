@@ -81,6 +81,33 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "apply",
             Type::rest_procedure(vec![Type::Any, Type::Any], Type::Any, Type::Any),
         ),
+        Primitive::new(
+            "symbol->string",
+            Type::procedure(vec![Type::Symbol], Type::String),
+        ),
+        Primitive::new(
+            "string->symbol",
+            Type::procedure(vec![Type::String], Type::Symbol),
+        ),
+        Primitive::new(
+            "char->integer",
+            Type::procedure(vec![Type::Char], Type::Number),
+        ),
+        Primitive::new(
+            "integer->char",
+            Type::procedure(vec![Type::Number], Type::Char),
+        ),
+        Primitive::new(
+            "number->string",
+            Type::procedure(vec![Type::Number], Type::String),
+        ),
+        Primitive::new(
+            "string->number",
+            Type::procedure(
+                vec![Type::String],
+                Type::union(vec![Type::Number, Type::Boolean]),
+            ),
+        ),
         Primitive::new("+", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new("*", Type::uniform_variadic(Type::Number, Type::Number)),
         Primitive::new(
@@ -360,6 +387,18 @@ mod tests {
         assert_eq!(
             primitive("for-each").unwrap().signature.to_string(),
             "(-> any? list? list? * unknown?)"
+        );
+    }
+
+    #[test]
+    fn exposes_conversion_primitives() {
+        assert_eq!(
+            primitive("symbol->string").unwrap().signature.to_string(),
+            "(-> symbol? string?)"
+        );
+        assert_eq!(
+            primitive("string->number").unwrap().signature.to_string(),
+            "(-> string? (U boolean? number?))"
         );
     }
 }
