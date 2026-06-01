@@ -183,6 +183,14 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new("round", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
+            "exact->inexact",
+            Type::procedure(vec![Type::Number], Type::Number),
+        ),
+        Primitive::new(
+            "inexact->exact",
+            Type::procedure(vec![Type::Number], Type::Number),
+        ),
+        Primitive::new(
             "char=?",
             Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
         ),
@@ -549,6 +557,10 @@ mod tests {
         );
         assert_eq!(
             primitive("floor").unwrap().signature.to_string(),
+            "(-> number? number?)"
+        );
+        assert_eq!(
+            primitive("exact->inexact").unwrap().signature.to_string(),
             "(-> number? number?)"
         );
         assert_eq!(

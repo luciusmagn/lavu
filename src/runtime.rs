@@ -208,6 +208,8 @@ impl Env {
             "ceiling",
             "truncate",
             "round",
+            "exact->inexact",
+            "inexact->exact",
             "char?",
             "char-alphabetic?",
             "char-numeric?",
@@ -547,6 +549,8 @@ fn apply_primitive(
         "ceiling" => numeric_round(args, span, BigRational::ceil, RoundingMode::Ceiling),
         "truncate" => numeric_round(args, span, BigRational::trunc, RoundingMode::Down),
         "round" => numeric_round(args, span, round_rational_half_even, RoundingMode::HalfEven),
+        "exact->inexact" => exact_to_inexact(args, span),
+        "inexact->exact" => inexact_to_exact(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
         "char-numeric?" => char_predicate(args, span, char::is_numeric),
@@ -1181,6 +1185,56 @@ fn round_rational_half_even(number: &BigRational) -> BigRational {
         Ordering::Equal if floor.to_integer().is_even() => floor,
         Ordering::Equal => ceiling,
     }
+}
+
+fn exact_to_inexact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(n) => Ok(Value::Decimal(BigDecimal::from(n))),
+        Value::Rational(n) => Ok(Value::Decimal(rational_to_decimal(&n))),
+        Value::Decimal(_) | Value::Complex(_) => Ok(value),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    })
+}
+
+fn inexact_to_exact(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::Integer(_) | Value::Rational(_) => Ok(value),
+        Value::Decimal(n) => decimal_to_rational(&n, span).map(exact_number),
+        Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "real number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    })
+}
+
+fn decimal_to_rational(number: &BigDecimal, span: SourceSpan) -> Result<BigRational, EvalError> {
+    let (digits, scale) = number.as_bigint_and_exponent();
+    if scale >= 0 {
+        Ok(BigRational::new(digits, power_of_ten(scale, span)?))
+    } else {
+        let scale = scale.checked_neg().ok_or(EvalError::TypeError {
+            expected: "representable decimal scale?",
+            span: span.clone(),
+        })?;
+        Ok(BigRational::from_integer(
+            digits * power_of_ten(scale, span)?,
+        ))
+    }
+}
+
+fn power_of_ten(exponent: i64, span: SourceSpan) -> Result<BigInt, EvalError> {
+    let exponent = u32::try_from(exponent).map_err(|_| EvalError::TypeError {
+        expected: "representable decimal scale?",
+        span,
+    })?;
+    Ok(BigInt::from(10).pow(exponent))
 }
 
 fn exact_integer(value: &Value, span: SourceSpan) -> Result<BigInt, EvalError> {
@@ -2488,6 +2542,11 @@ mod tests {
         assert_eq!(eval_one("(round 7/2)"), "4");
         assert_eq!(eval_one("(floor -1.2)"), "-2");
         assert_eq!(eval_one("(ceiling -1.2)"), "-1");
+        assert_eq!(eval_one("(exact->inexact 1/2)"), "0.5");
+        assert_eq!(eval_one("(inexact->exact 1.25)"), "5/4");
+        assert_eq!(eval_one("(inexact->exact 2.0)"), "2");
+        assert_eq!(eval_one("(inexact? (exact->inexact 1))"), "#t");
+        assert_eq!(eval_one("(exact? (inexact->exact 1.25))"), "#t");
     }
 
     #[test]
