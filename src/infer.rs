@@ -1667,6 +1667,10 @@ mod tests {
             "(-> (-> any?) (-> any?) (-> any?) any?)"
         );
         assert_eq!(infer_one("(call/cc (lambda (k) 1))"), "any?");
+        assert_eq!(
+            infer_one("(lambda (f) (call/cc f))"),
+            "(-> (-> (-> any? any?) any?) any?)"
+        );
         assert_eq!(infer_one("(write \"x\")"), "unknown?");
     }
 

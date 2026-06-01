@@ -477,6 +477,8 @@ Scheme value is valid.
 - Add initial escape-continuation support for =call/cc= and
   =call-with-current-continuation= within the dynamic extent of the call.
   Full reusable R5RS continuations remain future work.
+- Type the =call/cc= callback as receiving a one-argument continuation
+  procedure while keeping the overall result conservative.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
   =display= raw.

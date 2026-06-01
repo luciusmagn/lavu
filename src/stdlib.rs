@@ -38,6 +38,8 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
     let a = Type::Var("a".to_string());
     let b = Type::Var("b".to_string());
     let thunk = Type::procedure(vec![], Type::Any);
+    let continuation = Type::procedure(vec![Type::Any], Type::Any);
+    let continuation_receiver = Type::procedure(vec![continuation], Type::Any);
 
     let mut primitives = vec![
         Primitive::predicate("boolean?", Type::Boolean),
@@ -195,9 +197,12 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         ),
         Primitive::new(
             "call-with-current-continuation",
-            Type::procedure(vec![Type::Any], Type::Any),
+            Type::procedure(vec![continuation_receiver.clone()], Type::Any),
         ),
-        Primitive::new("call/cc", Type::procedure(vec![Type::Any], Type::Any)),
+        Primitive::new(
+            "call/cc",
+            Type::procedure(vec![continuation_receiver], Type::Any),
+        ),
         Primitive::new(
             "close-output-port",
             Type::procedure(vec![Type::OutputPort], Type::Unknown),
@@ -1036,7 +1041,14 @@ mod tests {
         );
         assert_eq!(
             primitive("call/cc").unwrap().signature.to_string(),
-            "(-> any? any?)"
+            "(-> (-> (-> any? any?) any?) any?)"
+        );
+        assert_eq!(
+            primitive("call-with-current-continuation")
+                .unwrap()
+                .signature
+                .to_string(),
+            "(-> (-> (-> any? any?) any?) any?)"
         );
         assert_eq!(
             primitive("write-char").unwrap().signature.to_string(),
