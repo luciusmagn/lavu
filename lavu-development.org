@@ -270,6 +270,9 @@ Scheme value is valid.
   shorthand.
 - Bind rest arguments as proper lists at runtime and expose rest
   procedure types in inference.
+- Reject duplicate binders in lambda/procedure formals and in R5RS
+  binding forms that require distinct names, while preserving =let*=
+  sequential shadowing.
 ** List Library
 - Add =length= and the R5RS composed =car=/=cdr= accessors through four
   levels, with conservative =any?= metadata for the composed accessors.

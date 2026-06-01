@@ -80,6 +80,13 @@ pub enum SurfaceError {
         span: SourceSpan,
     },
 
+    #[error("{context} has duplicate identifier {name}")]
+    DuplicateIdentifier {
+        context: &'static str,
+        name: String,
+        span: SourceSpan,
+    },
+
     #[error("empty application")]
     EmptyApplication { span: SourceSpan },
 
@@ -1545,6 +1552,9 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 define_formals_from_list(formals, None, &rest[0])?;
             let name = expect_identifier(name_datum, "define procedure")?;
             let params = parse_required_formals(params, "define procedure formals")?;
+            if let Some(rest_param) = &rest_param {
+                ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
+            }
             let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
             let value = Spanned {
                 node: Expr::Lambda {
@@ -1563,6 +1573,9 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 define_formals_from_list(formals, Some(tail.as_ref()), &rest[0])?;
             let name = expect_identifier(name_datum, "define procedure")?;
             let params = parse_required_formals(params, "define procedure formals")?;
+            if let Some(rest_param) = &rest_param {
+                ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
+            }
             let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
             let value = Spanned {
                 node: Expr::Lambda {
@@ -1702,6 +1715,7 @@ fn parse_let(
     }
 
     let bindings = parse_bindings(&rest[0], "let bindings")?;
+    ensure_distinct_bindings(&bindings, "let bindings")?;
     let (params, operands): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
     let body = parse_body(&rest[1..], span.clone(), origin)?;
 
@@ -1734,6 +1748,7 @@ fn parse_named_let(
 
     let name = expect_identifier(&rest[0], "named let")?;
     let bindings = parse_bindings(&rest[1], "named let bindings")?;
+    ensure_distinct_bindings(&bindings, "named let bindings")?;
     let mut params = Vec::new();
     let mut operands = Vec::new();
     for (param, operand) in bindings {
@@ -1850,6 +1865,17 @@ fn parse_bindings(
         .collect()
 }
 
+fn ensure_distinct_bindings(
+    bindings: &[Binding],
+    context: &'static str,
+) -> Result<(), SurfaceError> {
+    let names = bindings
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    ensure_distinct_names(&names, context)
+}
+
 fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -1859,8 +1885,11 @@ fn parse_letrec(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfa
         });
     }
 
+    let bindings = parse_bindings(&rest[0], "letrec bindings")?;
+    ensure_distinct_bindings(&bindings, "letrec bindings")?;
+
     Ok(Expr::LetRec {
-        bindings: parse_bindings(&rest[0], "letrec bindings")?,
+        bindings,
         body: parse_body(&rest[1..], span.clone(), None)?,
     })
 }
@@ -2229,6 +2258,7 @@ fn parse_do(
     }
 
     let bindings = parse_do_bindings(&rest[0])?;
+    ensure_distinct_do_bindings(&bindings, "do bindings")?;
     let Datum::List(test_clause) = &rest[1].node else {
         return Err(SurfaceError::ExpectedList {
             context: "do test clause",
@@ -2353,6 +2383,17 @@ fn parse_do_bindings(bindings: &Spanned<Datum>) -> Result<Vec<DoBinding>, Surfac
             })
         })
         .collect()
+}
+
+fn ensure_distinct_do_bindings(
+    bindings: &[DoBinding],
+    context: &'static str,
+) -> Result<(), SurfaceError> {
+    let names = bindings
+        .iter()
+        .map(|binding| binding.name.clone())
+        .collect::<Vec<_>>();
+    ensure_distinct_names(&names, context)
 }
 
 fn parse_body(
@@ -2494,10 +2535,12 @@ fn parse_formals(formals: &Spanned<Datum>) -> Result<Formals, SurfaceError> {
             Some(expect_identifier(formals, "lambda formals")?),
         )),
         Datum::List(items) => Ok((parse_required_formals(items, "lambda formals")?, None)),
-        Datum::DottedList(items, tail) => Ok((
-            parse_required_formals(items, "lambda formals")?,
-            Some(expect_identifier(tail, "lambda rest formal")?),
-        )),
+        Datum::DottedList(items, tail) => {
+            let params = parse_required_formals(items, "lambda formals")?;
+            let rest = expect_identifier(tail, "lambda rest formal")?;
+            ensure_distinct_extra_name(&params, &rest, "lambda formals")?;
+            Ok((params, Some(rest)))
+        }
         _ => Err(SurfaceError::ExpectedList {
             context: "lambda formals",
             span: formals.span.clone(),
@@ -2527,10 +2570,44 @@ fn parse_required_formals(
     formals: &[Spanned<Datum>],
     context: &'static str,
 ) -> Result<Vec<Spanned<String>>, SurfaceError> {
-    formals
+    let formals = formals
         .iter()
         .map(|item| expect_identifier(item, context))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    ensure_distinct_names(&formals, context)?;
+    Ok(formals)
+}
+
+fn ensure_distinct_names(
+    names: &[Spanned<String>],
+    context: &'static str,
+) -> Result<(), SurfaceError> {
+    let mut seen = BTreeSet::new();
+    for name in names {
+        if !seen.insert(name.node.clone()) {
+            return Err(SurfaceError::DuplicateIdentifier {
+                context,
+                name: name.node.clone(),
+                span: name.span.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn ensure_distinct_extra_name(
+    names: &[Spanned<String>],
+    name: &Spanned<String>,
+    context: &'static str,
+) -> Result<(), SurfaceError> {
+    if names.iter().any(|existing| existing.node == name.node) {
+        return Err(SurfaceError::DuplicateIdentifier {
+            context,
+            name: name.node.clone(),
+            span: name.span.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn expect_identifier(
@@ -2561,7 +2638,9 @@ fn identifier_name(datum: &Spanned<Datum>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
-    use crate::surface::{Expr, SurfaceContext, TopLevel, classify_program, classify_top_level};
+    use crate::surface::{
+        Expr, SurfaceContext, SurfaceError, TopLevel, classify_program, classify_top_level,
+    };
 
     #[test]
     fn classifies_define_and_lambda() {
@@ -2612,6 +2691,39 @@ mod tests {
 
         assert_eq!(name.node, "add1");
         assert!(matches!(value.node, Expr::Lambda { .. }));
+    }
+
+    #[test]
+    fn rejects_duplicate_binding_names() {
+        for input in [
+            "(lambda (x x) x)",
+            "(lambda (x . x) x)",
+            "(let ((x 1) (x 2)) x)",
+            "(let loop ((x 1) (x 2)) x)",
+            "(letrec ((x 1) (x 2)) x)",
+            "(do ((x 0) (x 1)) (#t x))",
+        ] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_top_level(&datums[0]),
+                Err(SurfaceError::DuplicateIdentifier { .. })
+            ));
+        }
+
+        let datums = parse("(define (f x x) x)").unwrap();
+        assert!(matches!(
+            classify_program(&datums),
+            Err(SurfaceError::DuplicateIdentifier { .. })
+        ));
+
+        let datums = parse("(define (f x . x) x)").unwrap();
+        assert!(matches!(
+            classify_program(&datums),
+            Err(SurfaceError::DuplicateIdentifier { .. })
+        ));
+
+        let datums = parse("(let* ((x 1) (x 2)) x)").unwrap();
+        assert!(classify_top_level(&datums[0]).is_ok());
     }
 
     #[test]

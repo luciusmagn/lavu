@@ -81,6 +81,7 @@ fn surface_span(error: &SurfaceError) -> SourceSpan {
         SurfaceError::BadArity { span, .. }
         | SurfaceError::ExpectedIdentifier { span, .. }
         | SurfaceError::ExpectedList { span, .. }
+        | SurfaceError::DuplicateIdentifier { span, .. }
         | SurfaceError::EmptyApplication { span }
         | SurfaceError::UnsupportedDatum { span }
         | SurfaceError::UnsupportedMacroPattern { span }
