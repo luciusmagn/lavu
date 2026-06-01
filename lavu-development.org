@@ -272,6 +272,8 @@ Scheme value is valid.
 - Make improper pair values reference-backed as groundwork for R5RS
   =set-car!= and =set-cdr!=.
 - Add =set-car!= and =set-cdr!= for shared pair values.
+- Infer direct =car= and =cdr= over both pair shapes and proper =listof=
+  values.
 - Represent constructed proper lists as shared cons cells so mutating a
   list or one of its tails is visible through aliases.
 ** Internal Definitions

@@ -67,7 +67,7 @@ enum HigherOrderListResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IndexedListResult {
+enum ListAccessResult {
     Element,
     Tail,
 }
@@ -190,7 +190,7 @@ impl Inferencer {
                         operands,
                         operand_tys,
                         expr.span.clone(),
-                        IndexedListResult::Element,
+                        ListAccessResult::Element,
                     );
                 }
                 if matches!(&operator.node, Expr::Variable(name) if name == "list-tail") {
@@ -198,7 +198,23 @@ impl Inferencer {
                         operands,
                         operand_tys,
                         expr.span.clone(),
-                        IndexedListResult::Tail,
+                        ListAccessResult::Tail,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "car") {
+                    return self.infer_pair_accessor(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        ListAccessResult::Element,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "cdr") {
+                    return self.infer_pair_accessor(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        ListAccessResult::Tail,
                     );
                 }
 
@@ -510,7 +526,7 @@ impl Inferencer {
         operands: &[Spanned<Expr>],
         operand_tys: Vec<Type>,
         span: SourceSpan,
-        result: IndexedListResult,
+        result: ListAccessResult,
     ) -> Result<Type, TypeError> {
         let [list_ty, index_ty]: [Type; 2] =
             operand_tys
@@ -525,8 +541,62 @@ impl Inferencer {
         let element = self.infer_list_element_type(list_ty, &operands[0])?;
 
         match result {
-            IndexedListResult::Element => Ok(self.resolve(element)),
-            IndexedListResult::Tail => Ok(Type::ListOf(Box::new(self.resolve(element)))),
+            ListAccessResult::Element => Ok(self.resolve(element)),
+            ListAccessResult::Tail => Ok(Type::ListOf(Box::new(self.resolve(element)))),
+        }
+    }
+
+    fn infer_pair_accessor(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        result: ListAccessResult,
+    ) -> Result<Type, TypeError> {
+        let [operand_ty]: [Type; 1] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "1".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        match self.resolve(operand_ty) {
+            Type::Pair(car, cdr) => match result {
+                ListAccessResult::Element => Ok(self.resolve(*car)),
+                ListAccessResult::Tail => Ok(self.resolve(*cdr)),
+            },
+            Type::ListOf(element) => match result {
+                ListAccessResult::Element => Ok(self.resolve(*element)),
+                ListAccessResult::Tail => Ok(Type::ListOf(Box::new(self.resolve(*element)))),
+            },
+            Type::List => match result {
+                ListAccessResult::Element => Ok(Type::Any),
+                ListAccessResult::Tail => Ok(Type::List),
+            },
+            Type::Any | Type::Unknown => Ok(Type::Any),
+            Type::Var(name) => {
+                let car = self.fresh_type_var();
+                let cdr = self.fresh_type_var();
+                self.substitutions.insert(
+                    name,
+                    Type::Pair(Box::new(car.clone()), Box::new(cdr.clone())),
+                );
+
+                match result {
+                    ListAccessResult::Element => Ok(car),
+                    ListAccessResult::Tail => Ok(cdr),
+                }
+            }
+            actual => {
+                self.unify(
+                    actual,
+                    Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                    operands[0].span.clone(),
+                )?;
+                Ok(Type::Any)
+            }
         }
     }
 
@@ -1179,6 +1249,14 @@ mod tests {
     fn infers_pair_mutators() {
         assert_eq!(infer_one("(set-car! (cons 1 2) 9)"), "unknown?");
         assert_eq!(infer_one("(set-cdr! (cons 1 2) 9)"), "unknown?");
+    }
+
+    #[test]
+    fn infers_pair_accessors_over_lists() {
+        assert_eq!(infer_one("(car '(1 2))"), "number?");
+        assert_eq!(infer_one("(cdr '(1 2))"), "(listof number?)");
+        assert_eq!(infer_one("(car (cons \"x\" 2))"), "string?");
+        assert_eq!(infer_one("(cdr (cons \"x\" 2))"), "number?");
     }
 
     #[test]
