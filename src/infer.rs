@@ -60,6 +60,12 @@ pub struct Inferencer {
     next_var: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HigherOrderListResult {
+    Mapped,
+    Unspecified,
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -156,6 +162,22 @@ impl Inferencer {
                 }
                 if matches!(&operator.node, Expr::Variable(name) if name == "call-with-values") {
                     return self.infer_call_with_values(operands, operand_tys, expr.span.clone());
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "map") {
+                    return self.infer_higher_order_list(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        HigherOrderListResult::Mapped,
+                    );
+                }
+                if matches!(&operator.node, Expr::Variable(name) if name == "for-each") {
+                    return self.infer_higher_order_list(
+                        operands,
+                        operand_tys,
+                        expr.span.clone(),
+                        HigherOrderListResult::Unspecified,
+                    );
                 }
 
                 self.infer_application(operator_ty, operands, operand_tys, expr.span.clone())
@@ -406,6 +428,59 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
+    fn infer_higher_order_list(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        result: HigherOrderListResult,
+    ) -> Result<Type, TypeError> {
+        if operand_tys.len() < 2 {
+            return Err(TypeError::ArityMismatch {
+                expected: "at least 2".to_string(),
+                actual: operand_tys.len(),
+                span,
+            });
+        }
+
+        let mut operand_tys = operand_tys.into_iter();
+        let procedure_ty = operand_tys
+            .next()
+            .expect("arity check ensures a procedure operand");
+        let element_tys = operand_tys
+            .zip(&operands[1..])
+            .map(|(ty, operand)| self.infer_list_element_type(ty, operand))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mapped_ty =
+            self.infer_application(procedure_ty, &operands[1..], element_tys, span.clone())?;
+
+        match result {
+            HigherOrderListResult::Mapped => Ok(Type::ListOf(Box::new(self.resolve(mapped_ty)))),
+            HigherOrderListResult::Unspecified => Ok(Type::Unknown),
+        }
+    }
+
+    fn infer_list_element_type(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+    ) -> Result<Type, TypeError> {
+        match self.resolve(actual) {
+            Type::ListOf(element) => Ok(self.resolve(*element)),
+            Type::Null | Type::List | Type::Any | Type::Unknown => Ok(Type::Any),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(element)
+            }
+            actual => {
+                self.unify(actual, Type::List, operand.span.clone())?;
+                Ok(Type::Any)
+            }
+        }
     }
 
     fn infer_apply_primitive(
@@ -1209,8 +1284,20 @@ mod tests {
     }
 
     #[test]
-    fn infers_higher_order_iteration_conservatively() {
-        assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "list?");
+    fn infers_higher_order_iteration_element_flow() {
+        assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "(listof number?)");
+        assert_eq!(
+            infer_one("(map string-length '(\"a\" \"bb\"))"),
+            "(listof number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (xs) (map string-length xs))"),
+            "(-> (listof string?) (listof number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (xs) (for-each string-length xs))"),
+            "(-> (listof string?) unknown?)"
+        );
         assert_eq!(infer_one("(for-each + '(1 2) '(3 4))"), "unknown?");
     }
 

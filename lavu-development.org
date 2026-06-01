@@ -501,6 +501,9 @@ Scheme value is valid.
 ** Higher-Order List Iteration
 - Add typed and native =map= and =for-each= over equal-length proper
   lists, applying both closures and primitive procedures from Rust.
+- Infer =map= result element types from the mapped procedure, and use
+  =map=/=for-each= list element flow to constrain procedure and list
+  parameters.
 ** Multiple Values
 - Add native =values= and =call-with-values= with conservative primitive
   metadata.
