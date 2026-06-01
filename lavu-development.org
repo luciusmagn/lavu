@@ -242,11 +242,13 @@ Scheme value is valid.
 - Add integer rounding primitives =floor=, =ceiling=, =truncate=, and
   =round= over exact rationals and decimals.
 - Add =exact->inexact= and =inexact->exact= for exact rationals and
-  finite decimals; reader-level exact complex literals remain future
-  numeric-tower work.
+  finite decimals.
 - Add an exact complex runtime representation for rectangular complexes
   built from exact real components, preserving exactness through core
   complex arithmetic and component access.
+- Parse exact rectangular and pure-imaginary complex literals over
+  decimal exact components, so values such as =1+2i= and =1/2+3/4i=
+  remain exact unless explicitly marked with =#i= or decimal notation.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.

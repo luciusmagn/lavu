@@ -303,6 +303,7 @@ fn atom_from_token(token: Token) -> Option<Atom> {
         | Token::DecInteger(n) => Some(Atom::Integer(n)),
         Token::Decimal(n) => Some(Atom::Decimal(n)),
         Token::Real((numerator, denominator)) => Some(Atom::Real(numerator, denominator)),
+        Token::ExactComplex(n) => Some(Atom::ExactComplex(n)),
         Token::Complex(n) => Some(Atom::Complex(n)),
         Token::String(s) => Some(Atom::String(unescape_string_token(&s))),
         Token::Character(c) => Some(Atom::Character(c)),

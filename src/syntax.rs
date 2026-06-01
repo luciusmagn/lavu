@@ -1,5 +1,5 @@
 use bigdecimal::BigDecimal;
-use num::{BigInt, Complex};
+use num::{BigInt, BigRational, Complex};
 
 use std::ops::Range;
 
@@ -44,6 +44,7 @@ pub enum Atom {
     Integer(BigInt),
     Decimal(BigDecimal),
     Real(BigInt, BigInt),
+    ExactComplex(Complex<BigRational>),
     Complex(Complex<BigDecimal>),
     String(String),
     Boolean(bool),

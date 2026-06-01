@@ -4046,7 +4046,7 @@ fn value_to_datum(value: Value, span: SourceSpan) -> Result<Spanned<Datum>, Eval
     let datum = match value {
         Value::Integer(n) => Datum::Atom(Atom::Integer(n)),
         Value::Rational(n) => Datum::Atom(Atom::Real(n.numer().clone(), n.denom().clone())),
-        Value::ExactComplex(n) => Datum::Atom(Atom::Complex(exact_complex_to_decimal(&n))),
+        Value::ExactComplex(n) => Datum::Atom(Atom::ExactComplex(n)),
         Value::Decimal(n) => Datum::Atom(Atom::Decimal(n)),
         Value::Complex(n) => Datum::Atom(Atom::Complex(n)),
         Value::Boolean(value) => Datum::Atom(Atom::Boolean(value)),
@@ -4194,6 +4194,7 @@ fn atom_to_value(atom: &Atom) -> Value {
         Atom::Integer(n) => Value::Integer(n.clone()),
         Atom::Decimal(n) => Value::Decimal(n.clone()),
         Atom::Real(n, d) => exact_number(BigRational::new(n.clone(), d.clone())),
+        Atom::ExactComplex(n) => exact_complex_value(n.clone()),
         Atom::Complex(n) => Value::Complex(n.clone()),
         Atom::String(text) => string_value(text.clone()),
         Atom::Boolean(value) => Value::Boolean(*value),
@@ -4806,6 +4807,9 @@ mod tests {
         assert_eq!(eval_one("1.5"), "1.5");
         assert_eq!(eval_one("+i"), "0+1i");
         assert_eq!(eval_one("1-i"), "1-1i");
+        assert_eq!(eval_one("1/2+3/4i"), "1/2+3/4i");
+        assert_eq!(eval_one("(exact? 1+2i)"), "#t");
+        assert_eq!(eval_one("(exact? #i1+2i)"), "#f");
         assert_eq!(eval_one(".5+.5i"), "0.5+0.5i");
         assert_eq!(eval_one("1@0"), "1+0i");
     }

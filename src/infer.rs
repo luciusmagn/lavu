@@ -2030,7 +2030,11 @@ fn type_of_atom(atom: &Atom) -> Type {
         Atom::Identifier(name) => primitive(name)
             .map(|primitive| primitive.signature)
             .unwrap_or_else(|| Type::Var(name.clone())),
-        Atom::Integer(_) | Atom::Decimal(_) | Atom::Real(_, _) | Atom::Complex(_) => Type::Number,
+        Atom::Integer(_)
+        | Atom::Decimal(_)
+        | Atom::Real(_, _)
+        | Atom::ExactComplex(_)
+        | Atom::Complex(_) => Type::Number,
         Atom::String(_) => Type::String,
         Atom::Boolean(_) => Type::Boolean,
         Atom::Character(_) => Type::Char,

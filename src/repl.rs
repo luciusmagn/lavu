@@ -57,6 +57,7 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
                     Ok(Token::Integer(_))
                     | Ok(Token::Decimal(_))
                     | Ok(Token::Real(_))
+                    | Ok(Token::ExactComplex(_))
                     | Ok(Token::Complex(_))
                     | Ok(Token::Binary(_))
                     | Ok(Token::Octal(_))

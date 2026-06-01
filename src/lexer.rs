@@ -1,6 +1,8 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Lexer as LogosLexer, Logos, Span};
-use num::{BigInt, Complex, FromPrimitive, Num, ToPrimitive, Zero, bigint::ParseBigIntError};
+use num::{
+    BigInt, BigRational, Complex, FromPrimitive, Num, ToPrimitive, Zero, bigint::ParseBigIntError,
+};
 use strum::EnumIs;
 use thiserror::Error;
 
@@ -163,6 +165,28 @@ pub enum Token {
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[4..])
     )]
     Real((BigInt, BigInt)),
+
+    #[regex(
+        r"[+-]?([0-9]+(/[0-9]+)?)[+-]([0-9]+(/[0-9]+)?)i",
+        priority = 9,
+        callback = |lex| parse_exact_rectangular_complex(lex.slice())
+    )]
+    #[regex(
+        r"[+-]i",
+        priority = 7,
+        callback = |lex| parse_exact_imaginary_unit(lex.slice())
+    )]
+    #[regex(
+        r"[+-]?([0-9]+(/[0-9]+)?)i",
+        priority = 7,
+        callback = |lex| parse_exact_pure_imaginary(lex.slice())
+    )]
+    #[regex(
+        r"[+-]?([0-9]+(/[0-9]+)?)[+-]i",
+        priority = 7,
+        callback = |lex| parse_exact_unit_imaginary_complex(lex.slice())
+    )]
+    ExactComplex(Complex<BigRational>),
 
     #[regex(
         r"[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))[+-](([0-9]+(\.[0-9]*)?)|(\.[0-9]+))i",
@@ -646,6 +670,71 @@ fn parse_decimal_literal(slice: &str) -> Result<BigDecimal, ParseBigDecimalError
     BigDecimal::from_str(&normalize_decimal_exponent(slice))
 }
 
+fn parse_exact_rectangular_complex(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let sign_index = slice
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_exact_component(&slice[..sign_index])?;
+    let imaginary = parse_exact_component(
+        slice[sign_index..]
+            .strip_suffix('i')
+            .ok_or(LexerError::DefaultError)?,
+    )?;
+
+    Ok(Complex::new(real, imaginary))
+}
+
+fn parse_exact_imaginary_unit(slice: &str) -> Complex<BigRational> {
+    let imaginary = if slice.starts_with('-') { -1 } else { 1 };
+    Complex::new(
+        BigRational::zero(),
+        BigRational::from_integer(BigInt::from(imaginary)),
+    )
+}
+
+fn parse_exact_pure_imaginary(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let imaginary = parse_exact_component(&slice[..slice.len() - 1])?;
+    Ok(Complex::new(BigRational::zero(), imaginary))
+}
+
+fn parse_exact_unit_imaginary_complex(slice: &str) -> Result<Complex<BigRational>, LexerError> {
+    let sign_index = slice
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+        .ok_or(LexerError::DefaultError)?;
+    let real = parse_exact_component(&slice[..sign_index])?;
+    let imaginary = if slice[sign_index..].starts_with('-') {
+        -1
+    } else {
+        1
+    };
+
+    Ok(Complex::new(
+        real,
+        BigRational::from_integer(BigInt::from(imaginary)),
+    ))
+}
+
+fn parse_exact_component(slice: &str) -> Result<BigRational, LexerError> {
+    let slice = slice.strip_prefix('+').unwrap_or(slice);
+    let Some((numerator, denominator)) = slice.split_once('/') else {
+        return Ok(BigRational::from_integer(BigInt::from_str(slice)?));
+    };
+
+    let numerator = BigInt::from_str(numerator)?;
+    let denominator = BigInt::from_str(denominator)?;
+    if denominator.is_zero() {
+        return Err(LexerError::ZeroDenominator);
+    }
+
+    Ok(BigRational::new(numerator, denominator))
+}
+
 fn parse_rectangular_complex(slice: &str) -> Result<Complex<BigDecimal>, LexerError> {
     let sign_index = slice
         .char_indices()
@@ -858,6 +947,7 @@ fn token_requires_delimiter(token: &Token) -> bool {
         Token::Identifier(_)
             | Token::Integer(_)
             | Token::Real(_)
+            | Token::ExactComplex(_)
             | Token::Complex(_)
             | Token::Decimal(_)
             | Token::Binary(_)
@@ -1111,15 +1201,24 @@ mod tests {
         let imaginary = tokenize("+i -i 2i -2.5i 1+i 1-i #i+i");
         assert_eq!(
             imaginary[0].0,
-            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(1))
+            ))
         );
         assert_eq!(
             imaginary[2].0,
-            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(-1)))
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(-1))
+            ))
         );
         assert_eq!(
             imaginary[4].0,
-            Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(2)))
+            Token::ExactComplex(Complex::new(
+                BigRational::zero(),
+                BigRational::from_integer(BigInt::from(2))
+            ))
         );
         assert_eq!(
             imaginary[6].0,
@@ -1130,15 +1229,30 @@ mod tests {
         );
         assert_eq!(
             imaginary[8].0,
-            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(1)))
+            Token::ExactComplex(Complex::new(
+                BigRational::from_integer(BigInt::from(1)),
+                BigRational::from_integer(BigInt::from(1))
+            ))
         );
         assert_eq!(
             imaginary[10].0,
-            Token::Complex(Complex::new(BigDecimal::from(1), BigDecimal::from(-1)))
+            Token::ExactComplex(Complex::new(
+                BigRational::from_integer(BigInt::from(1)),
+                BigRational::from_integer(BigInt::from(-1))
+            ))
         );
         assert_eq!(
             imaginary[12].0,
             Token::Complex(Complex::new(BigDecimal::from(0), BigDecimal::from(1)))
+        );
+
+        let exact_rectangular = tokenize("1/2+3/4i");
+        assert_eq!(
+            exact_rectangular[0].0,
+            Token::ExactComplex(Complex::new(
+                BigRational::new(BigInt::from(1), BigInt::from(2)),
+                BigRational::new(BigInt::from(3), BigInt::from(4))
+            ))
         );
 
         let rectangular = tokenize(".5+.5i #i-1.5+2.i");
