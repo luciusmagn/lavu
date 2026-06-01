@@ -274,6 +274,8 @@ Scheme value is valid.
 - Add =set-car!= and =set-cdr!= for shared pair values.
 - Infer direct =car= and =cdr= over both pair shapes and proper =listof=
   values.
+- Infer composed =car=/=cdr= accessors through the same pair and =listof=
+  access path while keeping their primitive metadata conservative.
 - Represent constructed proper lists as shared cons cells so mutating a
   list or one of its tails is visible through aliases.
 ** Internal Definitions

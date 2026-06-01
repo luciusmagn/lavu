@@ -78,7 +78,7 @@ enum MembershipResult {
     Entry,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PrimitiveApplication {
     Apply,
     Values,
@@ -91,6 +91,7 @@ enum PrimitiveApplication {
     Cdr,
     Member,
     Assoc,
+    ComposedAccessor(Vec<ListAccessResult>),
 }
 
 impl PrimitiveApplication {
@@ -111,9 +112,26 @@ impl PrimitiveApplication {
             "cdr" => Some(Self::Cdr),
             "memq" | "memv" | "member" => Some(Self::Member),
             "assq" | "assv" | "assoc" => Some(Self::Assoc),
-            _ => None,
+            _ => composed_accessor_steps(name).map(Self::ComposedAccessor),
         }
     }
+}
+
+fn composed_accessor_steps(name: &str) -> Option<Vec<ListAccessResult>> {
+    let middle = name.strip_prefix('c')?.strip_suffix('r')?;
+    if !(2..=4).contains(&middle.len()) {
+        return None;
+    }
+
+    middle
+        .chars()
+        .rev()
+        .map(|ch| match ch {
+            'a' => Some(ListAccessResult::Element),
+            'd' => Some(ListAccessResult::Tail),
+            _ => None,
+        })
+        .collect()
 }
 
 impl Inferencer {
@@ -260,6 +278,9 @@ impl Inferencer {
             }
             PrimitiveApplication::Assoc => {
                 self.infer_membership(operands, operand_tys, span, MembershipResult::Entry)
+            }
+            PrimitiveApplication::ComposedAccessor(steps) => {
+                self.infer_composed_accessor(operands, operand_tys, span, &steps)
             }
         }
     }
@@ -603,7 +624,37 @@ impl Inferencer {
                     span,
                 })?;
 
-        match self.resolve(operand_ty) {
+        self.infer_access_type(operand_ty, &operands[0], result)
+    }
+
+    fn infer_composed_accessor(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        steps: &[ListAccessResult],
+    ) -> Result<Type, TypeError> {
+        let [operand_ty]: [Type; 1] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "1".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        steps.iter().try_fold(operand_ty, |ty, step| {
+            self.infer_access_type(ty, &operands[0], *step)
+        })
+    }
+
+    fn infer_access_type(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+        result: ListAccessResult,
+    ) -> Result<Type, TypeError> {
+        match self.resolve(actual) {
             Type::Pair(car, cdr) => match result {
                 ListAccessResult::Element => Ok(self.resolve(*car)),
                 ListAccessResult::Tail => Ok(self.resolve(*cdr)),
@@ -634,7 +685,7 @@ impl Inferencer {
                 self.unify(
                     actual,
                     Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
-                    operands[0].span.clone(),
+                    operand.span.clone(),
                 )?;
                 Ok(Type::Any)
             }
@@ -1569,7 +1620,8 @@ mod tests {
     fn infers_indexed_list_primitives() {
         assert_eq!(infer_one("(length '(a b c))"), "number?");
         assert_eq!(infer_one("(append '(a) 'b)"), "any?");
-        assert_eq!(infer_one("(cadr '(a b c))"), "any?");
+        assert_eq!(infer_one("(cadr '(a b c))"), "symbol?");
+        assert_eq!(infer_one("(caddr '(a b c))"), "symbol?");
         assert_eq!(infer_one("(list-ref '(a b c) 1)"), "symbol?");
         assert_eq!(infer_one("(list-tail '(a b c) 1)"), "(listof symbol?)");
         assert_eq!(
