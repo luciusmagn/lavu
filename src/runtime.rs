@@ -3587,7 +3587,7 @@ impl fmt::Display for Value {
             Value::Character(' ') => write!(f, "#\\space"),
             Value::Character('\n') => write!(f, "#\\newline"),
             Value::Character(c) => write!(f, "#\\{c}"),
-            Value::String(text) => write!(f, "\"{}\"", text.borrow()),
+            Value::String(text) => write_string_literal(f, &text.borrow()),
             Value::Symbol(name) => write!(f, "{name}"),
             Value::List(items) => {
                 write!(f, "(")?;
@@ -3629,6 +3629,20 @@ impl fmt::Display for Value {
             Value::Uninitialized => write!(f, "#<uninitialized>"),
         }
     }
+}
+
+fn write_string_literal(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {
+    write!(f, "\"")?;
+    for ch in text.chars() {
+        match ch {
+            '"' => write!(f, "\\\"")?,
+            '\\' => write!(f, "\\\\")?,
+            '\n' => write!(f, "\\n")?,
+            '\t' => write!(f, "\\t")?,
+            ch => write!(f, "{ch}")?,
+        }
+    }
+    write!(f, "\"")
 }
 
 #[cfg(test)]
@@ -4027,6 +4041,27 @@ mod tests {
         write_char(vec![Value::Character('z'), port], 0..0).unwrap();
 
         assert_eq!(*output.borrow(), "\"x\"\nyz");
+    }
+
+    #[test]
+    fn writes_escaped_string_literals() {
+        let output = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let port = Value::OutputPort(OutputPort::Buffer(output.clone()));
+
+        output_value(
+            vec![string_value("a\"b\\c\n"), port.clone()],
+            0..0,
+            OutputMode::Write,
+        )
+        .unwrap();
+        output_value(
+            vec![string_value(" raw\" "), port],
+            0..0,
+            OutputMode::Display,
+        )
+        .unwrap();
+
+        assert_eq!(*output.borrow(), "\"a\\\"b\\\\c\\n\" raw\" ");
     }
 
     #[test]
