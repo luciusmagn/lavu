@@ -844,4 +844,10 @@ mod tests {
         assert_eq!(infer_one("(member 'b '(a b c))"), "any?");
         assert_eq!(infer_one("(assoc 'b '((a 1) (b 2)))"), "any?");
     }
+
+    #[test]
+    fn infers_higher_order_iteration_conservatively() {
+        assert_eq!(infer_one("(map + '(1 2) '(3 4))"), "list?");
+        assert_eq!(infer_one("(for-each + '(1 2) '(3 4))"), "unknown?");
+    }
 }

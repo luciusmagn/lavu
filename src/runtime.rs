@@ -220,6 +220,8 @@ impl Env {
             "assq",
             "assv",
             "assoc",
+            "map",
+            "for-each",
             "string-length",
             "char=?",
             "char<?",
@@ -474,6 +476,8 @@ fn apply_primitive(
         "assq" => assoc(args, span, eq_value),
         "assv" => assoc(args, span, eqv_value),
         "assoc" => assoc(args, span, equal_value),
+        "map" => map_list(args, span),
+        "for-each" => for_each(args, span),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -1113,6 +1117,76 @@ fn assoc(
     Ok(Value::Boolean(false))
 }
 
+fn map_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let (procedure, lists) = procedure_and_lists(args, span.clone())?;
+    let len = common_list_len(&lists, span.clone())?;
+    let mut results = Vec::with_capacity(len);
+
+    for index in 0..len {
+        let operands = lists
+            .iter()
+            .map(|items| items[index].clone())
+            .collect::<Vec<_>>();
+        results.push(apply(procedure.clone(), operands, span.clone())?);
+    }
+
+    Ok(Value::List(results))
+}
+
+fn for_each(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let (procedure, lists) = procedure_and_lists(args, span.clone())?;
+    let len = common_list_len(&lists, span.clone())?;
+
+    for index in 0..len {
+        let operands = lists
+            .iter()
+            .map(|items| items[index].clone())
+            .collect::<Vec<_>>();
+        apply(procedure.clone(), operands, span.clone())?;
+    }
+
+    Ok(Value::Unspecified)
+}
+
+fn procedure_and_lists(
+    args: Vec<Value>,
+    span: SourceSpan,
+) -> Result<(Value, Vec<Vec<Value>>), EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let mut args = args.into_iter();
+    let procedure = args.next().expect("arity check ensures procedure argument");
+    let lists = args
+        .map(|value| match value {
+            Value::List(items) => Ok(items),
+            _ => Err(EvalError::TypeError {
+                expected: "list?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok((procedure, lists))
+}
+
+fn common_list_len(lists: &[Vec<Value>], span: SourceSpan) -> Result<usize, EvalError> {
+    let len = lists.first().map_or(0, Vec::len);
+    if lists.iter().any(|items| items.len() != len) {
+        return Err(EvalError::TypeError {
+            expected: "lists of equal length",
+            span,
+        });
+    }
+
+    Ok(len)
+}
+
 fn make_vector(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if !(1..=2).contains(&args.len()) {
         return Err(EvalError::ArityMismatch {
@@ -1617,6 +1691,16 @@ mod tests {
         assert_eq!(eval_one("(assq 'b '((a 1) (b 2)))"), "(b 2)");
         assert_eq!(eval_one("(assq 'x '((a 1) (b 2)))"), "#f");
         assert_eq!(eval_one("(assoc '(b) '(((a) 1) ((b) 2)))"), "((b) 2)");
+    }
+
+    #[test]
+    fn evaluates_higher_order_list_iteration() {
+        assert_eq!(eval_one("(map (lambda (x) (+ x 1)) '(1 2 3))"), "(2 3 4)");
+        assert_eq!(eval_one("(map + '(1 2) '(10 20))"), "(11 22)");
+        assert_eq!(
+            eval_one("(define x 0) (for-each (lambda (n) (set! x (+ x n))) '(1 2 3)) x"),
+            "6"
+        );
     }
 
     #[test]

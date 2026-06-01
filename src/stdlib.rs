@@ -233,6 +233,14 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "assoc",
             Type::procedure(vec![Type::Any, Type::List], Type::Any),
         ),
+        Primitive::new(
+            "map",
+            Type::rest_procedure(vec![Type::Any, Type::List], Type::List, Type::List),
+        ),
+        Primitive::new(
+            "for-each",
+            Type::rest_procedure(vec![Type::Any, Type::List], Type::List, Type::Unknown),
+        ),
     ]
 }
 
@@ -340,6 +348,18 @@ mod tests {
         assert_eq!(
             primitive("assoc").unwrap().signature.to_string(),
             "(-> any? list? any?)"
+        );
+    }
+
+    #[test]
+    fn exposes_higher_order_list_primitives() {
+        assert_eq!(
+            primitive("map").unwrap().signature.to_string(),
+            "(-> any? list? list? * list?)"
+        );
+        assert_eq!(
+            primitive("for-each").unwrap().signature.to_string(),
+            "(-> any? list? list? * unknown?)"
         );
     }
 }
