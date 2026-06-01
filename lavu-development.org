@@ -639,6 +639,8 @@ Scheme value is valid.
 - Compose =string->number= exactness prefixes with an explicit radix
   argument, so =#e10= and =#i10= use the supplied radix when no radix
   prefix is present in the string.
+- Make =string->number= reject comment-bearing or lexically invalid
+  strings instead of filtering comments as reader trivia.
 - Parse R5RS exactness prefixes for supported real numeric literals:
   exact decimal forms become rational values, inexact integer/fraction
   forms become decimal values, and exactness composes with radix prefixes

@@ -13,7 +13,7 @@ use num::{
 use thiserror::Error;
 
 use crate::datum_parser::parse as parse_datums;
-use crate::lexer::{Token, tokenize};
+use crate::lexer::{Token, tokenize_checked};
 use crate::surface::{Expr, Program, TopLevel, classify_expr, classify_program};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 
@@ -3245,9 +3245,12 @@ fn radix_argument(value: &Value, span: SourceSpan) -> Result<u32, EvalError> {
 }
 
 fn string_to_number(text: &str) -> Value {
-    let tokens = tokenize(text)
+    let Ok(tokens) = tokenize_checked(text) else {
+        return Value::Boolean(false);
+    };
+    let tokens = tokens
         .into_iter()
-        .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_) | Token::LineComment))
+        .filter(|(token, _, _)| !matches!(token, Token::Whitespace(_)))
         .map(|(token, _, _)| token)
         .collect::<Vec<_>>();
 
@@ -5087,6 +5090,9 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#e1.25e-1\")"), "1/8");
         assert_eq!(eval_one("(= (string->number \"1d2\") 100)"), "#t");
         assert_eq!(eval_one("(string->number \"#e1d2\")"), "100");
+        assert_eq!(eval_one("(string->number \" 10 \")"), "10");
+        assert_eq!(eval_one("(string->number \"1 ; comment\")"), "#f");
+        assert_eq!(eval_one("(string->number \"1 #| comment |#\")"), "#f");
         assert_eq!(eval_one("(string->number \"1/0\")"), "#f");
         assert_eq!(eval_one("(string->number \"#x10/0\")"), "#f");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
