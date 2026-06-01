@@ -30,10 +30,18 @@ pub fn infer_query_with_surface(
     input: &str,
     surface: &SurfaceContext,
 ) -> Result<Vec<Type>, QueryError> {
+    infer_query_with_context(input, surface, &TypeEnv::new())
+}
+
+pub fn infer_query_with_context(
+    input: &str,
+    surface: &SurfaceContext,
+    env: &TypeEnv,
+) -> Result<Vec<Type>, QueryError> {
     let datums = parse(input)?;
     let mut surface = surface.clone();
     let program = surface.classify_program(&datums)?;
-    let mut env = TypeEnv::new();
+    let mut env = env.clone();
     let mut inferencer = Inferencer::new();
 
     Ok(inferencer.infer_program(&program, &mut env)?)
@@ -41,8 +49,9 @@ pub fn infer_query_with_surface(
 
 #[cfg(test)]
 mod tests {
-    use super::{infer_query, infer_query_with_surface};
+    use super::{infer_query, infer_query_with_context, infer_query_with_surface};
     use crate::datum_parser::parse;
+    use crate::infer::{Inferencer, TypeEnv};
     use crate::surface::SurfaceContext;
 
     #[test]
@@ -72,6 +81,20 @@ mod tests {
         surface.classify_program(&datums).unwrap();
 
         let types = infer_query_with_surface("(id (+ 1 2))", &surface).unwrap();
+
+        assert_eq!(types[0].to_string(), "number?");
+    }
+
+    #[test]
+    fn infers_with_repl_type_bindings() {
+        let mut surface = SurfaceContext::new();
+        let datums = parse("(define x 1)").unwrap();
+        let program = surface.classify_program(&datums).unwrap();
+        let mut env = TypeEnv::new();
+        let mut inferencer = Inferencer::new();
+        inferencer.infer_program(&program, &mut env).unwrap();
+
+        let types = infer_query_with_context("x", &surface, &env).unwrap();
 
         assert_eq!(types[0].to_string(), "number?");
     }

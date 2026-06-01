@@ -343,6 +343,8 @@ Scheme value is valid.
 ** REPL Type Query
 - Add the =? expr...= type query path using the new parser,
   classifier, and inference engine.
+- Persist inferred top-level REPL bindings in a session =TypeEnv= so
+  later =?= queries can resolve names already evaluated in the REPL.
 ** Native Runtime Seed
 - Add a native evaluator on the stable surface AST for literals, quote,
   variables, lambdas, if, begin, set!, define, and a first Rust primitive
