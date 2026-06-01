@@ -164,6 +164,8 @@ enum PrimitiveApplication {
     List,
     MakeVector,
     Vector,
+    VectorToList,
+    ListToVector,
     VectorRef,
     ListRef,
     ListTail,
@@ -200,6 +202,8 @@ impl PrimitiveApplication {
             "list" => Some(Self::List),
             "make-vector" => Some(Self::MakeVector),
             "vector" => Some(Self::Vector),
+            "vector->list" => Some(Self::VectorToList),
+            "list->vector" => Some(Self::ListToVector),
             "vector-ref" => Some(Self::VectorRef),
             "list-ref" => Some(Self::ListRef),
             "list-tail" => Some(Self::ListTail),
@@ -231,19 +235,38 @@ fn composed_accessor_steps(name: &str) -> Option<Vec<ListAccessResult>> {
 }
 
 fn constructor_kind(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<ConstructorKind> {
-    let Expr::Variable(name) = &expr.node else {
-        return None;
-    };
-
-    if !env.is_primitive(name) {
-        return None;
-    }
-
-    match name.as_str() {
+    match primitive_operator_name(expr, env)? {
         "list" => Some(ConstructorKind::List),
         "vector" => Some(ConstructorKind::Vector),
         _ => None,
     }
+}
+
+fn primitive_operator_name<'a>(expr: &'a Spanned<Expr>, env: &TypeEnv) -> Option<&'a str> {
+    let Expr::Variable(name) = &expr.node else {
+        return None;
+    };
+
+    env.is_primitive(name).then_some(name.as_str())
+}
+
+fn primitive_unary_operand<'a>(
+    expr: &'a Spanned<Expr>,
+    name: &str,
+    env: &TypeEnv,
+) -> Option<&'a Spanned<Expr>> {
+    let Expr::Apply { operator, operands } = &expr.node else {
+        return None;
+    };
+
+    if primitive_operator_name(operator, env) != Some(name) {
+        return None;
+    }
+
+    let [operand] = operands.as_slice() else {
+        return None;
+    };
+    Some(operand)
 }
 
 impl Inferencer {
@@ -438,6 +461,12 @@ impl Inferencer {
             PrimitiveApplication::List => Ok(self.infer_list_constructor(operand_tys)),
             PrimitiveApplication::MakeVector => self.infer_make_vector(operands, operand_tys, span),
             PrimitiveApplication::Vector => Ok(self.infer_vector_constructor(operand_tys)),
+            PrimitiveApplication::VectorToList => {
+                self.infer_vector_to_list(operands, operand_tys, span, env)
+            }
+            PrimitiveApplication::ListToVector => {
+                self.infer_list_to_vector(operands, operand_tys, span, env)
+            }
             PrimitiveApplication::VectorRef => {
                 self.infer_vector_ref(operands, operand_tys, span, env)
             }
@@ -1098,6 +1127,79 @@ impl Inferencer {
         match operand_tys.as_slice() {
             [] => Type::Vector,
             _ => Type::VectorOf(Box::new(self.union_resolved(operand_tys))),
+        }
+    }
+
+    fn infer_vector_to_list(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let [vector_ty]: [Type; 1] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "1".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        if let Some(ty) = visible_vector_as_list_type(&operands[0], env) {
+            return Ok(ty);
+        }
+
+        match self.resolve(vector_ty) {
+            Type::VectorOf(element) => Ok(Type::ListOf(Box::new(self.resolve(*element)))),
+            Type::Vector | Type::Any | Type::Unknown => Ok(Type::List),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::VectorOf(Box::new(element.clone())));
+                Ok(Type::ListOf(Box::new(element)))
+            }
+            actual => {
+                self.unify(actual, Type::Vector, operands[0].span.clone())?;
+                Ok(Type::List)
+            }
+        }
+    }
+
+    fn infer_list_to_vector(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        operand_tys: Vec<Type>,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let [list_ty]: [Type; 1] =
+            operand_tys
+                .try_into()
+                .map_err(|operand_tys: Vec<Type>| TypeError::ArityMismatch {
+                    expected: "1".to_string(),
+                    actual: operand_tys.len(),
+                    span,
+                })?;
+
+        if let Some(ty) = visible_list_as_vector_type(&operands[0], env) {
+            return Ok(ty);
+        }
+
+        match self.resolve(list_ty) {
+            Type::Null | Type::List => Ok(Type::Vector),
+            Type::ListOf(element) => Ok(Type::VectorOf(Box::new(self.resolve(*element)))),
+            Type::Any | Type::Unknown => Ok(Type::Vector),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(Type::VectorOf(Box::new(element)))
+            }
+            actual => {
+                self.unify(actual, Type::List, operands[0].span.clone())?;
+                Ok(Type::Vector)
+            }
         }
     }
 
@@ -2184,6 +2286,10 @@ fn visible_indexed_list_type(
     result: ListAccessResult,
     env: &TypeEnv,
 ) -> Option<Type> {
+    if let Some(vector) = primitive_unary_operand(expr, "vector->list", env) {
+        return visible_indexed_vector_as_list_type(vector, index, result, env);
+    }
+
     match &expr.node {
         Expr::Quote(datum) => match &datum.node {
             Datum::List(items) => match result {
@@ -2211,6 +2317,10 @@ fn visible_indexed_list_type(
 }
 
 fn visible_vector_item_type(expr: &Spanned<Expr>, index: usize, env: &TypeEnv) -> Option<Type> {
+    if let Some(list) = primitive_unary_operand(expr, "list->vector", env) {
+        return visible_indexed_list_type(list, index, ListAccessResult::Element, env);
+    }
+
     match &expr.node {
         Expr::Quote(datum) => match &datum.node {
             Datum::Vector(items) => items.get(index).map(type_of_datum),
@@ -2220,6 +2330,118 @@ fn visible_vector_item_type(expr: &Spanned<Expr>, index: usize, env: &TypeEnv) -
             if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
         {
             operands.get(index).and_then(static_expr_type)
+        }
+        _ => None,
+    }
+}
+
+fn visible_indexed_vector_as_list_type(
+    expr: &Spanned<Expr>,
+    index: usize,
+    result: ListAccessResult,
+    env: &TypeEnv,
+) -> Option<Type> {
+    if let Some(list) = primitive_unary_operand(expr, "list->vector", env) {
+        return visible_indexed_list_type(list, index, result, env);
+    }
+
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::Vector(items) => match result {
+                ListAccessResult::Element => items.get(index).map(type_of_datum),
+                ListAccessResult::Tail if index <= items.len() => {
+                    Some(type_of_list_datums(&items[index..]))
+                }
+                ListAccessResult::Tail => None,
+            },
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
+        {
+            match result {
+                ListAccessResult::Element => operands.get(index).and_then(static_expr_type),
+                ListAccessResult::Tail if index <= operands.len() => {
+                    visible_expr_list_type(&operands[index..])
+                }
+                ListAccessResult::Tail => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn visible_vector_as_list_type(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Type> {
+    if let Some(list) = primitive_unary_operand(expr, "list->vector", env) {
+        return visible_list_type(list, env);
+    }
+
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::Vector(items) => Some(type_of_list_datums(items)),
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
+        {
+            visible_expr_list_type(operands)
+        }
+        _ => None,
+    }
+}
+
+fn visible_list_as_vector_type(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Type> {
+    if let Some(vector) = primitive_unary_operand(expr, "vector->list", env) {
+        return visible_vector_type(vector, env);
+    }
+
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::List(items) => Some(type_of_vector_datums(items)),
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
+        {
+            visible_expr_vector_type(operands)
+        }
+        _ => None,
+    }
+}
+
+fn visible_list_type(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Type> {
+    if let Some(vector) = primitive_unary_operand(expr, "vector->list", env) {
+        return visible_vector_as_list_type(vector, env);
+    }
+
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::List(items) => Some(type_of_list_datums(items)),
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
+        {
+            visible_expr_list_type(operands)
+        }
+        _ => None,
+    }
+}
+
+fn visible_vector_type(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<Type> {
+    if let Some(list) = primitive_unary_operand(expr, "list->vector", env) {
+        return visible_list_as_vector_type(list, env);
+    }
+
+    match &expr.node {
+        Expr::Quote(datum) => match &datum.node {
+            Datum::Vector(items) => Some(type_of_vector_datums(items)),
+            _ => None,
+        },
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
+        {
+            visible_expr_vector_type(operands)
         }
         _ => None,
     }
@@ -2239,6 +2461,19 @@ fn visible_expr_list_type(items: &[Spanned<Expr>]) -> Option<Type> {
     }
 
     Some(Type::ListOf(Box::new(Type::union(
+        items
+            .iter()
+            .map(static_expr_type)
+            .collect::<Option<Vec<_>>>()?,
+    ))))
+}
+
+fn visible_expr_vector_type(items: &[Spanned<Expr>]) -> Option<Type> {
+    if items.is_empty() {
+        return Some(Type::Vector);
+    }
+
+    Some(Type::VectorOf(Box::new(Type::union(
         items
             .iter()
             .map(static_expr_type)
@@ -2862,11 +3097,17 @@ mod tests {
         assert_eq!(infer_one("(vector-length (vector 1 2 3))"), "number?");
         assert_eq!(infer_one("(make-vector 3)"), "(vectorof any?)");
         assert_eq!(infer_one("(make-vector 3 #\\a)"), "(vectorof char?)");
+        assert_eq!(infer_one("(vector->list (vector))"), "null?");
         assert_eq!(
             infer_one("(vector->list (vector #\\a #\\b))"),
             "(listof char?)"
         );
+        assert_eq!(infer_one("(list->vector '())"), "vector?");
         assert_eq!(infer_one("(list->vector '(1 2 3))"), "(vectorof number?)");
+        assert_eq!(
+            infer_one("(lambda (x) (vector-ref (list->vector (list x \"x\")) 1))"),
+            "(-> x string?)"
+        );
     }
 
     #[test]
@@ -2954,6 +3195,14 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (list-tail (list x \"x\") 1))"),
+            "(-> x (listof string?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (list-ref (vector->list (vector x \"x\")) 1))"),
+            "(-> x string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (list-tail (vector->list (vector x \"x\")) 1))"),
             "(-> x (listof string?))"
         );
         assert_eq!(

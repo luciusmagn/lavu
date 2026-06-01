@@ -694,6 +694,9 @@ Scheme value is valid.
 - Infer visible heterogeneous =list= and =vector= constructors as unions,
   and infer no-fill =make-vector= elements as =any?= instead of leaking
   unconstrained type variables.
+- Preserve visible element flow through =vector->list= and
+  =list->vector= so literal-index accesses after conversion can still
+  infer selected elements precisely.
 - Print circular mutable vectors with a diagnostic marker so the REPL
   display path does not hang on self-referential vectors.
 ** Equality Primitives
