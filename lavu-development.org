@@ -598,6 +598,8 @@ Scheme value is valid.
   exact decimal forms become rational values, inexact integer/fraction
   forms become decimal values, and exactness composes with radix prefixes
   for integer literals.
+- Parse radix-prefixed rational literals such as =#b101/10= and
+  =#x10/4=, with inexact exactness prefixes producing decimal values.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.

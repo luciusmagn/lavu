@@ -81,6 +81,51 @@ pub enum Token {
         callback = |lex| parse_ratio_literal(&lex.slice()[4..])
     )]
     #[regex(
+        r"#[bB][+-]?[01]+/[01]+",
+        priority = 6,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[2..], 2)
+    )]
+    #[regex(
+        r"#[eE]#[bB][+-]?[01]+/[01]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[bB]#[eE][+-]?[01]+/[01]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[oO][+-]?[0-7]+/[0-7]+",
+        priority = 6,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[2..], 8)
+    )]
+    #[regex(
+        r"#[eE]#[oO][+-]?[0-7]+/[0-7]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[oO]#[eE][+-]?[0-7]+/[0-7]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[xX][+-]?[0-9a-fA-F]+/[0-9a-fA-F]+",
+        priority = 6,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[2..], 16)
+    )]
+    #[regex(
+        r"#[eE]#[xX][+-]?[0-9a-fA-F]+/[0-9a-fA-F]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 16)
+    )]
+    #[regex(
+        r"#[xX]#[eE][+-]?[0-9a-fA-F]+/[0-9a-fA-F]+",
+        priority = 8,
+        callback = |lex| parse_radix_ratio_literal(&lex.slice()[4..], 16)
+    )]
+    #[regex(
         r"#[eE][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
         priority = 6,
         callback = |lex| parse_exact_decimal_literal(&lex.slice()[2..])
@@ -174,6 +219,36 @@ pub enum Token {
         r"#[dD]#[iI][+-]?[0-9]+/[0-9]+",
         priority = 8,
         callback = |lex| parse_inexact_fraction_literal(&lex.slice()[4..])
+    )]
+    #[regex(
+        r"#[iI]#[bB][+-]?[01]+/[01]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[bB]#[iI][+-]?[01]+/[01]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 2)
+    )]
+    #[regex(
+        r"#[iI]#[oO][+-]?[0-7]+/[0-7]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[oO]#[iI][+-]?[0-7]+/[0-7]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 8)
+    )]
+    #[regex(
+        r"#[iI]#[xX][+-]?[0-9a-fA-F]+/[0-9a-fA-F]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 16)
+    )]
+    #[regex(
+        r"#[xX]#[iI][+-]?[0-9a-fA-F]+/[0-9a-fA-F]+",
+        priority = 8,
+        callback = |lex| parse_inexact_radix_fraction_literal(&lex.slice()[4..], 16)
     )]
     #[regex(
         r"#[iI][+-]?([0-9]+\.[0-9]*|\.[0-9]+)",
@@ -420,6 +495,20 @@ fn parse_ratio_literal(slice: &str) -> Result<(BigInt, BigInt), ParseBigIntError
     Ok((BigInt::from_str(numerator)?, BigInt::from_str(denominator)?))
 }
 
+fn parse_radix_ratio_literal(
+    slice: &str,
+    radix: u32,
+) -> Result<(BigInt, BigInt), ParseBigIntError> {
+    let (numerator, denominator) = slice
+        .split_once('/')
+        .expect("ratio token regex guarantees a slash");
+
+    Ok((
+        BigInt::from_str_radix(numerator, radix)?,
+        BigInt::from_str_radix(denominator, radix)?,
+    ))
+}
+
 fn parse_exact_decimal_literal(slice: &str) -> Result<(BigInt, BigInt), ParseBigIntError> {
     let (sign, magnitude) = match slice.as_bytes().first() {
         Some(b'-') => (-1, &slice[1..]),
@@ -453,6 +542,12 @@ fn parse_inexact_radix_literal(slice: &str, radix: u32) -> Result<BigDecimal, Le
     BigInt::from_str_radix(slice, radix)
         .map(BigDecimal::from)
         .map_err(LexerError::from)
+}
+
+fn parse_inexact_radix_fraction_literal(slice: &str, radix: u32) -> Result<BigDecimal, LexerError> {
+    let (numerator, denominator) = parse_radix_ratio_literal(slice, radix)?;
+
+    Ok(BigDecimal::from(numerator) / BigDecimal::from(denominator))
 }
 
 pub fn tokenize(input: &str) -> Vec<(Token, &str, Span)> {
@@ -609,6 +704,24 @@ mod tests {
         );
         assert_eq!(exactness[12].0, Token::Hex(BigInt::from(16)));
         assert_eq!(exactness[14].0, Token::Decimal(BigDecimal::from(16)));
+
+        let radix_rationals = tokenize("#b101/10 #o10/4 #x10/4 #i#b101/10");
+        assert_eq!(
+            radix_rationals[0].0,
+            Token::Real((BigInt::from(5), BigInt::from(2)))
+        );
+        assert_eq!(
+            radix_rationals[2].0,
+            Token::Real((BigInt::from(8), BigInt::from(4)))
+        );
+        assert_eq!(
+            radix_rationals[4].0,
+            Token::Real((BigInt::from(16), BigInt::from(4)))
+        );
+        assert_eq!(
+            radix_rationals[6].0,
+            Token::Decimal(BigDecimal::from_str("2.5").unwrap())
+        );
     }
 
     #[test]

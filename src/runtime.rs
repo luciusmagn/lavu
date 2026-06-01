@@ -3221,7 +3221,7 @@ fn string_to_number(text: &str) -> Value {
         | Token::Hex(n)
         | Token::DecInteger(n) => Value::Integer(n),
         Token::Real((numerator, denominator)) => {
-            Value::Rational(BigRational::new(numerator, denominator))
+            exact_number(BigRational::new(numerator, denominator))
         }
         Token::Decimal(n) => Value::Decimal(n),
         Token::Complex(n) => Value::Complex(n),
@@ -3947,7 +3947,7 @@ fn atom_to_value(atom: &Atom) -> Value {
         Atom::Identifier(name) => Value::Symbol(name.clone()),
         Atom::Integer(n) => Value::Integer(n.clone()),
         Atom::Decimal(n) => Value::Decimal(n.clone()),
-        Atom::Real(n, d) => Value::Rational(BigRational::new(n.clone(), d.clone())),
+        Atom::Real(n, d) => exact_number(BigRational::new(n.clone(), d.clone())),
         Atom::Complex(n) => Value::Complex(n.clone()),
         Atom::String(text) => string_value(text.clone()),
         Atom::Boolean(value) => Value::Boolean(*value),
@@ -4836,6 +4836,9 @@ mod tests {
         assert_eq!(eval_one("(string->number \"#i1/2\")"), "0.5");
         assert_eq!(eval_one("(string->number \"#i#x10\")"), "16");
         assert_eq!(eval_one("(string->number \"#x#i10\" 2)"), "16");
+        assert_eq!(eval_one("(string->number \"#b101/10\")"), "5/2");
+        assert_eq!(eval_one("(string->number \"#x10/4\")"), "4");
+        assert_eq!(eval_one("(string->number \"#i#b101/10\")"), "2.5");
         assert_eq!(eval_one("(string->number \".5\")"), "0.5");
         assert_eq!(eval_one("(string->number \"1.\")"), "1");
         assert_eq!(eval_one("(string->number \"10\" 16)"), "16");
