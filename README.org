@@ -30,7 +30,9 @@ Lavu (Lavender) Scheme is an educational R5RS Scheme implementation focused on:
 The old numbered parser/AST files explored tiny pass boundaries but led
 to repeated whole-tree enum duplication. The active implementation now
 uses stable =Datum= and surface expression types, with tiny lowering
-steps over shared data structures.
+steps over shared data structures. The inactive numbered prototype files
+have been removed from the source tree; their intended pass boundaries
+are recorded here instead.
 
 *** Identification Passes
 1. (x) Identify symbol literals (Quote + Identifier)
