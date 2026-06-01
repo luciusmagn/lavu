@@ -284,6 +284,8 @@ Scheme value is valid.
   list or one of its tails is visible through aliases.
 - Make =list?= detect mutable-pair cycles and return =#f= instead of
   walking forever.
+- Print circular mutable pairs with a diagnostic marker so the REPL
+  display path does not hang on cyclic structures.
 ** Internal Definitions
 - Lower leading internal =define= forms in body contexts to =letrec= so
   lambda, let, let*, and letrec bodies can use R5RS-style local

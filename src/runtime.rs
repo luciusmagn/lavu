@@ -4069,66 +4069,87 @@ fn string_value(text: impl Into<String>) -> Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Integer(n) => write!(f, "{n}"),
-            Value::Rational(n) => write!(f, "{}/{}", n.numer(), n.denom()),
-            Value::Decimal(n) => write!(f, "{n}"),
-            Value::Complex(n) => {
-                let imaginary = n.im.to_string();
-                if imaginary.starts_with('-') {
-                    write!(f, "{}{}i", n.re, imaginary)
-                } else {
-                    write!(f, "{}+{}i", n.re, imaginary)
-                }
-            }
-            Value::Boolean(value) => write!(f, "{}", if *value { "#t" } else { "#f" }),
-            Value::Character(' ') => write!(f, "#\\space"),
-            Value::Character('\n') => write!(f, "#\\newline"),
-            Value::Character(c) => write!(f, "#\\{c}"),
-            Value::String(text) => write_string_literal(f, &text.borrow()),
-            Value::Symbol(name) => write!(f, "{name}"),
-            Value::List(items) => {
-                write!(f, "(")?;
-                for (index, item) in items.iter().enumerate() {
-                    if index > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{item}")?;
-                }
-                write!(f, ")")
-            }
-            Value::Pair(pair) => write_pair_value(pair.clone(), f),
-            Value::Vector(items) => {
-                write!(f, "#(")?;
-                for (index, item) in items.borrow().iter().enumerate() {
-                    if index > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{item}")?;
-                }
-                write!(f, ")")
-            }
-            Value::InputPort(_) => write!(f, "#<input-port>"),
-            Value::OutputPort(_) => write!(f, "#<output-port>"),
-            Value::Promise(_) => write!(f, "#<promise>"),
-            Value::Values(values) => {
-                write!(f, "(values")?;
-                for value in values {
-                    write!(f, " {value}")?;
-                }
-                write!(f, ")")
-            }
-            Value::EofObject => write!(f, "#<eof>"),
-            Value::Environment(_) => write!(f, "#<environment>"),
-            Value::Continuation(_) => write!(f, "#<continuation>"),
-            Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
-            Value::Unspecified => write!(f, "#<unspecified>"),
-            Value::Uninitialized => write!(f, "#<uninitialized>"),
-        }
+        write_value(self, f, &mut HashSet::new())
     }
 }
 
-fn write_pair_value(pair: Rc<RefCell<PairValue>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn write_value(
+    value: &Value,
+    f: &mut fmt::Formatter<'_>,
+    stack: &mut HashSet<*const RefCell<PairValue>>,
+) -> fmt::Result {
+    match value {
+        Value::Integer(n) => write!(f, "{n}"),
+        Value::Rational(n) => write!(f, "{}/{}", n.numer(), n.denom()),
+        Value::Decimal(n) => write!(f, "{n}"),
+        Value::Complex(n) => {
+            let imaginary = n.im.to_string();
+            if imaginary.starts_with('-') {
+                write!(f, "{}{}i", n.re, imaginary)
+            } else {
+                write!(f, "{}+{}i", n.re, imaginary)
+            }
+        }
+        Value::Boolean(value) => write!(f, "{}", if *value { "#t" } else { "#f" }),
+        Value::Character(' ') => write!(f, "#\\space"),
+        Value::Character('\n') => write!(f, "#\\newline"),
+        Value::Character(c) => write!(f, "#\\{c}"),
+        Value::String(text) => write_string_literal(f, &text.borrow()),
+        Value::Symbol(name) => write!(f, "{name}"),
+        Value::List(items) => write_list_items(items, f, stack),
+        Value::Pair(pair) if stack.contains(&Rc::as_ptr(pair)) => write!(f, "#<circular-pair>"),
+        Value::Pair(pair) => write_pair_value(pair.clone(), f, stack),
+        Value::Vector(items) => {
+            write!(f, "#(")?;
+            for (index, item) in items.borrow().iter().enumerate() {
+                if index > 0 {
+                    write!(f, " ")?;
+                }
+                write_value(item, f, stack)?;
+            }
+            write!(f, ")")
+        }
+        Value::InputPort(_) => write!(f, "#<input-port>"),
+        Value::OutputPort(_) => write!(f, "#<output-port>"),
+        Value::Promise(_) => write!(f, "#<promise>"),
+        Value::Values(values) => {
+            write!(f, "(values")?;
+            for value in values {
+                write!(f, " ")?;
+                write_value(value, f, stack)?;
+            }
+            write!(f, ")")
+        }
+        Value::EofObject => write!(f, "#<eof>"),
+        Value::Environment(_) => write!(f, "#<environment>"),
+        Value::Continuation(_) => write!(f, "#<continuation>"),
+        Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
+        Value::Unspecified => write!(f, "#<unspecified>"),
+        Value::Uninitialized => write!(f, "#<uninitialized>"),
+    }
+}
+
+fn write_list_items(
+    items: &[Value],
+    f: &mut fmt::Formatter<'_>,
+    stack: &mut HashSet<*const RefCell<PairValue>>,
+) -> fmt::Result {
+    write!(f, "(")?;
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            write!(f, " ")?;
+        }
+        write_value(item, f, stack)?;
+    }
+    write!(f, ")")
+}
+
+fn write_pair_value(
+    pair: Rc<RefCell<PairValue>>,
+    f: &mut fmt::Formatter<'_>,
+    stack: &mut HashSet<*const RefCell<PairValue>>,
+) -> fmt::Result {
+    let mut inserted = Vec::new();
     write!(f, "(")?;
     let mut tail = Value::Pair(pair);
     let mut first = true;
@@ -4136,6 +4157,13 @@ fn write_pair_value(pair: Rc<RefCell<PairValue>>, f: &mut fmt::Formatter<'_>) ->
     loop {
         match tail {
             Value::Pair(pair) => {
+                let pointer = Rc::as_ptr(&pair);
+                if !stack.insert(pointer) {
+                    write!(f, " . #<circular-pair>)")?;
+                    remove_pair_stack_entries(stack, inserted);
+                    return Ok(());
+                }
+                inserted.push(pointer);
                 let (car, cdr) = {
                     let pair = pair.borrow();
                     (pair.car.clone(), pair.cdr.clone())
@@ -4143,23 +4171,44 @@ fn write_pair_value(pair: Rc<RefCell<PairValue>>, f: &mut fmt::Formatter<'_>) ->
                 if !first {
                     write!(f, " ")?;
                 }
-                write!(f, "{car}")?;
+                write_value(&car, f, stack)?;
                 tail = cdr;
                 first = false;
             }
-            Value::List(items) if items.is_empty() => return write!(f, ")"),
+            Value::List(items) if items.is_empty() => {
+                write!(f, ")")?;
+                remove_pair_stack_entries(stack, inserted);
+                return Ok(());
+            }
             Value::List(items) => {
                 for item in items {
                     if !first {
                         write!(f, " ")?;
                     }
-                    write!(f, "{item}")?;
+                    write_value(&item, f, stack)?;
                     first = false;
                 }
-                return write!(f, ")");
+                write!(f, ")")?;
+                remove_pair_stack_entries(stack, inserted);
+                return Ok(());
             }
-            value => return write!(f, " . {value})"),
+            value => {
+                write!(f, " . ")?;
+                write_value(&value, f, stack)?;
+                write!(f, ")")?;
+                remove_pair_stack_entries(stack, inserted);
+                return Ok(());
+            }
         }
+    }
+}
+
+fn remove_pair_stack_entries(
+    stack: &mut HashSet<*const RefCell<PairValue>>,
+    inserted: Vec<*const RefCell<PairValue>>,
+) {
+    for pointer in inserted {
+        stack.remove(&pointer);
     }
 }
 
@@ -5079,6 +5128,14 @@ mod tests {
         assert_eq!(
             eval_one("(define p (cons 1 '())) (set-cdr! p p) (list? p)"),
             "#f"
+        );
+        assert_eq!(
+            eval_one("(define p (cons 1 '())) (set-cdr! p p) p"),
+            "(1 . #<circular-pair>)"
+        );
+        assert_eq!(
+            eval_one("(define p (cons 1 '())) (set-car! p p) p"),
+            "(#<circular-pair>)"
         );
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
