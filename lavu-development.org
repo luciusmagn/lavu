@@ -628,6 +628,8 @@ Scheme value is valid.
   parameters.
 - Require the =map=/=for-each= procedure operand to be applicable even
   when the input lists are empty.
+- Enforce the =map=/=for-each= procedure arity at runtime before
+  iteration, so empty input lists do not hide an inapplicable procedure.
 - Preserve visible heterogeneous element unions for =(map list ...)= and
   =(map vector ...)= constructor mappers.
 ** Multiple Values

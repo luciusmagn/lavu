@@ -14,8 +14,10 @@ use thiserror::Error;
 
 use crate::datum_parser::parse as parse_datums;
 use crate::lexer::{Token, tokenize_checked};
+use crate::stdlib::primitive as primitive_metadata;
 use crate::surface::{Expr, Program, TopLevel, classify_expr, classify_program};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
+use crate::types::{ProcedureType, Type};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -3734,8 +3736,76 @@ fn procedure_and_lists(
     let lists = args
         .map(|value| expect_list_items(&value, span.clone()))
         .collect::<Result<Vec<_>, _>>()?;
+    ensure_procedure_accepts_arity(&procedure, lists.len(), span)?;
 
     Ok((procedure, lists))
+}
+
+fn ensure_procedure_accepts_arity(
+    procedure: &Value,
+    actual: usize,
+    span: SourceSpan,
+) -> Result<(), EvalError> {
+    let expected = match procedure {
+        Value::Procedure(procedure) => {
+            if procedure_accepts_arity(procedure, actual) {
+                return Ok(());
+            }
+            procedure.params.len()
+        }
+        Value::Continuation(_) => {
+            if actual == 1 {
+                return Ok(());
+            }
+            1
+        }
+        Value::Primitive(name) => {
+            let Some(Type::Procedure(procedure)) =
+                primitive_metadata(name).map(|primitive| primitive.signature)
+            else {
+                return Ok(());
+            };
+            if procedure_type_accepts_arity(&procedure, actual) {
+                return Ok(());
+            }
+            minimum_procedure_type_arity(&procedure)
+        }
+        _ => return Err(EvalError::NotProcedure { span }),
+    };
+
+    Err(EvalError::ArityMismatch {
+        expected,
+        actual,
+        span,
+    })
+}
+
+fn procedure_accepts_arity(procedure: &Procedure, actual: usize) -> bool {
+    match &procedure.rest {
+        Some(_) => actual >= procedure.params.len(),
+        None => actual == procedure.params.len(),
+    }
+}
+
+fn procedure_type_accepts_arity(procedure: &ProcedureType, actual: usize) -> bool {
+    match procedure {
+        ProcedureType::Fixed { params, .. } => actual == params.len(),
+        ProcedureType::Optional {
+            required, optional, ..
+        } => actual >= required.len() && actual <= required.len() + optional.len(),
+        ProcedureType::UniformVariadic { .. } => true,
+        ProcedureType::Rest { required, .. } => actual >= required.len(),
+    }
+}
+
+fn minimum_procedure_type_arity(procedure: &ProcedureType) -> usize {
+    match procedure {
+        ProcedureType::Fixed { params, .. } => params.len(),
+        ProcedureType::Optional { required, .. } | ProcedureType::Rest { required, .. } => {
+            required.len()
+        }
+        ProcedureType::UniformVariadic { .. } => 0,
+    }
 }
 
 fn common_list_len(lists: &[Vec<Value>], span: SourceSpan) -> Result<usize, EvalError> {
@@ -5364,6 +5434,7 @@ mod tests {
     fn evaluates_higher_order_list_iteration() {
         assert_eq!(eval_one("(map (lambda (x) (+ x 1)) '(1 2 3))"), "(2 3 4)");
         assert_eq!(eval_one("(map + '(1 2) '(10 20))"), "(11 22)");
+        assert_eq!(eval_one("(map (lambda (x) x) '())"), "()");
         assert_eq!(
             eval_one("(define x 0) (for-each (lambda (n) (set! x (+ x n))) '(1 2 3)) x"),
             "6"
@@ -5375,6 +5446,30 @@ mod tests {
         assert!(matches!(
             eval_error("(for-each 1 '())"),
             EvalError::NotProcedure { .. }
+        ));
+        assert!(matches!(
+            eval_error("(map (lambda (x y) x) '())"),
+            EvalError::ArityMismatch {
+                expected: 2,
+                actual: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            eval_error("(for-each (lambda () 1) '())"),
+            EvalError::ArityMismatch {
+                expected: 0,
+                actual: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            eval_error("(map = '())"),
+            EvalError::ArityMismatch {
+                expected: 2,
+                actual: 1,
+                ..
+            }
         ));
     }
 
