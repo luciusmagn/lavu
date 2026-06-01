@@ -863,7 +863,10 @@ impl Inferencer {
                     span: span.clone(),
                 })?;
 
-        let expected_produced = self.expected_call_with_values_result(&consumer_ty);
+        let constructor = constructor_kind(&operands[1], env);
+        let expected_produced = constructor
+            .and_then(|constructor| self.expected_constructor_value(&consumer_ty, constructor))
+            .or_else(|| self.expected_call_with_values_result(&consumer_ty));
         let produced = self.infer_call_with_values_producer(
             producer_ty,
             expected_produced,
@@ -878,11 +881,22 @@ impl Inferencer {
             .map(|_| operands[0].clone())
             .collect::<Vec<_>>();
 
-        if let Some(constructor) = constructor_kind(&operands[1], env) {
+        if let Some(constructor) = constructor {
             return Ok(self.infer_constructor_result(constructor, value_tys));
         }
 
         self.infer_application(consumer_ty, &value_operands, value_tys, span)
+    }
+
+    fn expected_constructor_value(
+        &self,
+        consumer_ty: &Type,
+        _constructor: ConstructorKind,
+    ) -> Option<Type> {
+        match self.resolve(consumer_ty.clone()) {
+            Type::Procedure(ProcedureType::UniformVariadic { param, .. }) => Some(*param),
+            _ => None,
+        }
     }
 
     fn infer_constructor_result(
@@ -3197,7 +3211,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (producer) (call-with-values producer list))"),
-            "(-> (-> t1) (listof t1))"
+            "(-> (-> t0) (listof t0))"
         );
         assert_eq!(
             infer_one("(lambda (producer) (call-with-values producer +))"),

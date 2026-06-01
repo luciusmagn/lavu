@@ -774,6 +774,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Preserve heterogeneous element unions when =call-with-values= sends
   fixed values into primitive =list= or =vector= constructors, while still
   respecting lexical shadowing of those constructor names.
+- Reuse the constructor element variable when an unknown
+  =call-with-values= producer feeds =list= or =vector=, keeping displayed
+  query types dense and readable.
 ** Conversion Primitives
 - Add typed and native symbol/string, char/integer, and number/string
   conversion primitives, with =string->number= reusing the lexer.
