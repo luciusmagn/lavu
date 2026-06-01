@@ -3135,6 +3135,12 @@ mod tests {
             infer_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
             "number?"
         );
+        assert_eq!(infer_one("(do ((i 0 (+ i 1))) ((= i 1)))"), "unspecified?");
+    }
+
+    #[test]
+    fn infers_omitted_if_alternate_as_unspecified() {
+        assert_eq!(infer_one("(if #f 1)"), "(U number? unspecified?)");
     }
 
     #[test]

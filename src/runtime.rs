@@ -5040,6 +5040,7 @@ mod tests {
             eval_one("(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))"),
             "10"
         );
+        assert_eq!(eval_one("(do ((i 0 (+ i 1))) ((= i 1)))"), "#<unspecified>");
     }
 
     #[test]
@@ -5106,6 +5107,7 @@ mod tests {
     #[test]
     fn evaluates_if_with_scheme_truthiness() {
         assert_eq!(eval_one("(if #f 1 2)"), "2");
+        assert_eq!(eval_one("(if #f 1)"), "#<unspecified>");
         assert_eq!(eval_one("(if #F 1 2)"), "2");
         assert_eq!(eval_one("(if #T 1 2)"), "1");
         assert_eq!(eval_one("(if '() 1 2)"), "1");
