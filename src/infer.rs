@@ -3370,6 +3370,11 @@ mod tests {
     #[test]
     fn infers_membership_primitives() {
         assert_eq!(
+            infer_one("member"),
+            "(-> any? (listof t0) (U boolean? (listof t0)))"
+        );
+        assert_eq!(infer_one("assoc"), "(-> any? (listof t0) (U boolean? t0))");
+        assert_eq!(
             infer_one("(member 'b '(a b c))"),
             "(U boolean? (listof symbol?))"
         );

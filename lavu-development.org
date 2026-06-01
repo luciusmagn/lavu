@@ -729,6 +729,9 @@ Scheme value is valid.
 ** Membership Primitives
 - Add typed and native =memq=, =memv=, =member=, =assq=, =assv=, and
   =assoc= using the corresponding equality predicate semantics.
+- Expose membership and association metadata in terms of list element
+  flow, so querying the primitive values preserves successful result
+  shapes.
 - Infer membership results as false-or-tail and association results as
   false-or-entry, preserving visible =listof= element shapes.
 - Make membership scans reject circular mutable-pair chains as non-list
