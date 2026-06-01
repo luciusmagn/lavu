@@ -536,13 +536,7 @@ impl Inferencer {
             None => Type::Unknown,
         };
 
-        self.merge_branch_substitutions(
-            refinement.as_ref(),
-            consequent,
-            alternate,
-            &then_inferencer,
-            &else_inferencer,
-        );
+        self.merge_branch_substitutions(refinement.as_ref(), &then_inferencer, &else_inferencer);
         self.next_var = self
             .next_var
             .max(then_inferencer.next_var)
@@ -557,8 +551,6 @@ impl Inferencer {
     fn merge_branch_substitutions(
         &mut self,
         refinement: Option<&BranchRefinement>,
-        consequent: &Spanned<Expr>,
-        alternate: Option<&Spanned<Expr>>,
         then_inferencer: &Inferencer,
         else_inferencer: &Inferencer,
     ) {
@@ -583,20 +575,10 @@ impl Inferencer {
 
             if let Some(refinement) = refinement.filter(|refinement| name == refinement.name) {
                 match refinement.branch {
-                    RefinedBranch::Then
-                        if then_ty.is_none()
-                            && (else_ty.is_some()
-                                || expr_mentions_variable(consequent, &refinement.name)) =>
-                    {
+                    RefinedBranch::Then if then_ty.is_none() && else_ty.is_some() => {
                         then_ty = Some(refinement.positive.clone());
                     }
-                    RefinedBranch::Else
-                        if else_ty.is_none()
-                            && (then_ty.is_some()
-                                || alternate.is_some_and(|expr| {
-                                    expr_mentions_variable(expr, &refinement.name)
-                                })) =>
-                    {
+                    RefinedBranch::Else if else_ty.is_none() && then_ty.is_some() => {
                         else_ty = Some(refinement.positive.clone());
                     }
                     _ => {}
@@ -2162,51 +2144,6 @@ fn variable_name(expr: &Spanned<Expr>) -> Option<&String> {
     }
 }
 
-fn expr_mentions_variable(expr: &Spanned<Expr>, name: &str) -> bool {
-    match &expr.node {
-        Expr::Variable(variable) => variable == name,
-        Expr::Lambda { params, rest, body } => {
-            !params.iter().any(|param| param.node == name)
-                && rest.as_ref().is_none_or(|param| param.node != name)
-                && body.iter().any(|expr| expr_mentions_variable(expr, name))
-        }
-        Expr::If {
-            condition,
-            consequent,
-            alternate,
-        } => {
-            expr_mentions_variable(condition, name)
-                || expr_mentions_variable(consequent, name)
-                || alternate
-                    .as_deref()
-                    .is_some_and(|expr| expr_mentions_variable(expr, name))
-        }
-        Expr::Begin(exprs) => exprs.iter().any(|expr| expr_mentions_variable(expr, name)),
-        Expr::Set {
-            name: set_name,
-            value,
-        } => set_name.node == name || expr_mentions_variable(value, name),
-        Expr::Delay(expr) => expr_mentions_variable(expr, name),
-        Expr::LetRec { bindings, body } => {
-            let shadows = bindings
-                .iter()
-                .any(|(binding_name, _)| binding_name.node == name);
-            !shadows
-                && (bindings
-                    .iter()
-                    .any(|(_, value)| expr_mentions_variable(value, name))
-                    || body.iter().any(|expr| expr_mentions_variable(expr, name)))
-        }
-        Expr::Apply { operator, operands } => {
-            expr_mentions_variable(operator, name)
-                || operands
-                    .iter()
-                    .any(|operand| expr_mentions_variable(operand, name))
-        }
-        Expr::Literal(_) | Expr::Quote(_) | Expr::Quasiquote(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::datum_parser::parse;
@@ -2412,8 +2349,12 @@ mod tests {
     #[test]
     fn propagates_refinements_through_derived_conditionals() {
         assert_eq!(
+            infer_one("(lambda (x) (if (string? x) (string-length x) #f))"),
+            "(-> x (U boolean? number?))"
+        );
+        assert_eq!(
             infer_one("(lambda (x) (and (string? x) (string-length x)))"),
-            "(-> string? (U boolean? number?))"
+            "(-> x (U boolean? number?))"
         );
         assert_eq!(
             infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
@@ -2797,7 +2738,7 @@ mod tests {
         assert_eq!(infer_one("(expt 2 3)"), "number?");
         assert_eq!(
             infer_one("(lambda (x) (if (integer? x) (+ x 1) 0))"),
-            "(-> number? number?)"
+            "(-> x number?)"
         );
     }
 }

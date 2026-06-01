@@ -373,6 +373,10 @@ Scheme value is valid.
   when the final argument has a known list element type.
 - Cover =set!= assignment inference so reassignment is checked against
   the existing binding type and mismatches are reported.
+- Keep predicate-guarded branch refinements from escaping when the
+  opposite branch accepts the unrefined value, so forms like =(and
+  (string? x) ...)= do not incorrectly require every caller to pass a
+  string.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
