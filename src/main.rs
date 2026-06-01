@@ -1,9 +1,13 @@
 use color_eyre::eyre::Result;
+use lavu::datum_parser::DatumParseError;
 use lavu::datum_parser::parse;
+use lavu::diagnostics::{
+    report_datum_error, report_eval_error, report_query_error, report_surface_error,
+};
 use lavu::query::infer_query;
 use lavu::repl::{line_editor, print_logo};
-use lavu::runtime::{Env, Value, eval_program};
-use lavu::surface::classify_program;
+use lavu::runtime::{Env, EvalError, Value, eval_program};
+use lavu::surface::{SurfaceError, classify_program};
 use reedline::Signal;
 
 fn main() -> Result<()> {
@@ -25,7 +29,7 @@ fn main() -> Result<()> {
                                 println!("{}", ty);
                             }
                         }
-                        Err(error) => println!("Type query error: {}", error),
+                        Err(error) => report_query_error(query, &error),
                     }
                     continue;
                 }
@@ -38,7 +42,9 @@ fn main() -> Result<()> {
                             }
                         }
                     }
-                    Err(error) => println!("Eval error: {}", error),
+                    Err(ReplError::Datum(error)) => report_datum_error(&buffer, &error),
+                    Err(ReplError::Surface(error)) => report_surface_error(&buffer, &error),
+                    Err(ReplError::Eval(error)) => report_eval_error(&buffer, &error),
                 }
             }
             Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
@@ -54,8 +60,27 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn eval_input(input: &str, env: &Env) -> Result<Vec<Value>> {
+#[derive(Debug)]
+enum ReplError {
+    Datum(DatumParseError),
+    Surface(SurfaceError),
+    Eval(EvalError),
+}
+
+fn eval_input(input: &str, env: &Env) -> std::result::Result<Vec<Value>, ReplError> {
     let datums = parse(input)?;
     let program = classify_program(&datums)?;
-    Ok(eval_program(&program, env)?)
+    eval_program(&program, env).map_err(ReplError::Eval)
+}
+
+impl From<DatumParseError> for ReplError {
+    fn from(error: DatumParseError) -> Self {
+        Self::Datum(error)
+    }
+}
+
+impl From<SurfaceError> for ReplError {
+    fn from(error: SurfaceError) -> Self {
+        Self::Surface(error)
+    }
 }

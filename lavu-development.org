@@ -318,3 +318,7 @@ Scheme value is valid.
 - Keep predicate refinements branch-local unless the refined branch
   actually mentions the variable, avoiding over-constrained parameters
   for guarded constant branches.
+** Native Diagnostics
+- Route native parser, surface, type, and evaluator errors through
+  Ariadne reports in the REPL so the new implementation keeps highlighted
+  span-oriented failures.
