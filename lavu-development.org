@@ -257,6 +257,8 @@ Scheme value is valid.
 ** List Library
 - Add =length= and the R5RS composed =car=/=cdr= accessors through four
   levels, with conservative =any?= metadata for the composed accessors.
+- Make improper pair values reference-backed as groundwork for R5RS
+  =set-car!= and =set-cdr!=.
 ** Internal Definitions
 - Lower leading internal =define= forms in body contexts to =letrec= so
   lambda, let, let*, and letrec bodies can use R5RS-style local

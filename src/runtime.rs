@@ -23,7 +23,7 @@ pub enum Value {
     String(Rc<RefCell<String>>),
     Symbol(String),
     List(Vec<Value>),
-    Pair(Box<Value>, Box<Value>),
+    Pair(Rc<RefCell<PairValue>>),
     Vector(Rc<RefCell<Vec<Value>>>),
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
@@ -44,8 +44,10 @@ impl PartialEq for Value {
             (Value::String(left), Value::String(right)) => *left.borrow() == *right.borrow(),
             (Value::Symbol(left), Value::Symbol(right)) => left == right,
             (Value::List(left), Value::List(right)) => left == right,
-            (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
-                left_car == right_car && left_cdr == right_cdr
+            (Value::Pair(left), Value::Pair(right)) => {
+                let left = left.borrow();
+                let right = right.borrow();
+                left.car == right.car && left.cdr == right.cdr
             }
             (Value::Vector(left), Value::Vector(right)) => *left.borrow() == *right.borrow(),
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
@@ -56,6 +58,12 @@ impl PartialEq for Value {
             _ => false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairValue {
+    car: Value,
+    cdr: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -585,7 +593,7 @@ fn apply_primitive(
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
         "pair?" => predicate(args, span, |value| match value {
             Value::List(items) => !items.is_empty(),
-            Value::Pair(_, _) => true,
+            Value::Pair(_) => true,
             _ => false,
         }),
         "null?" => predicate(
@@ -1926,8 +1934,10 @@ fn equal_value(left: &Value, right: &Value) -> bool {
                 .all(|(left, right)| equal_value(left, right))
                 && left.len() == right.len()
         }
-        (Value::Pair(left_car, left_cdr), Value::Pair(right_car, right_cdr)) => {
-            equal_value(left_car, right_car) && equal_value(left_cdr, right_cdr)
+        (Value::Pair(left), Value::Pair(right)) => {
+            let left = left.borrow();
+            let right = right.borrow();
+            equal_value(&left.car, &right.car) && equal_value(&left.cdr, &right.cdr)
         }
         (Value::Vector(left), Value::Vector(right)) => {
             let left = left.borrow();
@@ -1955,7 +1965,7 @@ fn cons(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 fn car(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
     match value {
         Value::List(items) if !items.is_empty() => Ok(items[0].clone()),
-        Value::Pair(head, _) => Ok(*head),
+        Value::Pair(pair) => Ok(pair.borrow().car.clone()),
         _ => Err(EvalError::TypeError {
             expected: "pair?",
             span,
@@ -1966,7 +1976,7 @@ fn car(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
 fn cdr(value: Value, span: SourceSpan) -> Result<Value, EvalError> {
     match value {
         Value::List(items) if !items.is_empty() => Ok(Value::List(items[1..].to_vec())),
-        Value::Pair(_, tail) => Ok(*tail),
+        Value::Pair(pair) => Ok(pair.borrow().cdr.clone()),
         _ => Err(EvalError::TypeError {
             expected: "pair?",
             span,
@@ -2115,8 +2125,15 @@ fn assoc(
                     return Ok(entry);
                 }
             }
-            Value::Pair(key, _) if compare(&target, key) => return Ok(entry),
-            Value::Pair(_, _) => {}
+            Value::Pair(pair) => {
+                let matches = {
+                    let pair = pair.borrow();
+                    compare(&target, &pair.car)
+                };
+                if matches {
+                    return Ok(entry);
+                }
+            }
             _ => {
                 return Err(EvalError::TypeError {
                     expected: "pair?",
@@ -2474,7 +2491,10 @@ fn cons_value(head: Value, tail: Value) -> Value {
             items.insert(0, head);
             Value::List(items)
         }
-        tail => Value::Pair(Box::new(head), Box::new(tail)),
+        tail => Value::Pair(Rc::new(RefCell::new(PairValue {
+            car: head,
+            cdr: tail,
+        }))),
     }
 }
 
@@ -2512,7 +2532,10 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
-            Value::Pair(head, tail) => write!(f, "({head} . {tail})"),
+            Value::Pair(pair) => {
+                let pair = pair.borrow();
+                write!(f, "({} . {})", pair.car, pair.cdr)
+            }
             Value::Vector(items) => {
                 write!(f, "#(")?;
                 for (index, item) in items.borrow().iter().enumerate() {
