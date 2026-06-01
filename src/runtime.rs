@@ -2436,7 +2436,10 @@ fn char_ready(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
         });
     }
 
-    Ok(Value::Boolean(state.index < state.chars.len()))
+    Ok(Value::Boolean(match state.kind {
+        InputPortKind::Buffer => true,
+        InputPortKind::Stdin => state.index < state.chars.len(),
+    }))
 }
 
 fn optional_input_port(args: Vec<Value>, span: SourceSpan) -> Result<InputPort, EvalError> {
@@ -4986,11 +4989,12 @@ mod tests {
                    (peek-char p)
                    (read-char p)
                    (eof-object? (read-char p))
+                   (char-ready? p)
                    (begin (close-input-port p) 'closed))",
             path.to_string_lossy()
         );
 
-        assert_eq!(eval_one(&input), "(#t #t #t #\\a #\\b #\\b #t closed)");
+        assert_eq!(eval_one(&input), "(#t #t #t #\\a #\\b #\\b #t #t closed)");
         std::fs::remove_file(path).unwrap();
         assert_eq!(eval_one("(current-input-port)"), "#<input-port>");
 

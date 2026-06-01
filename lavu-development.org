@@ -556,6 +556,8 @@ Scheme value is valid.
 - Make =read= parse and consume only one datum from the current port, so
   malformed following data is left for a later read instead of rejecting
   the first object.
+- Make =char-ready?= stay true for buffered/file input ports at EOF,
+  since the next =read-char= can return immediately.
 - Add =call-with-input-file= around file-backed input ports.
 - Add dynamic default input rebinding with =with-input-from-file=.
 - Type input-file combinator callbacks as input-port procedures or
