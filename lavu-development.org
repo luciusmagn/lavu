@@ -547,6 +547,8 @@ Scheme value is valid.
   proper lists, preserving visible arity and result types for =apply=.
 - Infer =apply= through visible =list= and =vector= constructors without
   forcing heterogeneous elements through uniform variadic metadata.
+- Bind unknown procedure variables through quoted final =apply= lists so
+  shadowed procedure names still receive visible argument constraints.
 ** Vector Primitives
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill
@@ -607,3 +609,5 @@ Scheme value is valid.
   too-many-argument calls during inference instead of looking variadic.
 - Accept =null?= wherever a proper =(listof a)= argument is required,
   since the empty list is valid at every proper list element type.
+- Classify primitive-specific inference cases through the active type
+  environment so lexical bindings can shadow standard names normally.

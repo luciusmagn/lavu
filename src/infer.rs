@@ -39,13 +39,14 @@ pub struct TypeEnv {
 struct TypeBinding {
     ty: Type,
     scheme: bool,
+    primitive: bool,
 }
 
 impl TypeEnv {
     pub fn new() -> Self {
         let mut env = Self::default();
         for primitive in crate::stdlib::r5rs_primitives() {
-            env.define_scheme(primitive.name, primitive.signature);
+            env.define_primitive(primitive.name, primitive.signature);
         }
         env
     }
@@ -70,18 +71,43 @@ impl TypeEnv {
         self.bindings.insert(name.into(), TypeBinding::scheme(ty));
     }
 
+    fn define_primitive(&mut self, name: impl Into<String>, ty: Type) {
+        self.bindings
+            .insert(name.into(), TypeBinding::primitive(ty));
+    }
+
     fn binding(&self, name: &str) -> Option<&TypeBinding> {
         self.bindings.get(name)
+    }
+
+    fn is_primitive(&self, name: &str) -> bool {
+        self.binding(name).is_some_and(|binding| binding.primitive)
     }
 }
 
 impl TypeBinding {
     fn monotype(ty: Type) -> Self {
-        Self { ty, scheme: false }
+        Self {
+            ty,
+            scheme: false,
+            primitive: false,
+        }
     }
 
     fn scheme(ty: Type) -> Self {
-        Self { ty, scheme: true }
+        Self {
+            ty,
+            scheme: true,
+            primitive: false,
+        }
+    }
+
+    fn primitive(ty: Type) -> Self {
+        Self {
+            ty,
+            scheme: true,
+            primitive: true,
+        }
     }
 }
 
@@ -143,10 +169,14 @@ enum PrimitiveApplication {
 }
 
 impl PrimitiveApplication {
-    fn classify(expr: &Expr) -> Option<Self> {
+    fn classify(expr: &Expr, env: &TypeEnv) -> Option<Self> {
         let Expr::Variable(name) = expr else {
             return None;
         };
+
+        if !env.is_primitive(name) {
+            return None;
+        }
 
         match name.as_str() {
             "apply" => Some(Self::Apply),
@@ -187,10 +217,14 @@ fn composed_accessor_steps(name: &str) -> Option<Vec<ListAccessResult>> {
         .collect()
 }
 
-fn constructor_kind(expr: &Spanned<Expr>) -> Option<ConstructorKind> {
+fn constructor_kind(expr: &Spanned<Expr>, env: &TypeEnv) -> Option<ConstructorKind> {
     let Expr::Variable(name) = &expr.node else {
         return None;
     };
+
+    if !env.is_primitive(name) {
+        return None;
+    }
 
     match name.as_str() {
         "list" => Some(ConstructorKind::List),
@@ -288,12 +322,13 @@ impl Inferencer {
                     .map(|operand| self.infer_expr(operand, env))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                if let Some(application) = PrimitiveApplication::classify(&operator.node) {
+                if let Some(application) = PrimitiveApplication::classify(&operator.node, env) {
                     return self.infer_primitive_application(
                         application,
                         operands,
                         operand_tys,
                         expr.span.clone(),
+                        env,
                     );
                 }
 
@@ -322,9 +357,12 @@ impl Inferencer {
         operands: &[Spanned<Expr>],
         operand_tys: Vec<Type>,
         span: SourceSpan,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         match application {
-            PrimitiveApplication::Apply => self.infer_apply_primitive(operands, operand_tys, span),
+            PrimitiveApplication::Apply => {
+                self.infer_apply_primitive(operands, operand_tys, span, env)
+            }
             PrimitiveApplication::Values => Ok(Type::Values(
                 operand_tys
                     .into_iter()
@@ -340,12 +378,14 @@ impl Inferencer {
                 operand_tys,
                 span,
                 HigherOrderListResult::Mapped,
+                env,
             ),
             PrimitiveApplication::ForEach => self.infer_higher_order_list(
                 operands,
                 operand_tys,
                 span,
                 HigherOrderListResult::Unspecified,
+                env,
             ),
             PrimitiveApplication::List => Ok(self.infer_list_constructor(operand_tys)),
             PrimitiveApplication::MakeVector => self.infer_make_vector(operands, operand_tys, span),
@@ -882,6 +922,7 @@ impl Inferencer {
         operand_tys: Vec<Type>,
         span: SourceSpan,
         result: HigherOrderListResult,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         if operand_tys.len() < 2 {
             return Err(TypeError::ArityMismatch {
@@ -899,7 +940,7 @@ impl Inferencer {
             .zip(&operands[1..])
             .map(|(ty, operand)| self.infer_list_element_type(ty, operand))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(ty) = self.infer_constructor_mapper(&operands[0], &element_tys, result) {
+        if let Some(ty) = self.infer_constructor_mapper(&operands[0], &element_tys, result, env) {
             return Ok(ty);
         }
         let mapped_ty =
@@ -916,8 +957,9 @@ impl Inferencer {
         procedure: &Spanned<Expr>,
         element_tys: &[Type],
         result: HigherOrderListResult,
+        env: &TypeEnv,
     ) -> Option<Type> {
-        let mapped = match constructor_kind(procedure)? {
+        let mapped = match constructor_kind(procedure, env)? {
             ConstructorKind::List => self.infer_list_constructor(element_tys.to_vec()),
             ConstructorKind::Vector => self.infer_vector_constructor(element_tys.to_vec()),
         };
@@ -1175,6 +1217,7 @@ impl Inferencer {
         operands: &[Spanned<Expr>],
         operand_tys: Vec<Type>,
         span: SourceSpan,
+        env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         if operand_tys.len() < 2 {
             return Err(TypeError::ArityMismatch {
@@ -1197,11 +1240,32 @@ impl Inferencer {
             .last()
             .expect("arity check ensures a final list operand");
 
-        if let Some(constructor) = constructor_kind(&operands[0]) {
+        if let Some(constructor) = constructor_kind(&operands[0], env) {
             return self.infer_apply_constructor(constructor, arguments, final_list, final_operand);
         }
 
         match self.resolve(procedure_ty) {
+            Type::Var(name) => {
+                let Some(final_arguments) = quoted_proper_list_types(final_operand) else {
+                    return Ok(Type::Any);
+                };
+                self.unify(final_list, Type::List, final_operand.span.clone())?;
+
+                let mut params = arguments;
+                params.extend(final_arguments.into_iter().map(|ty| self.resolve(ty)));
+                let result = self.fresh_type_var();
+                self.substitutions.insert(
+                    name,
+                    Type::procedure(
+                        params
+                            .into_iter()
+                            .map(|ty| self.resolve(ty))
+                            .collect::<Vec<_>>(),
+                        result.clone(),
+                    ),
+                );
+                Ok(self.resolve(result))
+            }
             Type::Procedure(
                 procedure @ (ProcedureType::Fixed { .. } | ProcedureType::Optional { .. }),
             ) => {
@@ -2391,6 +2455,30 @@ mod tests {
         assert_eq!(
             infer_one("((lambda () (vector 1) (vector #\\a)))"),
             "(vectorof char?)"
+        );
+    }
+
+    #[test]
+    fn respects_primitive_shadowing() {
+        assert_eq!(
+            infer_one("((lambda (list) (list 1 \"x\")) (lambda (x y) x))"),
+            "number?"
+        );
+        assert_eq!(
+            infer_one("((lambda (map) (map 1)) (lambda (x) \"ok\"))"),
+            "string?"
+        );
+        assert_eq!(
+            infer_one("((lambda (apply) (apply 1)) (lambda (x) \"ok\"))"),
+            "string?"
+        );
+        assert_eq!(
+            infer_one("((lambda (vector) (apply vector 1 '(\"x\"))) (lambda (x y) x))"),
+            "number?"
+        );
+        assert_eq!(
+            infer_one("((lambda (list) (map list '(1) '(\"x\"))) (lambda (x y) x))"),
+            "(listof number?)"
         );
     }
 
