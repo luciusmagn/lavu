@@ -2171,6 +2171,14 @@ fn parse_cond(
     origin: Option<crate::syntax::NodeId>,
     clauses: &[Spanned<Datum>],
 ) -> Result<Expr, SurfaceError> {
+    if clauses.is_empty() {
+        return Err(SurfaceError::BadArity {
+            form: "cond",
+            expected: "at least one clause",
+            span,
+        });
+    }
+
     let mut result = Spanned {
         node: boolean_literal(false),
         span: span.clone(),
@@ -2197,6 +2205,13 @@ fn parse_cond(
                 return Err(SurfaceError::BadArity {
                     form: "cond",
                     expected: "else clause last",
+                    span: clause.span.clone(),
+                });
+            }
+            if body.is_empty() {
+                return Err(SurfaceError::BadArity {
+                    form: "cond else clause",
+                    expected: "at least one body expression",
                     span: clause.span.clone(),
                 });
             }
@@ -3020,6 +3035,20 @@ mod tests {
             classify_top_level(&datums[0]),
             Err(SurfaceError::BadArity { form: "cond", .. })
         ));
+    }
+
+    #[test]
+    fn rejects_empty_cond_forms() {
+        for input in ["(cond)", "(cond (else))"] {
+            let datums = parse(input).unwrap();
+            assert!(matches!(
+                classify_top_level(&datums[0]),
+                Err(SurfaceError::BadArity { .. })
+            ));
+        }
+
+        let datums = parse("(cond (#t))").unwrap();
+        assert!(classify_top_level(&datums[0]).is_ok());
     }
 
     #[test]

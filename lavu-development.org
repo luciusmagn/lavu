@@ -312,6 +312,8 @@ Scheme value is valid.
   variable set.
 - Reject =cond= forms whose =else= clause is not last, matching the
   existing =case= clause validation.
+- Reject empty =cond= forms and empty =cond= =else= clauses while keeping
+  ordinary test-only clauses valid.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.
