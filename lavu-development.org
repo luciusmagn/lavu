@@ -335,3 +335,7 @@ Scheme value is valid.
 ** Clippy Warning Cleanup
 - Fix Clippy-denied warnings in lexer defaults, redundant closures,
   test length checks, and repeated surface binding tuple types.
+** Apply Primitive
+- Add native R5RS =apply= evaluation with runtime enforcement of the
+  final list argument and conservative =any?= type metadata until the
+  procedure type model can express final-list rest application.

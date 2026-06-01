@@ -195,6 +195,7 @@ impl Env {
             "not",
             "eqv?",
             "force",
+            "apply",
             "cons",
             "car",
             "cdr",
@@ -403,6 +404,7 @@ fn apply_primitive(
         "not" => unary(args, span, |value| Ok(Value::Boolean(!truthy(&value)))),
         "eqv?" => eqv(args, span),
         "force" => force(args, span),
+        "apply" => apply_procedure_argument(args, span),
         "cons" => cons(args, span),
         "car" => unary(args, span.clone(), |value| car(value, span)),
         "cdr" => unary(args, span.clone(), |value| cdr(value, span)),
@@ -790,6 +792,34 @@ fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             span,
         }),
     })
+}
+
+fn apply_procedure_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let mut args = args.into_iter();
+    let procedure = args
+        .next()
+        .expect("arity check ensures a procedure argument");
+    let mut operands = args.collect::<Vec<_>>();
+    let final_operand = operands
+        .pop()
+        .expect("arity check ensures a final list argument");
+    let Value::List(final_operands) = final_operand else {
+        return Err(EvalError::TypeError {
+            expected: "list?",
+            span,
+        });
+    };
+
+    operands.extend(final_operands);
+    apply(procedure, operands, span)
 }
 
 fn eqv_value(left: &Value, right: &Value) -> bool {
@@ -1210,6 +1240,13 @@ mod tests {
         assert_eq!(eval_one("(car (list 1 2 3))"), "1");
         assert_eq!(eval_one("(cdr (list 1 2 3))"), "(2 3)");
         assert_eq!(eval_one("(append (list 1) (list 2 3))"), "(1 2 3)");
+    }
+
+    #[test]
+    fn evaluates_apply() {
+        assert_eq!(eval_one("(apply + (list 1 2 3))"), "6");
+        assert_eq!(eval_one("(apply + 1 2 (list 3 4))"), "10");
+        assert_eq!(eval_one("(apply (lambda (x y) (+ x y)) (list 4 5))"), "9");
     }
 
     #[test]

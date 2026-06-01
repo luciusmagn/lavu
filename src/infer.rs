@@ -813,4 +813,9 @@ mod tests {
         assert_eq!(infer_one("'(1 . \"x\")"), "(pair? number? string?)");
         assert_eq!(infer_one("'(1 \"x\")"), "(listof (U number? string?))");
     }
+
+    #[test]
+    fn infers_apply_conservatively() {
+        assert_eq!(infer_one("(apply + '(1 2 3))"), "any?");
+    }
 }
