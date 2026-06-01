@@ -1,7 +1,7 @@
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use logos::{Lexer as LogosLexer, Logos, Span};
 use num::{
-    BigInt, Complex, Num, ToPrimitive, bigint::ParseBigIntError, complex::ParseComplexError,
+    BigInt, Complex, Num, ToPrimitive, Zero, bigint::ParseBigIntError, complex::ParseComplexError,
 };
 use strum::EnumIs;
 use thiserror::Error;
@@ -30,6 +30,9 @@ pub enum LexerError {
 
     #[error("complex number parse error: {0}")]
     ComplexNumParseError(#[from] Rc<ParseComplexError<ParseBigDecimalError>>),
+
+    #[error("zero denominator in rational literal")]
+    ZeroDenominator,
 
     #[error("unclosed block comment")]
     UnclosedBlockComment,
@@ -539,26 +542,32 @@ pub fn is_operator(s: &str) -> bool {
     operators().contains(&s)
 }
 
-fn parse_ratio_literal(slice: &str) -> Result<(BigInt, BigInt), ParseBigIntError> {
+fn parse_ratio_literal(slice: &str) -> Result<(BigInt, BigInt), LexerError> {
     let (numerator, denominator) = slice
         .split_once('/')
         .expect("ratio token regex guarantees a slash");
 
-    Ok((BigInt::from_str(numerator)?, BigInt::from_str(denominator)?))
+    let numerator = BigInt::from_str(numerator)?;
+    let denominator = BigInt::from_str(denominator)?;
+    if denominator.is_zero() {
+        return Err(LexerError::ZeroDenominator);
+    }
+
+    Ok((numerator, denominator))
 }
 
-fn parse_radix_ratio_literal(
-    slice: &str,
-    radix: u32,
-) -> Result<(BigInt, BigInt), ParseBigIntError> {
+fn parse_radix_ratio_literal(slice: &str, radix: u32) -> Result<(BigInt, BigInt), LexerError> {
     let (numerator, denominator) = slice
         .split_once('/')
         .expect("ratio token regex guarantees a slash");
 
-    Ok((
-        BigInt::from_str_radix(numerator, radix)?,
-        BigInt::from_str_radix(denominator, radix)?,
-    ))
+    let numerator = BigInt::from_str_radix(numerator, radix)?;
+    let denominator = BigInt::from_str_radix(denominator, radix)?;
+    if denominator.is_zero() {
+        return Err(LexerError::ZeroDenominator);
+    }
+
+    Ok((numerator, denominator))
 }
 
 fn parse_exact_decimal_literal(slice: &str) -> Result<(BigInt, BigInt), LexerError> {
@@ -841,6 +850,21 @@ mod tests {
             radix_rationals[10].0,
             Token::Decimal(BigDecimal::from_str("2.5").unwrap())
         );
+
+        assert!(matches!(
+            tokenize_checked("1/0"),
+            Err(SpannedLexerError {
+                error: LexerError::ZeroDenominator,
+                ..
+            })
+        ));
+        assert!(matches!(
+            tokenize_checked("#x10/0"),
+            Err(SpannedLexerError {
+                error: LexerError::ZeroDenominator,
+                ..
+            })
+        ));
     }
 
     #[test]

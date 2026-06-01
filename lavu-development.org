@@ -620,6 +620,8 @@ Scheme value is valid.
   =#d3/2= and =#d1.5=.
 - Parse decimal exponent numeric literals such as =1e2= and exact
   exponent forms such as =#e1.25e1=.
+- Reject rational literals with zero denominators during lexing so datum
+  parsing and =string->number= report failure instead of panicking later.
 ** Complete Text Comparisons
 - Add typed and native =char<=?=, =char>=?=, character case-insensitive
   comparisons, and the matching string comparison family.
