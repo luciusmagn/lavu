@@ -563,3 +563,6 @@ Scheme value is valid.
 - Centralize primitive-specific application inference behind a small
   classifier so new educational special cases do not grow a long
   repeated operator-name chain.
+- Instantiate standard-library polymorphic type schemes per use so one
+  primitive application cannot leak its element constraints into a later
+  use of the same primitive.

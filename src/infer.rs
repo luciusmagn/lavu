@@ -32,25 +32,48 @@ pub enum TypeError {
 
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnv {
-    bindings: HashMap<String, Type>,
+    bindings: HashMap<String, TypeBinding>,
+}
+
+#[derive(Debug, Clone)]
+struct TypeBinding {
+    ty: Type,
+    scheme: bool,
 }
 
 impl TypeEnv {
     pub fn new() -> Self {
         let mut env = Self::default();
         for primitive in crate::stdlib::r5rs_primitives() {
-            env.bindings
-                .insert(primitive.name.to_string(), primitive.signature);
+            env.define_scheme(primitive.name, primitive.signature);
         }
         env
     }
 
     pub fn define(&mut self, name: impl Into<String>, ty: Type) {
-        self.bindings.insert(name.into(), ty);
+        self.bindings.insert(name.into(), TypeBinding::monotype(ty));
     }
 
     pub fn get(&self, name: &str) -> Option<&Type> {
+        self.binding(name).map(|binding| &binding.ty)
+    }
+
+    fn define_scheme(&mut self, name: impl Into<String>, ty: Type) {
+        self.bindings.insert(name.into(), TypeBinding::scheme(ty));
+    }
+
+    fn binding(&self, name: &str) -> Option<&TypeBinding> {
         self.bindings.get(name)
+    }
+}
+
+impl TypeBinding {
+    fn monotype(ty: Type) -> Self {
+        Self { ty, scheme: false }
+    }
+
+    fn scheme(ty: Type) -> Self {
+        Self { ty, scheme: true }
     }
 }
 
@@ -185,14 +208,7 @@ impl Inferencer {
     pub fn infer_expr(&mut self, expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeError> {
         match &expr.node {
             Expr::Literal(atom) => Ok(type_of_atom(atom)),
-            Expr::Variable(name) => env
-                .get(name)
-                .cloned()
-                .map(|ty| self.resolve(ty))
-                .ok_or_else(|| TypeError::UnboundVariable {
-                    name: name.clone(),
-                    span: expr.span.clone(),
-                }),
+            Expr::Variable(name) => self.infer_variable(name, expr.span.clone(), env),
             Expr::Quote(datum) => Ok(type_of_datum(datum)),
             Expr::Quasiquote(_) => Ok(Type::Any),
             Expr::Lambda { params, rest, body } => {
@@ -498,6 +514,94 @@ impl Inferencer {
                 Ok(self.resolve(result))
             }
             actual => Err(TypeError::ExpectedProcedure { actual, span }),
+        }
+    }
+
+    fn infer_variable(
+        &mut self,
+        name: &str,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let binding = env
+            .binding(name)
+            .ok_or_else(|| TypeError::UnboundVariable {
+                name: name.to_string(),
+                span,
+            })?;
+        let ty = if binding.scheme {
+            self.instantiate_scheme(&binding.ty)
+        } else {
+            binding.ty.clone()
+        };
+
+        Ok(self.resolve(ty))
+    }
+
+    fn instantiate_scheme(&mut self, ty: &Type) -> Type {
+        let mut vars = BTreeMap::new();
+        self.instantiate_scheme_type(ty, &mut vars)
+    }
+
+    fn instantiate_scheme_type(&mut self, ty: &Type, vars: &mut BTreeMap<String, Type>) -> Type {
+        match ty {
+            Type::Var(name) => {
+                if let Some(fresh) = vars.get(name) {
+                    fresh.clone()
+                } else {
+                    let fresh = self.fresh_type_var();
+                    vars.insert(name.clone(), fresh.clone());
+                    fresh
+                }
+            }
+            Type::Pair(car, cdr) => Type::Pair(
+                Box::new(self.instantiate_scheme_type(car, vars)),
+                Box::new(self.instantiate_scheme_type(cdr, vars)),
+            ),
+            Type::ListOf(element) => {
+                Type::ListOf(Box::new(self.instantiate_scheme_type(element, vars)))
+            }
+            Type::VectorOf(element) => {
+                Type::VectorOf(Box::new(self.instantiate_scheme_type(element, vars)))
+            }
+            Type::Values(types) => Type::Values(
+                types
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect(),
+            ),
+            Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
+                params
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect::<Vec<_>>(),
+                self.instantiate_scheme_type(result, vars),
+            ),
+            Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+                Type::uniform_variadic(
+                    self.instantiate_scheme_type(param, vars),
+                    self.instantiate_scheme_type(result, vars),
+                )
+            }
+            Type::Procedure(ProcedureType::Rest {
+                required,
+                rest,
+                result,
+            }) => Type::rest_procedure(
+                required
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect::<Vec<_>>(),
+                self.instantiate_scheme_type(rest, vars),
+                self.instantiate_scheme_type(result, vars),
+            ),
+            Type::Union(types) => Type::union(
+                types
+                    .iter()
+                    .map(|ty| self.instantiate_scheme_type(ty, vars))
+                    .collect::<Vec<_>>(),
+            ),
+            ty => ty.clone(),
         }
     }
 
@@ -1509,7 +1613,7 @@ mod tests {
         assert_eq!(infer_one("(lambda args args)"), "(-> args * (listof args))");
         assert_eq!(
             infer_one("(lambda (x . rest) (reverse rest))"),
-            "(-> x a * (listof a))"
+            "(-> x t0 * (listof t0))"
         );
     }
 
@@ -1543,7 +1647,7 @@ mod tests {
     fn infers_reverse_lambda_from_primitive_signature() {
         assert_eq!(
             infer_one("(lambda (x) (reverse x))"),
-            "(-> (listof a) (listof a))"
+            "(-> (listof t0) (listof t0))"
         );
     }
 
@@ -1695,6 +1799,18 @@ mod tests {
             "(listof char?)"
         );
         assert_eq!(infer_one("(list->vector '(1 2 3))"), "(vectorof number?)");
+    }
+
+    #[test]
+    fn instantiates_polymorphic_primitives_per_use() {
+        assert_eq!(
+            infer_one("((lambda () (reverse '(1)) (reverse '(a))))"),
+            "(listof symbol?)"
+        );
+        assert_eq!(
+            infer_one("((lambda () (vector 1) (vector #\\a)))"),
+            "(vectorof char?)"
+        );
     }
 
     #[test]
