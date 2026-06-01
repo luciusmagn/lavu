@@ -846,10 +846,18 @@ fn parse_literal_identifiers(datum: &Spanned<Datum>) -> Result<BTreeSet<String>,
         });
     };
 
-    items
-        .iter()
-        .map(|item| expect_identifier(item, "syntax-rules literal").map(|name| name.node))
-        .collect()
+    let mut literals = BTreeSet::new();
+    for item in items {
+        let name = expect_identifier(item, "syntax-rules literal")?;
+        if !literals.insert(name.node.clone()) {
+            return Err(SurfaceError::DuplicateIdentifier {
+                context: "syntax-rules literals",
+                name: name.node,
+                span: name.span,
+            });
+        }
+    }
+    Ok(literals)
 }
 
 fn parse_syntax_rule(datum: &Spanned<Datum>) -> Result<SyntaxRule, SurfaceError> {
@@ -2764,6 +2772,21 @@ mod tests {
                 Err(SurfaceError::DuplicateIdentifier { .. })
             ));
         }
+    }
+
+    #[test]
+    fn rejects_duplicate_syntax_rule_literals() {
+        let datums = parse(
+            "(define-syntax pick
+               (syntax-rules (else else)
+                 ((pick else value) value)))",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            classify_program(&datums),
+            Err(SurfaceError::DuplicateIdentifier { .. })
+        ));
     }
 
     #[test]
