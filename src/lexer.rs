@@ -114,10 +114,10 @@ pub enum Token {
     Character(char),
 
     // Boolean
-    #[token("#t")]
+    #[regex(r"#[tT]")]
     True,
 
-    #[token("#f")]
+    #[regex(r"#[fF]")]
     False,
 
     // Quotes
@@ -435,11 +435,13 @@ mod tests {
 
     #[test]
     fn test_booleans() {
-        let input = "#t #f";
+        let input = "#t #f #T #F";
         let tokens = tokenize(input);
 
         assert_eq!(tokens[0].0, Token::True);
         assert_eq!(tokens[2].0, Token::False);
+        assert_eq!(tokens[4].0, Token::True);
+        assert_eq!(tokens[6].0, Token::False);
     }
 
     #[test]

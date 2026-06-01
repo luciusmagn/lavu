@@ -4441,6 +4441,8 @@ mod tests {
     #[test]
     fn evaluates_if_with_scheme_truthiness() {
         assert_eq!(eval_one("(if #f 1 2)"), "2");
+        assert_eq!(eval_one("(if #F 1 2)"), "2");
+        assert_eq!(eval_one("(if #T 1 2)"), "1");
         assert_eq!(eval_one("(if '() 1 2)"), "1");
     }
 
