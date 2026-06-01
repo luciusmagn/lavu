@@ -1,6 +1,7 @@
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{Color, Config, Label, Report, ReportKind, Source};
 
 use crate::datum_parser::DatumParseError;
+use crate::highlight::segments;
 use crate::infer::TypeError;
 use crate::query::QueryError;
 use crate::runtime::EvalError;
@@ -45,15 +46,32 @@ pub fn report_eval_error(input: &str, error: &EvalError) {
 
 fn report(input: &str, title: &'static str, message: &str, span: SourceSpan) {
     let span = normalize_span(input, span);
-    let _ = Report::build(ReportKind::Error, (REPL_SOURCE, span.clone()))
-        .with_message(title)
-        .with_label(
-            Label::new((REPL_SOURCE, span))
-                .with_message(message)
-                .with_color(Color::Red),
-        )
-        .finish()
-        .eprint((REPL_SOURCE, Source::from(input)));
+
+    // Disable underlines so the per-token highlight labels below tint the
+    // source without each drawing its own underbar; the primary error label
+    // still points at its span with a message arrow.
+    let mut builder = Report::build(ReportKind::Error, (REPL_SOURCE, span.clone()))
+        .with_config(Config::default().with_underlines(false))
+        .with_message(title);
+
+    // Syntax-highlight the displayed source by coloring each token's span.
+    for segment in segments(input) {
+        if let Some(color) = segment.category.ariadne_color() {
+            builder.add_label(Label::new((REPL_SOURCE, segment.span.clone())).with_color(color));
+        }
+    }
+
+    // The error label sits on top with a higher priority so its span keeps
+    // the error color rather than the underlying syntax highlight.
+    builder.add_label(
+        Label::new((REPL_SOURCE, span))
+            .with_message(message)
+            .with_color(Color::Red)
+            .with_priority(10),
+    );
+
+    let _ = builder.finish().eprint((REPL_SOURCE, Source::from(input)));
+    eprintln!();
 }
 
 fn normalize_span(input: &str, span: SourceSpan) -> SourceSpan {

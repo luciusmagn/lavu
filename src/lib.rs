@@ -1,6 +1,7 @@
 pub mod chars;
 pub mod datum_parser;
 pub mod diagnostics;
+pub mod highlight;
 pub mod infer;
 pub mod lexer;
 pub mod query;

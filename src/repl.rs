@@ -10,10 +10,8 @@ use reedline::{
 use std::borrow::Cow;
 use std::env;
 
-use crate::lexer::{
-    LexerError, Token, is_conversion, is_keywordy, is_mutator, is_operator, is_predicate,
-    is_special_form,
-};
+use crate::highlight::segments;
+use crate::lexer::{LexerError, Token};
 
 pub fn history() -> Result<Box<dyn History>> {
     let history_path = dirs::cache_dir()
@@ -35,60 +33,9 @@ pub fn highlighter() -> Result<Box<dyn Highlighter>> {
     impl Highlighter for SchemeHighlighter {
         fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
             let mut result = StyledText::new();
-            let mut lexer = Token::lexer(line);
-
-            let mut previous = None;
-
-            while let Some(token_result) = lexer.next() {
-                let span = lexer.span();
-                let text = &line[span.clone()];
-
-                let style = match &token_result {
-                    Ok(Token::Identifier(_)) => match text {
-                        x if is_special_form(x) => Style::new().fg(Color::Green),
-                        x if is_keywordy(x) => Style::new().fg(Color::Purple),
-                        x if is_predicate(x) => Style::new().fg(Color::LightBlue),
-                        x if is_mutator(x) => Style::new().fg(Color::Red),
-                        x if is_conversion(x) => Style::new().fg(Color::Yellow),
-                        x if is_operator(x) => Style::new().fg(Color::LightRed),
-                        _ if previous == Some(Token::LParen) => Style::new().fg(Color::LightCyan),
-                        _ => Style::new().fg(Color::Default),
-                    },
-                    Ok(Token::Integer(_))
-                    | Ok(Token::Decimal(_))
-                    | Ok(Token::Real(_))
-                    | Ok(Token::ExactComplex(_))
-                    | Ok(Token::Complex(_))
-                    | Ok(Token::Binary(_))
-                    | Ok(Token::Octal(_))
-                    | Ok(Token::Hex(_)) => Style::new().fg(Color::Green),
-                    Ok(Token::String(_)) => Style::new().fg(Color::LightRed),
-                    Ok(Token::Character(_)) => Style::new().fg(Color::LightCyan).italic(),
-                    Ok(Token::True) | Ok(Token::False) => Style::new().fg(Color::LightGreen).bold(),
-                    Ok(Token::LParen) | Ok(Token::RParen) | Ok(Token::LBracket)
-                    | Ok(Token::RBracket) => Style::new().fg(Color::Purple),
-                    Ok(Token::Quote)
-                    | Ok(Token::Backquote)
-                    | Ok(Token::Unquote)
-                    | Ok(Token::UnquoteSplicing)
-                    | Ok(Token::SyntaxQuote) => Style::new().fg(Color::Magenta).bold(),
-                    Ok(Token::VectorStart) => Style::new().fg(Color::Purple).bold(),
-                    Ok(Token::LineComment | Token::BlockComment) => {
-                        Style::new().fg(Color::DarkGray).italic()
-                    }
-                    _ => Style::new().fg(Color::Default),
-                };
-
-                match token_result {
-                    Ok(Token::Whitespace(_)) | Err(_) => (),
-                    Ok(owo) => {
-                        previous = Some(owo);
-                    }
-                }
-
-                result.push((style, text.to_string()));
+            for segment in segments(line) {
+                result.push((segment.category.style(), segment.text.to_string()));
             }
-
             result
         }
     }

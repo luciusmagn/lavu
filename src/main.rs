@@ -5,12 +5,17 @@ use lavu::diagnostics::{
     report_datum_error, report_eval_error, report_query_error, report_surface_error,
     report_type_error,
 };
+use lavu::highlight::{paint_query, paint_type};
 use lavu::infer::{Inferencer, TypeEnv, TypeError};
 use lavu::query::infer_query_with_context;
 use lavu::repl::{line_editor, print_logo};
 use lavu::runtime::{Env, EvalError, Value, eval_top_level};
 use lavu::surface::{SurfaceContext, SurfaceError};
+use lavu::syntax::{Atom, Datum, Spanned};
+use lavu::types::Type;
 use reedline::Signal;
+
+use std::io::IsTerminal;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -28,11 +33,7 @@ fn main() -> Result<()> {
             Ok(Signal::Success(buffer)) => {
                 if let Some(query) = buffer.trim_start().strip_prefix('?') {
                     match infer_query_with_context(query, &surface, &type_env) {
-                        Ok(types) => {
-                            for ty in types {
-                                println!("{}", ty);
-                            }
-                        }
+                        Ok(types) => print_query_types(query, &types),
                         Err(error) => report_query_error(query, &error),
                     }
                     continue;
@@ -65,6 +66,72 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Print each inferred query type as `value : type-info`, echoing the source
+/// of the form (syntax highlighted) beside its colored type when stdout is a
+/// terminal. Procedure types expand into a multi-line parameter block, using
+/// the queried lambda's formal names when available. Falls back to plain text
+/// when piped, and to the bare type when the parse does not line up
+/// one-to-one with the inferred forms.
+fn print_query_types(query: &str, types: &[Type]) {
+    let colored = std::io::stdout().is_terminal();
+    let sources = parse(query)
+        .ok()
+        .filter(|datums| datums.len() == types.len());
+
+    for (index, ty) in types.iter().enumerate() {
+        match (sources.as_ref().map(|datums| &datums[index]), colored) {
+            (Some(datum), true) => {
+                let source = query[datum.span.clone()].trim();
+                let names = lambda_param_names(&datum.node);
+                println!("{}", paint_query(source, ty, &names));
+            }
+            (Some(datum), false) => println!("{} : {ty}", query[datum.span.clone()].trim()),
+            (None, true) => println!("{}", paint_type(ty)),
+            (None, false) => println!("{ty}"),
+        }
+    }
+
+    if !types.is_empty() {
+        println!();
+    }
+}
+
+/// The formal parameter names of a queried `(lambda <formals> ...)`, in order
+/// with any dotted rest name last, so the type display can label each
+/// inferred parameter. Anything that is not a lambda yields no names.
+fn lambda_param_names(datum: &Datum) -> Vec<String> {
+    let Datum::List(items) = datum else {
+        return Vec::new();
+    };
+    let (Some(head), Some(formals)) = (items.first(), items.get(1)) else {
+        return Vec::new();
+    };
+    if !matches!(&head.node, Datum::Atom(Atom::Identifier(name)) if name == "lambda") {
+        return Vec::new();
+    }
+    formal_names(&formals.node)
+}
+
+fn formal_names(formals: &Datum) -> Vec<String> {
+    match formals {
+        Datum::Atom(Atom::Identifier(name)) => vec![name.clone()],
+        Datum::List(items) => items.iter().filter_map(identifier_name).collect(),
+        Datum::DottedList(items, rest) => items
+            .iter()
+            .chain(std::iter::once(rest.as_ref()))
+            .filter_map(identifier_name)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn identifier_name(datum: &Spanned<Datum>) -> Option<String> {
+    match &datum.node {
+        Datum::Atom(Atom::Identifier(name)) => Some(name.clone()),
+        _ => None,
+    }
 }
 
 #[derive(Debug)]

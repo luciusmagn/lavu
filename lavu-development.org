@@ -871,3 +871,27 @@ and output procedures. =any?= means any Scheme value is valid.
 - Normalize collection and port unions in displayed inference results,
   so branch merges prefer shapes like =(listof (U number? string?))=
   over redundant unions with =null?= or multiple =listof= arms.
+** REPL Type Display And Highlighting
+- Share one Scheme highlighting palette across the Reedline editor, the
+  =?= query echo, and Ariadne source by centralizing token categorization
+  in a single =highlight= module instead of an inline editor-only matcher.
+- Display =? expr...= results as =value : type-info=, echoing each queried
+  form's syntax-highlighted source beside its inferred type, and pairing
+  every form with its own type for multi-form queries.
+- Render inferred types with color and a distinct palette for predicate
+  atoms, the procedure arrow, collection constructors, unions, variadic
+  markers, and polymorphic type variables, while leaving the plain
+  =Display= text untouched for tests and piped output.
+- Expand procedure and lambda results into a multi-line block that lists
+  each parameter with its inferred type and the result on its own line,
+  labelling parameters with the queried lambda's formal names when known
+  and positional =arg N= labels otherwise.
+- Fall back to plain =value : type= text when stdout is not a terminal, and
+  to the bare type when a parse does not line up one-to-one with the
+  inferred forms.
+- Syntax-highlight the Scheme source shown inside Ariadne diagnostics by
+  coloring each token's span, disabling span underlines so the per-token
+  labels tint cleanly while the prioritized error label still points at
+  its span with a message arrow.
+- Print a trailing blank line after =?= type query output and after every
+  Ariadne diagnostic so REPL results and errors stay visually separated.
