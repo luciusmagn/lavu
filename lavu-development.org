@@ -458,6 +458,9 @@ Scheme value is valid.
 - Keep predicate refinements branch-local unless the refined branch
   actually mentions the variable, avoiding over-constrained parameters
   for guarded constant branches.
+- Preserve predicate-accepted inputs when the opposite branch constrains
+  the same variable, so forms like =(if (string? x) #t (+ x 1))= infer
+  both accepted parameter cases.
 ** Native Diagnostics
 - Route native parser, surface, type, and evaluator errors through
   Ariadne reports in the REPL so the new implementation keeps highlighted

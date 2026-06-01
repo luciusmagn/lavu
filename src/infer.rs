@@ -455,33 +455,38 @@ impl Inferencer {
         names.extend(else_inferencer.substitutions.keys().cloned());
 
         for name in names {
-            let then_ty = then_inferencer
+            let mut then_ty = then_inferencer
                 .substitutions
                 .get(&name)
                 .cloned()
-                .map(|ty| then_inferencer.resolve(ty))
-                .or_else(|| {
-                    refinement.and_then(|refinement| {
-                        (refinement.branch == RefinedBranch::Then
-                            && name == refinement.name.as_str()
-                            && expr_mentions_variable(consequent, &refinement.name))
-                        .then(|| refinement.positive.clone())
-                    })
-                });
-            let else_ty = else_inferencer
+                .map(|ty| then_inferencer.resolve(ty));
+            let mut else_ty = else_inferencer
                 .substitutions
                 .get(&name)
                 .cloned()
-                .map(|ty| else_inferencer.resolve(ty))
-                .or_else(|| {
-                    refinement.and_then(|refinement| {
-                        (refinement.branch == RefinedBranch::Else
-                            && name == refinement.name.as_str()
-                            && alternate
-                                .is_some_and(|expr| expr_mentions_variable(expr, &refinement.name)))
-                        .then(|| refinement.positive.clone())
-                    })
-                });
+                .map(|ty| else_inferencer.resolve(ty));
+
+            if let Some(refinement) = refinement.filter(|refinement| name == refinement.name) {
+                match refinement.branch {
+                    RefinedBranch::Then
+                        if then_ty.is_none()
+                            && (else_ty.is_some()
+                                || expr_mentions_variable(consequent, &refinement.name)) =>
+                    {
+                        then_ty = Some(refinement.positive.clone());
+                    }
+                    RefinedBranch::Else
+                        if else_ty.is_none()
+                            && (then_ty.is_some()
+                                || alternate.is_some_and(|expr| {
+                                    expr_mentions_variable(expr, &refinement.name)
+                                })) =>
+                    {
+                        else_ty = Some(refinement.positive.clone());
+                    }
+                    _ => {}
+                }
+            }
 
             let merged = match (then_ty, else_ty) {
                 (Some(then_ty), Some(else_ty)) => Type::union(vec![then_ty, else_ty]),
@@ -1880,6 +1885,30 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (if (not (string? x)) (+ x 1) (string-length x)))"),
             "(-> (U number? string?) number?)"
+        );
+    }
+
+    #[test]
+    fn keeps_predicate_only_accepted_branch_inputs() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (string? x) #t (+ x 1)))"),
+            "(-> (U number? string?) (U boolean? number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (not (string? x)) (+ x 1) #t))"),
+            "(-> (U number? string?) (U boolean? number?))"
+        );
+    }
+
+    #[test]
+    fn propagates_refinements_through_derived_conditionals() {
+        assert_eq!(
+            infer_one("(lambda (x) (and (string? x) (string-length x)))"),
+            "(-> string? (U boolean? number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
+            "(-> (U number? string?) (U boolean? number?))"
         );
     }
 
