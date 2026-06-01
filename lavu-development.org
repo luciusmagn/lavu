@@ -238,6 +238,9 @@ Scheme value is valid.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.
+- Add conservative =sqrt= for real inputs, including negative reals as
+  decimal complex results; full complex transcendental behavior remains
+  future numeric-tower work.
 ** Character Library
 - Add R5RS character classification and case primitives to the native
   runtime and type metadata: =char-alphabetic?=, =char-numeric?=,

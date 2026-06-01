@@ -202,6 +202,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "imag-part",
             Type::procedure(vec![Type::Number], Type::Number),
         ),
+        Primitive::new("sqrt", Type::procedure(vec![Type::Number], Type::Number)),
         Primitive::new(
             "char=?",
             Type::rest_procedure(vec![Type::Char, Type::Char], Type::Char, Type::Boolean),
@@ -602,6 +603,10 @@ mod tests {
         assert_eq!(
             primitive("make-rectangular").unwrap().signature.to_string(),
             "(-> number? number? number?)"
+        );
+        assert_eq!(
+            primitive("sqrt").unwrap().signature.to_string(),
+            "(-> number? number?)"
         );
         assert_eq!(
             primitive("eqv?").unwrap().signature.to_string(),

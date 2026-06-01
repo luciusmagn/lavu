@@ -221,6 +221,7 @@ impl Env {
             "make-rectangular",
             "real-part",
             "imag-part",
+            "sqrt",
             "char?",
             "char-alphabetic?",
             "char-numeric?",
@@ -567,6 +568,7 @@ fn apply_primitive(
         "make-rectangular" => make_rectangular(args, span),
         "real-part" => real_part(args, span),
         "imag-part" => imag_part(args, span),
+        "sqrt" => numeric_sqrt(args, span),
         "char?" => predicate(args, span, |value| matches!(value, Value::Character(_))),
         "char-alphabetic?" => char_predicate(args, span, char::is_alphabetic),
         "char-numeric?" => char_predicate(args, span, char::is_numeric),
@@ -1267,6 +1269,28 @@ fn imag_part(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
             span,
         }),
     })
+}
+
+fn numeric_sqrt(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let decimal = real_to_decimal(value, span.clone())?;
+        if decimal < decimal_zero() {
+            return decimal_sqrt(-decimal, span)
+                .map(|imaginary| Value::Complex(Complex::new(decimal_zero(), imaginary)));
+        }
+
+        decimal_sqrt(decimal, span).map(Value::Decimal)
+    })
+}
+
+fn decimal_sqrt(number: BigDecimal, span: SourceSpan) -> Result<BigDecimal, EvalError> {
+    number
+        .sqrt()
+        .map(|number| number.normalized())
+        .ok_or(EvalError::TypeError {
+            expected: "number with square root?",
+            span,
+        })
 }
 
 fn real_to_decimal(value: Value, span: SourceSpan) -> Result<BigDecimal, EvalError> {
@@ -2679,6 +2703,8 @@ mod tests {
             eval_one("(+ (make-rectangular 1 2) (make-rectangular 3 4))"),
             "4+6i"
         );
+        assert_eq!(eval_one("(sqrt 4)"), "2");
+        assert_eq!(eval_one("(sqrt -4)"), "0+2i");
     }
 
     #[test]
