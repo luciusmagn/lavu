@@ -4145,6 +4145,42 @@ mod tests {
     }
 
     #[test]
+    fn preserves_cond_and_case_clause_syntax_during_macro_expansion() {
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((else (syntax-rules () ((else) 99))))
+                   (cond (else 1)))"
+            ),
+            "1"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((=> (syntax-rules () ((=>) 99))))
+                   (cond ((+ 1 1) => (lambda (x) x))))"
+            ),
+            "2"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((else (syntax-rules () ((else) 99))))
+                   (case 'x (else 1)))"
+            ),
+            "1"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax
+                   ((a (syntax-rules () ((a) 99))))
+                   (case 'a ((a) 1) (else 2)))"
+            ),
+            "1"
+        );
+    }
+
+    #[test]
     fn evaluates_primitive_arithmetic() {
         assert_eq!(eval_one("(+ 1 2 3)"), "6");
         assert_eq!(eval_one("(- 10 3 2)"), "5");

@@ -227,6 +227,12 @@ impl MacroExpander {
                         "let*" | "letrec" => {
                             return self.expand_binding_body_form(datum, items, 1, 2, depth);
                         }
+                        "cond" => {
+                            return self.expand_cond_form(datum, items, depth);
+                        }
+                        "case" => {
+                            return self.expand_case_form(datum, items, depth);
+                        }
                         "let-syntax" => {
                             return self.expand_local_syntax("let-syntax", datum, items, depth);
                         }
@@ -447,6 +453,122 @@ impl MacroExpander {
             node: Datum::List(expanded),
             span: binding.span.clone(),
             origin: binding.origin,
+        })
+    }
+
+    fn expand_cond_form(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let mut expanded = vec![items[0].clone()];
+        expanded.extend(
+            items[1..]
+                .iter()
+                .map(|clause| self.expand_cond_clause(clause, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
+    }
+
+    fn expand_cond_clause(
+        &self,
+        clause: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(items) = &clause.node else {
+            return self.expand_with_depth(clause, depth);
+        };
+        let Some((test, rest)) = items.split_first() else {
+            return Ok(clause.clone());
+        };
+
+        let expanded = if identifier_name(test).as_deref() == Some("else") {
+            std::iter::once(test.clone())
+                .chain(
+                    rest.iter()
+                        .map(|item| self.expand_with_depth(item, depth))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+                .collect()
+        } else if rest.first().and_then(identifier_name).as_deref() == Some("=>") {
+            let mut clause = vec![self.expand_with_depth(test, depth)?, rest[0].clone()];
+            clause.extend(
+                rest[1..]
+                    .iter()
+                    .map(|item| self.expand_with_depth(item, depth))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+            clause
+        } else {
+            items
+                .iter()
+                .map(|item| self.expand_with_depth(item, depth))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: clause.span.clone(),
+            origin: clause.origin,
+        })
+    }
+
+    fn expand_case_form(
+        &self,
+        datum: &Spanned<Datum>,
+        items: &[Spanned<Datum>],
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        if items.len() < 2 {
+            return self.expand_ordinary_list(datum, items, depth);
+        }
+
+        let mut expanded = vec![items[0].clone(), self.expand_with_depth(&items[1], depth)?];
+        expanded.extend(
+            items[2..]
+                .iter()
+                .map(|clause| self.expand_case_clause(clause, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: datum.span.clone(),
+            origin: datum.origin,
+        })
+    }
+
+    fn expand_case_clause(
+        &self,
+        clause: &Spanned<Datum>,
+        depth: usize,
+    ) -> Result<Spanned<Datum>, SurfaceError> {
+        let Datum::List(items) = &clause.node else {
+            return self.expand_with_depth(clause, depth);
+        };
+        let Some((head, body)) = items.split_first() else {
+            return Ok(clause.clone());
+        };
+
+        let expanded = std::iter::once(head.clone())
+            .chain(
+                body.iter()
+                    .map(|item| self.expand_with_depth(item, depth))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+            .collect();
+
+        Ok(Spanned {
+            node: Datum::List(expanded),
+            span: clause.span.clone(),
+            origin: clause.origin,
         })
     }
 
