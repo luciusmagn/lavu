@@ -536,14 +536,20 @@ pub fn special_forms() -> &'static [&'static str] {
         "let",
         "let*",
         "letrec",
+        "let-syntax",
+        "letrec-syntax",
         "begin",
         "do",
         "delay",
+        "define-syntax",
+        "syntax-rules",
         "quote",
         "quasiquote",
         "unquote",
         "unquote-splicing",
         "else",
+        "=>",
+        "...",
     ]
 }
 
@@ -552,7 +558,8 @@ pub fn operators() -> &'static [&'static str] {
 }
 
 pub fn is_special_form(s: &str) -> bool {
-    special_forms().contains(&s)
+    let lower = s.to_ascii_lowercase();
+    special_forms().contains(&lower.as_str())
 }
 
 pub fn is_conversion(s: &str) -> bool {
@@ -1175,10 +1182,16 @@ mod tests {
     #[test]
     fn recognizes_highlight_categories() {
         assert!(is_special_form("set!"));
+        assert!(is_special_form("DEFINE"));
+        assert!(is_special_form("define-syntax"));
+        assert!(is_special_form("letrec-syntax"));
+        assert!(is_special_form("syntax-rules"));
         assert!(is_special_form("quote"));
         assert!(is_special_form("quasiquote"));
         assert!(is_special_form("unquote"));
         assert!(is_special_form("unquote-splicing"));
+        assert!(is_special_form("=>"));
+        assert!(is_special_form("..."));
         assert!(is_predicate("number?"));
         assert!(is_conversion("exact->inexact"));
     }

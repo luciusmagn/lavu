@@ -376,6 +376,9 @@ Scheme value is valid.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
+- Highlight R5RS macro keywords and clause literals such as
+  =define-syntax=, =let-syntax=, =syntax-rules=, =>, and =...= as
+  syntax, and classify special forms case-insensitively like the reader.
 - Make Reedline validation token-aware so delimiters inside strings and
   comments do not trigger spurious continuation prompts, while unclosed
   block comments still wait for more input.
