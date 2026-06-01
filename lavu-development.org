@@ -258,6 +258,8 @@ Scheme value is valid.
   =#e#x1+2i= and =#x#e+i=.
 - Route exact complex tokens through =string->number= so parsed strings
   preserve exact complex values too.
+- Respect the explicit radix argument for unprefixed complex strings in
+  =string->number=, including exactness prefixes on those strings.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.

@@ -3324,6 +3324,10 @@ fn string_to_number_with_radix(text: &str, radix: u32) -> Value {
     }
     let (exactness, digits) = split_exactness_prefix(text);
 
+    if digits.ends_with('i') {
+        return string_to_complex_with_radix(digits, radix, exactness);
+    }
+
     if let Some((numerator, denominator)) = digits.split_once('/') {
         return string_to_rational_with_radix(numerator, denominator, radix, exactness);
     }
@@ -3356,6 +3360,73 @@ fn string_to_rational_with_radix(
     }
 
     exact_number(BigRational::new(numerator, denominator))
+}
+
+fn string_to_complex_with_radix(text: &str, radix: u32, exactness: Option<Exactness>) -> Value {
+    let Some(body) = text.strip_suffix('i') else {
+        return Value::Boolean(false);
+    };
+    let Some(number) = parse_radix_complex_body(body, radix) else {
+        return Value::Boolean(false);
+    };
+
+    if exactness == Some(Exactness::Inexact) {
+        return Value::Complex(exact_complex_to_decimal(&number));
+    }
+
+    exact_complex_value(number)
+}
+
+fn parse_radix_complex_body(body: &str, radix: u32) -> Option<Complex<BigRational>> {
+    match body {
+        "+" => return Some(Complex::new(BigRational::zero(), signed_rational(1))),
+        "-" => return Some(Complex::new(BigRational::zero(), signed_rational(-1))),
+        "" => return None,
+        _ => {}
+    }
+
+    if let Some(sign_index) = body
+        .char_indices()
+        .skip(1)
+        .find(|(_, ch)| matches!(ch, '+' | '-'))
+        .map(|(index, _)| index)
+    {
+        let real = parse_radix_rational_component(&body[..sign_index], radix)?;
+        let imaginary = parse_radix_imaginary_component(&body[sign_index..], radix)?;
+        return Some(Complex::new(real, imaginary));
+    }
+
+    let imaginary = parse_radix_rational_component(body, radix)?;
+    Some(Complex::new(BigRational::zero(), imaginary))
+}
+
+fn parse_radix_imaginary_component(slice: &str, radix: u32) -> Option<BigRational> {
+    match slice {
+        "+" => Some(signed_rational(1)),
+        "-" => Some(signed_rational(-1)),
+        _ => parse_radix_rational_component(slice, radix),
+    }
+}
+
+fn parse_radix_rational_component(slice: &str, radix: u32) -> Option<BigRational> {
+    let slice = slice.strip_prefix('+').unwrap_or(slice);
+    let Some((numerator, denominator)) = slice.split_once('/') else {
+        return BigInt::from_str_radix(slice, radix)
+            .map(BigRational::from_integer)
+            .ok();
+    };
+
+    let numerator = BigInt::from_str_radix(numerator, radix).ok()?;
+    let denominator = BigInt::from_str_radix(denominator, radix).ok()?;
+    if denominator.is_zero() {
+        return None;
+    }
+
+    Some(BigRational::new(numerator, denominator))
+}
+
+fn signed_rational(value: i32) -> BigRational {
+    BigRational::from_integer(BigInt::from(value))
 }
 
 fn text_has_explicit_radix(text: &str) -> bool {
@@ -5331,6 +5402,13 @@ mod tests {
         assert_eq!(eval_one("(exact? (string->number \"1+2i\"))"), "#t");
         assert_eq!(eval_one("(string->number \"#e1.5+2.25i\")"), "3/2+9/4i");
         assert_eq!(eval_one("(string->number \"#b101+10i\")"), "5+2i");
+        assert_eq!(eval_one("(string->number \"101+10i\" 2)"), "5+2i");
+        assert_eq!(eval_one("(string->number \"101+i\" 2)"), "5+1i");
+        assert_eq!(eval_one("(string->number \"-101-10i\" 2)"), "-5-2i");
+        assert_eq!(eval_one("(string->number \"#e101/10+1/10i\" 2)"), "5/2+1/2i");
+        assert_eq!(eval_one("(exact? (string->number \"101+10i\" 2))"), "#t");
+        assert_eq!(eval_one("(exact? (string->number \"#i101+10i\" 2))"), "#f");
+        assert_eq!(eval_one("(string->number \"2+10i\" 2)"), "#f");
         assert_eq!(eval_one("(string->number \"#x10\")"), "16");
         assert_eq!(eval_one("(string->number \"#x-ff\")"), "-255");
         assert_eq!(eval_one("(string->number \"#b+1010\")"), "10");
