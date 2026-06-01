@@ -1690,7 +1690,7 @@ fn classify_list(
         Some("quasiquote") => parse_quasiquote(span, rest),
         Some("lambda") => parse_lambda(span, origin, rest),
         Some("if") => parse_if(rest),
-        Some("begin") => parse_begin(rest),
+        Some("begin") => parse_begin(span, rest),
         Some("set!") => parse_set(rest),
         Some("delay") => parse_delay(span, rest),
         Some("let") => parse_let(span, origin, rest),
@@ -1852,7 +1852,15 @@ fn parse_if(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
     })
 }
 
-fn parse_begin(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_begin(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+    if rest.is_empty() {
+        return Err(SurfaceError::BadArity {
+            form: "begin",
+            expected: "at least one expression",
+            span,
+        });
+    }
+
     Ok(Expr::Begin(
         rest.iter()
             .map(classify_expr)
@@ -3049,6 +3057,16 @@ mod tests {
 
         let datums = parse("(cond (#t))").unwrap();
         assert!(classify_top_level(&datums[0]).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_begin_expression() {
+        let datums = parse("(begin)").unwrap();
+
+        assert!(matches!(
+            classify_top_level(&datums[0]),
+            Err(SurfaceError::BadArity { form: "begin", .. })
+        ));
     }
 
     #[test]

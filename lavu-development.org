@@ -314,6 +314,8 @@ Scheme value is valid.
   existing =case= clause validation.
 - Reject empty =cond= forms and empty =cond= =else= clauses while keeping
   ordinary test-only clauses valid.
+- Reject empty expression-position =begin= forms; top-level =begin=
+  splicing remains a separate definition/program path.
 ** Macro Expansion
 - Add a first native top-level =define-syntax= expander for
   =syntax-rules= transformers before surface AST classification.
