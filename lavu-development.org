@@ -439,6 +439,9 @@ Scheme value is valid.
 - Keep string literal escapes to the R5RS reader surface: only escaped
   double quotes and escaped backslashes are accepted, and =write= emits
   literal newline/tab characters instead of non-standard escape names.
+- Make REPL continuation validation ignore square brackets as grouping
+  delimiters, so non-R5RS bracket syntax reaches the parser diagnostic
+  immediately instead of waiting for a matching extension delimiter.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.

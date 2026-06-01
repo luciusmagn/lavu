@@ -120,19 +120,16 @@ pub fn validator() -> Result<Box<dyn Validator>> {
 
 fn input_is_complete(line: &str) -> bool {
     let mut parens = 0_i64;
-    let mut brackets = 0_i64;
     for token in Token::lexer(line) {
         match token {
             Ok(Token::LParen) => parens += 1,
             Ok(Token::RParen) => parens -= 1,
-            Ok(Token::LBracket) => brackets += 1,
-            Ok(Token::RBracket) => brackets -= 1,
             Err(LexerError::UnclosedBlockComment) => return false,
             Ok(_) | Err(_) => {}
         }
     }
 
-    parens <= 0 && brackets <= 0
+    parens <= 0
 }
 
 pub fn prompt() -> Result<Box<dyn Prompt>> {
@@ -214,7 +211,7 @@ mod tests {
     fn validation_tracks_token_delimiters() {
         assert!(input_is_complete("(+ 1 2)"));
         assert!(!input_is_complete("(+ 1 2"));
-        assert!(!input_is_complete("[+ 1 2"));
+        assert!(input_is_complete("[+ 1 2"));
     }
 
     #[test]
