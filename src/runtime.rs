@@ -212,6 +212,16 @@ impl Env {
             "char-upcase",
             "char-downcase",
             "string?",
+            "make-string",
+            "string",
+            "string-ref",
+            "string-set!",
+            "substring",
+            "string-append",
+            "string->list",
+            "list->string",
+            "string-copy",
+            "string-fill!",
             "symbol?",
             "pair?",
             "null?",
@@ -494,6 +504,22 @@ fn apply_primitive(
         "char-upcase" => char_map(args, span, |c| c.to_uppercase().next().unwrap_or(c)),
         "char-downcase" => char_map(args, span, |c| c.to_lowercase().next().unwrap_or(c)),
         "string?" => predicate(args, span, |value| matches!(value, Value::String(_))),
+        "make-string" => make_string(args, span),
+        "string" => string(args, span),
+        "string-ref" => string_ref(args, span),
+        "string-set!" => string_set(args, span),
+        "substring" => substring(args, span),
+        "string-append" => string_append(args, span),
+        "string->list" => string_to_list(args, span),
+        "list->string" => list_to_string(args, span),
+        "string-copy" => unary(args, span.clone(), |value| match value {
+            Value::String(text) => Ok(string_value(text.borrow().clone())),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span,
+            }),
+        }),
+        "string-fill!" => string_fill(args, span),
         "symbol?" => predicate(args, span, |value| matches!(value, Value::Symbol(_))),
         "pair?" => predicate(args, span, |value| match value {
             Value::List(items) => !items.is_empty(),
@@ -1290,6 +1316,224 @@ fn string_compare(
             .windows(2)
             .all(|pair| pred(pair[0].as_str(), pair[1].as_str())),
     ))
+}
+
+fn make_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(EvalError::ArityMismatch {
+            expected: 1,
+            actual: args.len(),
+            span,
+        });
+    }
+
+    let len = exact_nonnegative_integer(&args[0], span.clone())?;
+    let fill = match args.get(1) {
+        Some(Value::Character(c)) => *c,
+        Some(_) => {
+            return Err(EvalError::TypeError {
+                expected: "char?",
+                span,
+            });
+        }
+        None => ' ',
+    };
+
+    Ok(string_value(fill.to_string().repeat(len)))
+}
+
+fn string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    args.into_iter()
+        .map(|value| match value {
+            Value::Character(c) => Ok(c),
+            _ => Err(EvalError::TypeError {
+                expected: "char?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<String, _>>()
+        .map(string_value)
+}
+
+fn string_ref(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [string, index]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(text) = string else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+    let Some(ch) = text.borrow().chars().nth(index) else {
+        return Err(EvalError::TypeError {
+            expected: "valid string index",
+            span,
+        });
+    };
+
+    Ok(Value::Character(ch))
+}
+
+fn string_set(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [string, index, value]: [Value; 3] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 3,
+            actual,
+            span: span.clone(),
+        })?;
+    let Value::String(text) = string else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let Value::Character(ch) = value else {
+        return Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        });
+    };
+    let index = exact_nonnegative_integer(&index, span.clone())?;
+    let mut text = text.borrow_mut();
+    let start = string_byte_index(&text, index, span.clone())?;
+    if start == text.len() {
+        return Err(EvalError::TypeError {
+            expected: "valid string index",
+            span,
+        });
+    }
+    let end = next_char_byte_index(&text, start);
+    text.replace_range(start..end, ch.to_string().as_str());
+    Ok(Value::Unspecified)
+}
+
+fn substring(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [string, start, end]: [Value; 3] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 3,
+            actual,
+            span: span.clone(),
+        })?;
+    let Value::String(text) = string else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let start = exact_nonnegative_integer(&start, span.clone())?;
+    let end = exact_nonnegative_integer(&end, span.clone())?;
+    if start > end {
+        return Err(EvalError::TypeError {
+            expected: "ordered substring indexes",
+            span,
+        });
+    }
+
+    let text = text.borrow();
+    let start_byte = string_byte_index(&text, start, span.clone())?;
+    let end_byte = string_byte_index(&text, end, span)?;
+    Ok(string_value(text[start_byte..end_byte].to_string()))
+}
+
+fn string_append(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    args.into_iter()
+        .map(|value| match value {
+            Value::String(text) => Ok(text.borrow().clone()),
+            _ => Err(EvalError::TypeError {
+                expected: "string?",
+                span: span.clone(),
+            }),
+        })
+        .collect::<Result<String, _>>()
+        .map(string_value)
+}
+
+fn string_to_list(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| match value {
+        Value::String(text) => Ok(Value::List(
+            text.borrow().chars().map(Value::Character).collect(),
+        )),
+        _ => Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        }),
+    })
+}
+
+fn list_to_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |value| {
+        let Value::List(items) = value else {
+            return Err(EvalError::TypeError {
+                expected: "list?",
+                span,
+            });
+        };
+
+        items
+            .into_iter()
+            .map(|value| match value {
+                Value::Character(c) => Ok(c),
+                _ => Err(EvalError::TypeError {
+                    expected: "char?",
+                    span: span.clone(),
+                }),
+            })
+            .collect::<Result<String, _>>()
+            .map(string_value)
+    })
+}
+
+fn string_fill(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [string, value]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(text) = string else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let Value::Character(ch) = value else {
+        return Err(EvalError::TypeError {
+            expected: "char?",
+            span,
+        });
+    };
+    let len = text.borrow().chars().count();
+    *text.borrow_mut() = ch.to_string().repeat(len);
+    Ok(Value::Unspecified)
+}
+
+fn string_byte_index(text: &str, index: usize, span: SourceSpan) -> Result<usize, EvalError> {
+    if index == text.chars().count() {
+        return Ok(text.len());
+    }
+
+    text.char_indices()
+        .nth(index)
+        .map(|(byte_index, _)| byte_index)
+        .ok_or(EvalError::TypeError {
+            expected: "valid string index",
+            span,
+        })
+}
+
+fn next_char_byte_index(text: &str, start: usize) -> usize {
+    text[start..]
+        .char_indices()
+        .nth(1)
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(text.len())
 }
 
 fn string_ci_compare(
@@ -2220,6 +2464,31 @@ mod tests {
         assert_eq!(eval_one("(string>=? \"b\" \"a\" \"a\")"), "#t");
         assert_eq!(eval_one("(string-ci=? \"A\" \"a\")"), "#t");
         assert_eq!(eval_one("(string-ci<? \"a\" \"B\")"), "#t");
+    }
+
+    #[test]
+    fn evaluates_string_construction_access_conversion_and_mutation() {
+        assert_eq!(eval_one("(make-string 3 #\\x)"), "\"xxx\"");
+        assert_eq!(eval_one("(string #\\a #\\b)"), "\"ab\"");
+        assert_eq!(eval_one("(string-ref \"abc\" 1)"), "#\\b");
+        assert_eq!(eval_one("(substring \"abcdef\" 1 4)"), "\"bcd\"");
+        assert_eq!(eval_one("(string-append \"a\" \"b\" \"c\")"), "\"abc\"");
+        assert_eq!(eval_one("(string->list \"ab\")"), "(#\\a #\\b)");
+        assert_eq!(eval_one("(list->string '(#\\a #\\b))"), "\"ab\"");
+        assert_eq!(
+            eval_one("(define s (string #\\a #\\b)) (define t s) (string-set! t 0 #\\z) s"),
+            "\"zb\""
+        );
+        assert_eq!(
+            eval_one(
+                "(define s (string #\\a #\\b)) (define c (string-copy s)) (string-set! s 0 #\\z) c"
+            ),
+            "\"ab\""
+        );
+        assert_eq!(
+            eval_one("(define s (string #\\a #\\b)) (string-fill! s #\\x) s"),
+            "\"xx\""
+        );
     }
 
     #[test]

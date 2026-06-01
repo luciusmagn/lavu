@@ -300,6 +300,43 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::procedure(vec![Type::String], Type::Number),
         ),
         Primitive::new(
+            "make-string",
+            Type::rest_procedure(vec![Type::Number], Type::Char, Type::String),
+        ),
+        Primitive::new("string", Type::uniform_variadic(Type::Char, Type::String)),
+        Primitive::new(
+            "string-ref",
+            Type::procedure(vec![Type::String, Type::Number], Type::Char),
+        ),
+        Primitive::new(
+            "string-set!",
+            Type::procedure(vec![Type::String, Type::Number, Type::Char], Type::Unknown),
+        ),
+        Primitive::new(
+            "substring",
+            Type::procedure(vec![Type::String, Type::Number, Type::Number], Type::String),
+        ),
+        Primitive::new(
+            "string-append",
+            Type::uniform_variadic(Type::String, Type::String),
+        ),
+        Primitive::new(
+            "string->list",
+            Type::procedure(vec![Type::String], Type::ListOf(Box::new(Type::Char))),
+        ),
+        Primitive::new(
+            "list->string",
+            Type::procedure(vec![Type::ListOf(Box::new(Type::Char))], Type::String),
+        ),
+        Primitive::new(
+            "string-copy",
+            Type::procedure(vec![Type::String], Type::String),
+        ),
+        Primitive::new(
+            "string-fill!",
+            Type::procedure(vec![Type::String, Type::Char], Type::Unknown),
+        ),
+        Primitive::new(
             "make-vector",
             Type::rest_procedure(vec![Type::Number], Type::Any, Type::Vector),
         ),
@@ -515,6 +552,34 @@ mod tests {
         assert_eq!(
             primitive("string-ci>=?").unwrap().signature.to_string(),
             "(-> string? string? string? * boolean?)"
+        );
+    }
+
+    #[test]
+    fn exposes_string_primitives() {
+        assert_eq!(
+            primitive("make-string").unwrap().signature.to_string(),
+            "(-> number? char? * string?)"
+        );
+        assert_eq!(
+            primitive("string").unwrap().signature.to_string(),
+            "(->* char? string?)"
+        );
+        assert_eq!(
+            primitive("string-ref").unwrap().signature.to_string(),
+            "(-> string? number? char?)"
+        );
+        assert_eq!(
+            primitive("string-set!").unwrap().signature.to_string(),
+            "(-> string? number? char? unknown?)"
+        );
+        assert_eq!(
+            primitive("string->list").unwrap().signature.to_string(),
+            "(-> string? (listof char?))"
+        );
+        assert_eq!(
+            primitive("list->string").unwrap().signature.to_string(),
+            "(-> (listof char?) string?)"
         );
     }
 

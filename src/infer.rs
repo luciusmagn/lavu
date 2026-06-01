@@ -867,6 +867,15 @@ mod tests {
     }
 
     #[test]
+    fn infers_string_primitives() {
+        assert_eq!(infer_one("(string #\\a #\\b)"), "string?");
+        assert_eq!(infer_one("(string-ref \"abc\" 1)"), "char?");
+        assert_eq!(infer_one("(string->list \"ab\")"), "(listof char?)");
+        assert_eq!(infer_one("(list->string '(#\\a #\\b))"), "string?");
+        assert_eq!(infer_one("(string-set! \"ab\" 0 #\\z)"), "unknown?");
+    }
+
+    #[test]
     fn infers_numeric_predicates_and_integer_utilities() {
         assert_eq!(infer_one("(zero? 0)"), "boolean?");
         assert_eq!(infer_one("(quotient 5 2)"), "number?");
