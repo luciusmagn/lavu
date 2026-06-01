@@ -425,6 +425,8 @@ Scheme value is valid.
 - Reject missing implicit reader delimiters after identifiers, numbers,
   booleans, characters, and dot tokens, while keeping best-effort
   highlighter tokenization permissive.
+- Keep named character parsing to R5RS =#\space= and =#\newline=,
+  rejecting extension names such as =#\tab= and =#\return=.
 ** Surface Classifier
 - Add the first stable surface AST classifier for literals, variables,
   quote, lambda, if, begin, set!, define, and application.

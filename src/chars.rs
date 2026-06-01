@@ -39,8 +39,30 @@ pub fn parse_char(s: &str) -> Result<char, ParseCharError> {
     match char_part.to_lowercase().as_str() {
         "space" => Ok(' '),
         "newline" => Ok('\n'),
-        "tab" => Ok('\t'),
-        "return" => Ok('\r'),
         _ => Err(ParseCharError::UnknownNamedChar(char_part.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParseCharError, parse_char};
+
+    #[test]
+    fn parses_r5rs_named_characters() {
+        assert_eq!(parse_char("#\\space"), Ok(' '));
+        assert_eq!(parse_char("#\\SPACE"), Ok(' '));
+        assert_eq!(parse_char("#\\newline"), Ok('\n'));
+    }
+
+    #[test]
+    fn rejects_non_r5rs_named_character_extensions() {
+        assert_eq!(
+            parse_char("#\\tab"),
+            Err(ParseCharError::UnknownNamedChar("tab".to_string()))
+        );
+        assert_eq!(
+            parse_char("#\\return"),
+            Err(ParseCharError::UnknownNamedChar("return".to_string()))
+        );
     }
 }
