@@ -102,6 +102,7 @@ fn eval_span(error: &EvalError) -> SourceSpan {
         | EvalError::ArityMismatch { span, .. }
         | EvalError::TypeError { span, .. }
         | EvalError::IoError { span, .. }
-        | EvalError::ReadError { span, .. } => span.clone(),
+        | EvalError::ReadError { span, .. }
+        | EvalError::ContinuationJump { span, .. } => span.clone(),
     }
 }

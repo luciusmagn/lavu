@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -35,6 +35,7 @@ pub enum Value {
     Procedure(Rc<Procedure>),
     Primitive(&'static str),
     Promise(Rc<Promise>),
+    Continuation(Continuation),
     Environment(Env),
     Values(Vec<Value>),
     EofObject,
@@ -65,6 +66,7 @@ impl PartialEq for Value {
             (Value::Procedure(left), Value::Procedure(right)) => Rc::ptr_eq(left, right),
             (Value::Primitive(left), Value::Primitive(right)) => left == right,
             (Value::Promise(left), Value::Promise(right)) => Rc::ptr_eq(left, right),
+            (Value::Continuation(left), Value::Continuation(right)) => left == right,
             (Value::Environment(left), Value::Environment(right)) => Rc::ptr_eq(&left.0, &right.0),
             (Value::Values(left), Value::Values(right)) => left == right,
             (Value::EofObject, Value::EofObject)
@@ -147,6 +149,7 @@ pub struct OutputFilePort {
 thread_local! {
     static CURRENT_INPUT_PORT: RefCell<InputPort> = RefCell::new(InputPort::stdin());
     static CURRENT_OUTPUT_PORT: RefCell<OutputPort> = const { RefCell::new(OutputPort::Stdout) };
+    static NEXT_CONTINUATION_ID: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +164,11 @@ pub struct Procedure {
     rest: Option<String>,
     body: Vec<Spanned<Expr>>,
     env: Env,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Continuation {
+    id: usize,
 }
 
 #[derive(Debug)]
@@ -219,6 +227,13 @@ pub enum EvalError {
 
     #[error("read error: {message}")]
     ReadError { message: String, span: SourceSpan },
+
+    #[error("continuation used outside its dynamic extent")]
+    ContinuationJump {
+        id: usize,
+        value: Box<Value>,
+        span: SourceSpan,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -384,6 +399,8 @@ impl Env {
             "null-environment",
             "interaction-environment",
             "dynamic-wind",
+            "call-with-current-continuation",
+            "call/cc",
             "close-input-port",
             "close-output-port",
             "read",
@@ -613,6 +630,7 @@ fn eval_letrec(
 fn apply(procedure: Value, args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     match procedure {
         Value::Primitive(name) => apply_primitive(name, args, span),
+        Value::Continuation(continuation) => apply_continuation(continuation, args, span),
         Value::Procedure(procedure) => {
             if procedure.rest.is_none() && procedure.params.len() != args.len() {
                 return Err(EvalError::ArityMismatch {
@@ -818,6 +836,7 @@ fn apply_primitive(
             span,
         }),
         "dynamic-wind" => dynamic_wind(args, span),
+        "call-with-current-continuation" | "call/cc" => call_cc(args, span),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -2668,6 +2687,45 @@ fn dynamic_wind(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> 
     }
 }
 
+fn call_cc(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    unary(args, span.clone(), |procedure| {
+        let id = next_continuation_id();
+        let continuation = Value::Continuation(Continuation { id });
+        match apply(procedure, vec![continuation], span.clone()) {
+            Err(EvalError::ContinuationJump {
+                id: jump_id, value, ..
+            }) if jump_id == id => Ok(*value),
+            result => result,
+        }
+    })
+}
+
+fn next_continuation_id() -> usize {
+    NEXT_CONTINUATION_ID.with(|cell| {
+        let id = cell.get();
+        cell.set(id.wrapping_add(1));
+        id
+    })
+}
+
+fn apply_continuation(
+    continuation: Continuation,
+    args: Vec<Value>,
+    span: SourceSpan,
+) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [value]: [Value; 1] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 1,
+        actual,
+        span: span.clone(),
+    })?;
+    Err(EvalError::ContinuationJump {
+        id: continuation.id,
+        value: Box::new(value),
+        span,
+    })
+}
+
 fn scheme_report_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     require_environment_version(args, span)?;
     Ok(Value::Environment(Env::new()))
@@ -3043,6 +3101,7 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::InputPort(left), Value::InputPort(right)) => left == right,
         (Value::OutputPort(left), Value::OutputPort(right)) => left == right,
         (Value::Environment(left), Value::Environment(right)) => Rc::ptr_eq(&left.0, &right.0),
+        (Value::Continuation(left), Value::Continuation(right)) => left == right,
         (Value::EofObject, Value::EofObject) => true,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
@@ -3795,6 +3854,7 @@ impl fmt::Display for Value {
             }
             Value::EofObject => write!(f, "#<eof>"),
             Value::Environment(_) => write!(f, "#<environment>"),
+            Value::Continuation(_) => write!(f, "#<continuation>"),
             Value::Procedure(_) | Value::Primitive(_) => write!(f, "#<procedure>"),
             Value::Unspecified => write!(f, "#<unspecified>"),
             Value::Uninitialized => write!(f, "#<uninitialized>"),
@@ -4032,6 +4092,23 @@ mod tests {
                  xs"
             ),
             "(before during after)"
+        );
+    }
+
+    #[test]
+    fn evaluates_escape_continuations() {
+        assert_eq!(eval_one("(call/cc (lambda (k) 42))"), "42");
+        assert_eq!(eval_one("(+ 1 (call/cc (lambda (k) (k 5) 10)))"), "6");
+        assert_eq!(
+            eval_one(
+                "(call-with-current-continuation
+                   (lambda (exit)
+                     (for-each
+                       (lambda (x) (if (= x 3) (exit x) #f))
+                       '(1 2 3 4))
+                     0))"
+            ),
+            "3"
         );
     }
 

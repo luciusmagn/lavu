@@ -421,6 +421,10 @@ Scheme value is valid.
 ** Dynamic Wind
 - Add ordinary =dynamic-wind= entry/thunk/exit behavior. Continuation
   re-entry behavior remains part of the future =call/cc= work.
+** Continuations
+- Add initial escape-continuation support for =call/cc= and
+  =call-with-current-continuation= within the dynamic extent of the call.
+  Full reusable R5RS continuations remain future work.
 ** Printer
 - Escape string literals for =write= and printed values while keeping
   =display= raw.
