@@ -449,6 +449,11 @@ and output procedures. =any?= means any Scheme value is valid.
   =(and (pair? x) (number? (car x)) (number? (cdr x)))= refines =x= to
   a pair with both fields known and contradictory paths stop
   contributing result types.
+- Let predicate metadata contain type variables and instantiate them when
+  applying occurrence refinements. This is still first-order occurrence
+  typing, but it is direct groundwork for future latent predicate
+  propositions because predicate facts can now carry fresh result or
+  structure variables instead of collapsing to =any?=.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

@@ -69,11 +69,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::predicate("vector?", Type::Vector),
         Primitive::predicate(
             "procedure?",
-            Type::Procedure(crate::types::ProcedureType::Rest {
-                required: Vec::new(),
-                rest: Box::new(Type::Any),
-                result: Box::new(Type::Any),
-            }),
+            Type::rest_procedure(Vec::new(), Type::Any, a.clone()),
         ),
         Primitive::predicate("port?", Type::Port),
         Primitive::predicate("input-port?", Type::InputPort),
@@ -754,6 +750,12 @@ mod tests {
 
         assert_eq!(string_predicate.signature.to_string(), "(-> any? boolean?)");
         assert_eq!(string_predicate.predicate.unwrap().positive, Type::String);
+
+        let procedure_predicate = primitive("procedure?").unwrap();
+        assert_eq!(
+            procedure_predicate.predicate.unwrap().positive.to_string(),
+            "(-> any? * a)"
+        );
     }
 
     #[test]

@@ -605,7 +605,7 @@ impl Inferencer {
         alternate: Option<&Spanned<Expr>>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let refinements = predicate_refinements(condition, env);
+        let refinements = self.predicate_refinements(condition, env);
         self.infer_expr(condition, env)?;
 
         let base = self.clone();
@@ -699,6 +699,98 @@ impl Inferencer {
             result = self.infer_expr(expr, env)?;
         }
         Ok(self.resolve(result))
+    }
+
+    fn predicate_refinements(
+        &mut self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Vec<BranchRefinement> {
+        let truthy = self.truthy_predicate_refinements(condition, env);
+        if !truthy.is_empty() {
+            return truthy
+                .into_iter()
+                .map(|(name, positive)| BranchRefinement {
+                    branch: RefinedBranch::Then,
+                    name,
+                    positive,
+                })
+                .collect();
+        }
+
+        let Expr::Apply { operator, operands } = &condition.node else {
+            return Vec::new();
+        };
+        let Expr::Variable(operator_name) = &operator.node else {
+            return Vec::new();
+        };
+        if operator_name != "not" || !env.is_primitive(operator_name) || operands.len() != 1 {
+            return Vec::new();
+        }
+
+        self.truthy_predicate_refinements(&operands[0], env)
+            .into_iter()
+            .map(|(name, positive)| BranchRefinement {
+                branch: RefinedBranch::Else,
+                name,
+                positive,
+            })
+            .collect()
+    }
+
+    fn truthy_predicate_refinements(
+        &mut self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Vec<(String, Type)> {
+        if let Some(refinement) = self.direct_predicate_refinement(condition, env) {
+            return vec![refinement];
+        }
+
+        let Expr::If {
+            condition,
+            consequent,
+            alternate: Some(alternate),
+        } = &condition.node
+        else {
+            return Vec::new();
+        };
+        if !is_false_literal(alternate) {
+            return Vec::new();
+        }
+
+        let mut refinements = self.truthy_predicate_refinements(condition, env);
+        refinements.extend(self.truthy_predicate_refinements(consequent, env));
+        refinements
+    }
+
+    fn direct_predicate_refinement(
+        &mut self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Option<(String, Type)> {
+        let Expr::Apply { operator, operands } = &condition.node else {
+            return None;
+        };
+        if operands.len() != 1 {
+            return None;
+        }
+
+        let Expr::Variable(predicate_name) = &operator.node else {
+            return None;
+        };
+
+        if !env.is_primitive(predicate_name) {
+            return None;
+        }
+
+        let positive = primitive(predicate_name)?
+            .predicate
+            .filter(|predicate| predicate.argument == 0)?
+            .positive;
+        let positive = self.instantiate_scheme(&positive);
+
+        predicate_operand_refinement(&operands[0], positive, env)
     }
 
     fn infer_application(
@@ -2904,62 +2996,6 @@ fn intersect_union(types: Vec<Type>, ty: Type) -> Type {
     )
 }
 
-fn predicate_refinements(condition: &Spanned<Expr>, env: &TypeEnv) -> Vec<BranchRefinement> {
-    let truthy = truthy_predicate_refinements(condition, env);
-    if !truthy.is_empty() {
-        return truthy
-            .into_iter()
-            .map(|(name, positive)| BranchRefinement {
-                branch: RefinedBranch::Then,
-                name,
-                positive,
-            })
-            .collect();
-    }
-
-    let Expr::Apply { operator, operands } = &condition.node else {
-        return Vec::new();
-    };
-    let Expr::Variable(operator_name) = &operator.node else {
-        return Vec::new();
-    };
-    if operator_name != "not" || !env.is_primitive(operator_name) || operands.len() != 1 {
-        return Vec::new();
-    }
-
-    truthy_predicate_refinements(&operands[0], env)
-        .into_iter()
-        .map(|(name, positive)| BranchRefinement {
-            branch: RefinedBranch::Else,
-            name,
-            positive,
-        })
-        .collect()
-}
-
-fn truthy_predicate_refinements(condition: &Spanned<Expr>, env: &TypeEnv) -> Vec<(String, Type)> {
-    if let Some(refinement) = direct_predicate_refinement(condition, env) {
-        return vec![refinement];
-    }
-
-    let Expr::If {
-        condition,
-        consequent,
-        alternate: Some(alternate),
-    } = &condition.node
-    else {
-        return Vec::new();
-    };
-    if !is_false_literal(alternate) {
-        return Vec::new();
-    }
-
-    truthy_predicate_refinements(condition, env)
-        .into_iter()
-        .chain(truthy_predicate_refinements(consequent, env))
-        .collect()
-}
-
 fn is_false_literal(expr: &Spanned<Expr>) -> bool {
     matches!(expr.node, Expr::Literal(Atom::Boolean(false)))
 }
@@ -3404,6 +3440,36 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (or (string? x) #f))"),
             "(-> x boolean?)"
+        );
+    }
+
+    #[test]
+    fn instantiates_procedure_predicate_result_refinements() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (procedure? x) (x) \"fallback\"))"),
+            "(-> x (U string? t0))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (number? x)
+                       (+ x 10)
+                       (if (string? x)
+                           (string-append x \"!\")
+                           (if (procedure? x)
+                               (x)
+                               \"unknown\"))))"
+            ),
+            "(-> x (U number? string? t0))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x y)
+                   (if (and (procedure? x) (procedure? y))
+                       (list (x) (y))
+                       '()))"
+            ),
+            "(-> x y (listof (U t0 t1)))"
         );
     }
 
