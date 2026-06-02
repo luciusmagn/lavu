@@ -610,15 +610,15 @@ impl Inferencer {
         alternate: Option<&Spanned<Expr>>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let refinement = predicate_refinement(condition, env);
+        let refinements = predicate_refinements(condition, env);
         self.infer_expr(condition, env)?;
 
         let base = self.clone();
 
         let mut then_env = env.clone();
-        if let Some(refinement) = refinement
-            .as_ref()
-            .filter(|r| r.branch == RefinedBranch::Then)
+        for refinement in refinements
+            .iter()
+            .filter(|refinement| refinement.branch == RefinedBranch::Then)
         {
             then_env.define(refinement.name.clone(), refinement.positive.clone());
         }
@@ -626,9 +626,9 @@ impl Inferencer {
         let consequent_ty = then_inferencer.infer_expr(consequent, &then_env)?;
 
         let mut else_env = env.clone();
-        if let Some(refinement) = refinement
-            .as_ref()
-            .filter(|r| r.branch == RefinedBranch::Else)
+        for refinement in refinements
+            .iter()
+            .filter(|refinement| refinement.branch == RefinedBranch::Else)
         {
             else_env.define(refinement.name.clone(), refinement.positive.clone());
         }
@@ -638,7 +638,7 @@ impl Inferencer {
             None => Type::Unspecified,
         };
 
-        self.merge_branch_substitutions(refinement.as_ref(), &then_inferencer, &else_inferencer);
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
         self.next_var = self
             .next_var
             .max(then_inferencer.next_var)
@@ -652,12 +652,12 @@ impl Inferencer {
 
     fn merge_branch_substitutions(
         &mut self,
-        refinement: Option<&BranchRefinement>,
+        refinements: &[BranchRefinement],
         then_inferencer: &Inferencer,
         else_inferencer: &Inferencer,
     ) {
         let mut names = BTreeSet::new();
-        if let Some(refinement) = refinement {
+        for refinement in refinements {
             names.insert(refinement.name.clone());
         }
         names.extend(then_inferencer.substitutions.keys().cloned());
@@ -675,16 +675,19 @@ impl Inferencer {
                 .cloned()
                 .map(|ty| else_inferencer.resolve(ty));
 
-            if let Some(refinement) = refinement.filter(|refinement| name == refinement.name) {
-                match refinement.branch {
-                    RefinedBranch::Then if then_ty.is_none() && else_ty.is_some() => {
-                        then_ty = Some(refinement.positive.clone());
-                    }
-                    RefinedBranch::Else if else_ty.is_none() && then_ty.is_some() => {
-                        else_ty = Some(refinement.positive.clone());
-                    }
-                    _ => {}
-                }
+            if then_ty.is_none()
+                && else_ty.is_some()
+                && let Some(positive) =
+                    branch_refinement_type(refinements, &name, RefinedBranch::Then)
+            {
+                then_ty = Some(positive);
+            }
+            if else_ty.is_none()
+                && then_ty.is_some()
+                && let Some(positive) =
+                    branch_refinement_type(refinements, &name, RefinedBranch::Else)
+            {
+                else_ty = Some(positive);
             }
 
             let merged = match (then_ty, else_ty) {
@@ -2779,43 +2782,56 @@ struct BranchRefinement {
     positive: Type,
 }
 
-fn predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<BranchRefinement> {
-    if let Some(refinement) = direct_predicate_refinement(condition, env) {
-        return Some(BranchRefinement {
-            branch: RefinedBranch::Then,
-            name: refinement.0,
-            positive: refinement.1,
-        });
-    }
+fn branch_refinement_type(
+    refinements: &[BranchRefinement],
+    name: &str,
+    branch: RefinedBranch,
+) -> Option<Type> {
+    let positives = refinements
+        .iter()
+        .filter(|refinement| refinement.branch == branch && refinement.name == name)
+        .map(|refinement| refinement.positive.clone())
+        .collect::<Vec<_>>();
 
-    if let Some(refinement) = truthy_predicate_refinement(condition, env) {
-        return Some(BranchRefinement {
-            branch: RefinedBranch::Then,
-            name: refinement.0,
-            positive: refinement.1,
-        });
+    (!positives.is_empty()).then(|| Type::union(positives))
+}
+
+fn predicate_refinements(condition: &Spanned<Expr>, env: &TypeEnv) -> Vec<BranchRefinement> {
+    let truthy = truthy_predicate_refinements(condition, env);
+    if !truthy.is_empty() {
+        return truthy
+            .into_iter()
+            .map(|(name, positive)| BranchRefinement {
+                branch: RefinedBranch::Then,
+                name,
+                positive,
+            })
+            .collect();
     }
 
     let Expr::Apply { operator, operands } = &condition.node else {
-        return None;
+        return Vec::new();
     };
     let Expr::Variable(operator_name) = &operator.node else {
-        return None;
+        return Vec::new();
     };
     if operator_name != "not" || !env.is_primitive(operator_name) || operands.len() != 1 {
-        return None;
+        return Vec::new();
     }
 
-    direct_predicate_refinement(&operands[0], env).map(|(name, positive)| BranchRefinement {
-        branch: RefinedBranch::Else,
-        name,
-        positive,
-    })
+    truthy_predicate_refinements(&operands[0], env)
+        .into_iter()
+        .map(|(name, positive)| BranchRefinement {
+            branch: RefinedBranch::Else,
+            name,
+            positive,
+        })
+        .collect()
 }
 
-fn truthy_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<(String, Type)> {
+fn truthy_predicate_refinements(condition: &Spanned<Expr>, env: &TypeEnv) -> Vec<(String, Type)> {
     if let Some(refinement) = direct_predicate_refinement(condition, env) {
-        return Some(refinement);
+        return vec![refinement];
     }
 
     let Expr::If {
@@ -2824,14 +2840,16 @@ fn truthy_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Opti
         alternate: Some(alternate),
     } = &condition.node
     else {
-        return None;
+        return Vec::new();
     };
     if !is_false_literal(alternate) {
-        return None;
+        return Vec::new();
     }
 
-    truthy_predicate_refinement(condition, env)
-        .or_else(|| truthy_predicate_refinement(consequent, env))
+    truthy_predicate_refinements(condition, env)
+        .into_iter()
+        .chain(truthy_predicate_refinements(consequent, env))
+        .collect()
 }
 
 fn is_false_literal(expr: &Spanned<Expr>) -> bool {
@@ -3184,6 +3202,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x flag) (if (and flag (string? x)) (string-length x) 0))"),
             "(-> x flag number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x y) (if (and (string? x) (number? y)) y 0))"),
+            "(-> x y number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x y) (if (not (and (string? x) (number? y))) 0 y))"),
+            "(-> x y number?)"
         );
         assert_eq!(
             infer_one("(lambda (x) (and (string? x) (string-length x)))"),

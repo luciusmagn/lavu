@@ -417,6 +417,9 @@ and output procedures. =any?= means any Scheme value is valid.
   branch.
 - Preserve predicate refinements when =and= is used as an =if=
   condition, matching the desugared nested conditional shape.
+- Carry multiple simple predicate refinements from an =and= condition,
+  so independent facts such as =(string? x)= and =(number? y)= can both
+  refine the true branch without adding full proposition logic.
 - Infer simple =apply= calls for uniform variadic and rest procedures
   when the final argument has a known list element type.
 - Cover =set!= assignment inference so reassignment is checked against
