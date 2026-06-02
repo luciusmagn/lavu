@@ -369,6 +369,17 @@ impl Inferencer {
                     return Ok(Type::Never);
                 }
 
+                if let Expr::Lambda { params, rest, body } = &operator.node {
+                    return self.infer_lambda_with_argument_types(
+                        params,
+                        rest.as_ref(),
+                        body,
+                        operand_tys,
+                        expr.span.clone(),
+                        env,
+                    );
+                }
+
                 if let Some(application) = PrimitiveApplication::classify(&operator.node, env) {
                     return self.infer_primitive_application(
                         application,
@@ -3355,6 +3366,16 @@ mod tests {
     }
 
     #[test]
+    fn infers_direct_lambda_applications_without_local_name_leaks() {
+        assert_eq!(infer_one("(lambda (x) (let ((y x)) y))"), "(-> x x)");
+        assert_eq!(infer_one("(lambda (x) (or x 1))"), "(-> x (U number? x))");
+        assert_eq!(
+            infer_one("(lambda (x) (case x ((a) 1) ((b) \"b\") (else x)))"),
+            "(-> x (U number? string? x))"
+        );
+    }
+
+    #[test]
     fn infers_recursive_top_level_procedures() {
         assert_eq!(
             infer_all("(define (count n) (if (= n 0) n (count (- n 1)))) (count 5)"),
@@ -3635,7 +3656,7 @@ mod tests {
                   string? + \"hi\")"
             )
             .to_string(),
-            "type constraint conflict: expected string?, got number?"
+            "type constraint conflict: expected number?, got string?"
         );
         assert_eq!(
             infer_error(
@@ -3643,7 +3664,7 @@ mod tests {
                   number? string-length 1)"
             )
             .to_string(),
-            "type constraint conflict: expected number?, got string?"
+            "type constraint conflict: expected string?, got number?"
         );
     }
 

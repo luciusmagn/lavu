@@ -473,6 +473,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Keep latent predicate widening to direct variable operands, so guarded
   selector tests like =(and (pair? x) (pred (car x)))= do not require all
   callers to pass pairs.
+- Infer direct lambda applications by binding formals to known argument
+  types, preventing lowered =let=, =or=, and =case= binders from leaking
+  into public type displays.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
