@@ -484,6 +484,9 @@ and output procedures. =any?= means any Scheme value is valid.
   =char-alphabetic?= as =(-> char? boolean? : char?)=.
 - Keep latent predicate refinements flowing through simple =apply= calls
   with visible final argument lists, including mismatch diagnostics.
+- Infer simple unary predicate lambdas latently when their body is a
+  direct predicate test of their parameter, so user-defined predicates
+  like =(define stringy? (lambda (x) (string? x)))= refine callers too.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

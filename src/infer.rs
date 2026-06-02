@@ -593,6 +593,7 @@ impl Inferencer {
             );
         }
 
+        let predicate_positive = self.lambda_predicate_positive(params, rest, body, &local);
         let result = self.infer_sequence(body, &local)?;
         let param_types = params
             .iter()
@@ -600,6 +601,15 @@ impl Inferencer {
             .collect::<Vec<_>>();
 
         let result = self.resolve(result);
+        if rest.is_none()
+            && params.len() == 1
+            && result == Type::Boolean
+            && let Some(positive) = predicate_positive
+        {
+            let param = predicate_lambda_param_type(&params[0].node, param_types[0].clone());
+            return Ok(Type::predicate_procedure(param, self.resolve(positive)));
+        }
+
         Ok(match rest {
             Some(rest) => Type::rest_procedure(
                 param_types,
@@ -608,6 +618,20 @@ impl Inferencer {
             ),
             None => Type::procedure(param_types, result),
         })
+    }
+
+    fn lambda_predicate_positive(
+        &mut self,
+        params: &[Spanned<String>],
+        rest: Option<&Spanned<String>>,
+        body: &[Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Option<Type> {
+        let ([param], None, [expr]) = (params, rest, body) else {
+            return None;
+        };
+        let (name, positive) = self.direct_predicate_refinement(expr, env)?;
+        (name == param.node).then_some(positive)
     }
 
     fn infer_lambda_with_argument_types(
@@ -2782,6 +2806,75 @@ fn call_with_values_result_for_params(params: Vec<Type>) -> Type {
     }
 }
 
+fn predicate_lambda_param_type(param_name: &str, ty: Type) -> Type {
+    if same_type_var(&ty, &Type::Var(param_name.to_string())) {
+        Type::Any
+    } else {
+        wildcard_type_vars(ty)
+    }
+}
+
+fn wildcard_type_vars(ty: Type) -> Type {
+    match ty {
+        Type::Var(_) => Type::Any,
+        Type::Pair(car, cdr) => Type::Pair(
+            Box::new(wildcard_type_vars(*car)),
+            Box::new(wildcard_type_vars(*cdr)),
+        ),
+        Type::ListOf(element) => Type::ListOf(Box::new(wildcard_type_vars(*element))),
+        Type::VectorOf(element) => Type::VectorOf(Box::new(wildcard_type_vars(*element))),
+        Type::PromiseOf(element) => Type::PromiseOf(Box::new(wildcard_type_vars(*element))),
+        Type::Values(types) => Type::Values(types.into_iter().map(wildcard_type_vars).collect()),
+        Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
+            params
+                .into_iter()
+                .map(wildcard_type_vars)
+                .collect::<Vec<_>>(),
+            wildcard_type_vars(*result),
+        ),
+        Type::Procedure(ProcedureType::Optional {
+            required,
+            optional,
+            result,
+        }) => Type::optional_procedure(
+            required
+                .into_iter()
+                .map(wildcard_type_vars)
+                .collect::<Vec<_>>(),
+            optional
+                .into_iter()
+                .map(wildcard_type_vars)
+                .collect::<Vec<_>>(),
+            wildcard_type_vars(*result),
+        ),
+        Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+            Type::uniform_variadic(wildcard_type_vars(*param), wildcard_type_vars(*result))
+        }
+        Type::Procedure(ProcedureType::Rest {
+            required,
+            rest,
+            result,
+        }) => Type::rest_procedure(
+            required
+                .into_iter()
+                .map(wildcard_type_vars)
+                .collect::<Vec<_>>(),
+            wildcard_type_vars(*rest),
+            wildcard_type_vars(*result),
+        ),
+        Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+            Type::predicate_procedure(wildcard_type_vars(*param), wildcard_type_vars(*positive))
+        }
+        Type::Union(types) => Type::union(
+            types
+                .into_iter()
+                .map(wildcard_type_vars)
+                .collect::<Vec<_>>(),
+        ),
+        ty => ty,
+    }
+}
+
 fn same_type_var(left: &Type, right: &Type) -> bool {
     matches!((left, right), (Type::Var(left), Type::Var(right)) if left == right)
 }
@@ -3462,9 +3555,35 @@ mod tests {
     fn infers_character_classification_and_case() {
         assert_eq!(
             infer_one("(lambda (c) (char-alphabetic? c))"),
-            "(-> char? boolean?)"
+            "(-> char? boolean? : char?)"
         );
         assert_eq!(infer_one("(char-upcase #\\a)"), "char?");
+    }
+
+    #[test]
+    fn infers_simple_predicate_lambdas_latently() {
+        assert_eq!(
+            infer_one("(lambda (x) (string? x))"),
+            "(-> any? boolean? : string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (zero? x))"),
+            "(-> number? boolean? : number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (number? (car x)))"),
+            "(-> (pair? any? any?) boolean? : (pair? number? any?))"
+        );
+        assert_eq!(
+            infer_all(
+                "(define stringy? (lambda (x) (string? x)))
+                 (lambda (proc x) (if (stringy? x) (proc x) #f))"
+            ),
+            vec![
+                "(-> any? boolean? : string?)".to_string(),
+                "(-> (-> string? t1) any? (U boolean? t1))".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -3699,6 +3818,14 @@ mod tests {
             infer_error(
                 "((lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))
                   string? + \"hi\")"
+            )
+            .to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
+        assert_eq!(
+            infer_error(
+                "(define stringy? (lambda (x) (string? x)))
+                 ((lambda (proc x) (if (stringy? x) (proc x) #f)) + \"hi\")"
             )
             .to_string(),
             "type constraint conflict: expected number?, got string?"
