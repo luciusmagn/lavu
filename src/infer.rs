@@ -3942,6 +3942,47 @@ mod tests {
     }
 
     #[test]
+    fn covers_occurrence_typing_stress_examples() {
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (number? x)
+                       (+ x 10)
+                       (if (string? x)
+                           (string-append x \"!\")
+                           (if (procedure? x)
+                               (x)
+                               \"unknown\"))))"
+            ),
+            "(-> x (U number? string? t0))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x) (number? (car x)) (number? (cdr x)))
+                       (+ (car x) (cdr x))
+                       0))"
+            ),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (number? x)
+                       (if (string? x)
+                           (string-length x)
+                           (+ x 5))
+                       0))"
+            ),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (if (pred x) (proc x) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+    }
+
+    #[test]
     fn rejects_latent_predicate_call_site_conflicts() {
         assert_eq!(
             infer_error(
