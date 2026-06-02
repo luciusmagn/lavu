@@ -3316,6 +3316,7 @@ mod tests {
             infer_one("(let loop ((n 5) (acc 1)) (if (= n 0) acc (loop (- n 1) (* acc n))))"),
             "number?"
         );
+        assert_eq!(infer_one("(let - ((n (- 1))) n)"), "number?");
     }
 
     #[test]

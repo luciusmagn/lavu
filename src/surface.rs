@@ -2038,29 +2038,29 @@ fn parse_named_let(
 
     let body_scope = scope.with_name(&name).with_names(&params);
     let lambda_body = parse_body(&rest[2..], span.clone(), origin, &body_scope)?;
-    let call = spanned_expr(
-        Expr::Apply {
-            operator: Box::new(variable_expr(&name)),
-            operands,
+    let procedure = spanned_expr(
+        Expr::LetRec {
+            bindings: vec![(
+                name.clone(),
+                spanned_expr(
+                    Expr::Lambda {
+                        params,
+                        rest: None,
+                        body: lambda_body,
+                    },
+                    span.clone(),
+                    origin,
+                ),
+            )],
+            body: vec![variable_expr(&name)],
         },
         span.clone(),
         origin,
     );
 
-    Ok(Expr::LetRec {
-        bindings: vec![(
-            name,
-            spanned_expr(
-                Expr::Lambda {
-                    params,
-                    rest: None,
-                    body: lambda_body,
-                },
-                span.clone(),
-                origin,
-            ),
-        )],
-        body: vec![call],
+    Ok(Expr::Apply {
+        operator: Box::new(procedure),
+        operands,
     })
 }
 
@@ -3418,7 +3418,10 @@ mod tests {
         let datums = parse("(let loop ((n 1)) (loop n))").unwrap();
         let form = classify_top_level(&datums[0]).unwrap();
 
-        assert!(matches!(form.node, TopLevel::Expr(Expr::LetRec { .. })));
+        let TopLevel::Expr(Expr::Apply { operator, .. }) = form.node else {
+            panic!("expected named let application");
+        };
+        assert!(matches!(operator.node, Expr::LetRec { .. }));
     }
 
     #[test]

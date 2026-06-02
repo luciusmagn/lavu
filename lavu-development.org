@@ -795,6 +795,10 @@ and output procedures. =any?= means any Scheme value is valid.
   abbreviations that read as applications when =quote= is rebound.
 - Current baseline after keyword shadowing: 9 of 22 extracted cases pass.
   Pitfall cases 4.2 and 4.3 now pass.
+- Lower named =let= so initializer expressions are evaluated outside
+  the recursive binding, matching R5RS and allowing loop names such as
+  =-= to shadow primitives only in the loop body. Current pitfall
+  baseline: 10 of 22 extracted cases pass, with 8.1 now passing.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

@@ -5502,6 +5502,7 @@ mod tests {
             eval_one("(let loop ((n 5) (acc 1)) (if (= n 0) acc (loop (- n 1) (* acc n))))"),
             "120"
         );
+        assert_eq!(eval_one("(let - ((n (- 1))) n)"), "-1");
     }
 
     #[test]
