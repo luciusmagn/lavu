@@ -154,6 +154,13 @@ enum ConstructorKind {
     Vector,
 }
 
+struct SingleValueConditionApplication<'a> {
+    param: &'a Spanned<String>,
+    consequent: &'a Spanned<Expr>,
+    alternate: Option<&'a Spanned<Expr>>,
+    condition: &'a Spanned<Expr>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PrimitiveApplication {
     Apply,
@@ -254,6 +261,35 @@ fn primitive_operator_name<'a>(expr: &'a Spanned<Expr>, env: &TypeEnv) -> Option
     };
 
     env.is_primitive(name).then_some(name.as_str())
+}
+
+fn single_value_condition_application<'a>(
+    params: &'a [Spanned<String>],
+    rest: Option<&Spanned<String>>,
+    body: &'a [Spanned<Expr>],
+    operands: &'a [Spanned<Expr>],
+) -> Option<SingleValueConditionApplication<'a>> {
+    let ([param], None, [body], [condition]) = (params, rest, body, operands) else {
+        return None;
+    };
+    let Expr::If {
+        condition: branch_condition,
+        consequent,
+        alternate,
+    } = &body.node
+    else {
+        return None;
+    };
+    if variable_name(branch_condition).is_some_and(|name| name == &param.node) {
+        Some(SingleValueConditionApplication {
+            param,
+            consequent,
+            alternate: alternate.as_deref(),
+            condition,
+        })
+    } else {
+        None
+    }
 }
 
 fn primitive_unary_operand<'a>(
@@ -358,6 +394,18 @@ impl Inferencer {
                     == Some(PrimitiveApplication::CallCc)
                 {
                     return self.infer_call_cc_application(operands, expr.span.clone(), env);
+                }
+                if let Expr::Lambda { params, rest, body } = &operator.node
+                    && let Some(application) =
+                        single_value_condition_application(params, rest.as_ref(), body, operands)
+                {
+                    return self.infer_single_value_condition_application(
+                        application.param,
+                        application.consequent,
+                        application.alternate,
+                        application.condition,
+                        env,
+                    );
                 }
 
                 let operand_tys = operands
@@ -730,6 +778,50 @@ impl Inferencer {
         };
 
         let (else_env, else_dead) = refined_branch_env(env, &refinements, RefinedBranch::Else);
+        let mut else_inferencer = base;
+        let alternate_ty = match alternate {
+            Some(_) if else_dead => Type::Never,
+            Some(expr) => else_inferencer.infer_expr(expr, &else_env)?,
+            None => Type::Unspecified,
+        };
+
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
+        self.next_var = self
+            .next_var
+            .max(then_inferencer.next_var)
+            .max(else_inferencer.next_var);
+
+        Ok(Type::union(vec![
+            then_inferencer.resolve(consequent_ty),
+            else_inferencer.resolve(alternate_ty),
+        ]))
+    }
+
+    fn infer_single_value_condition_application(
+        &mut self,
+        param: &Spanned<String>,
+        consequent: &Spanned<Expr>,
+        alternate: Option<&Spanned<Expr>>,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        let refinements = self.predicate_refinements(condition, env);
+        let condition_ty = self.infer_expr(condition, env)?;
+        let base = self.clone();
+
+        let (mut then_env, then_dead) =
+            refined_branch_env(env, &refinements, RefinedBranch::Then);
+        then_env.define(param.node.clone(), condition_ty.clone());
+        let mut then_inferencer = base.clone();
+        let consequent_ty = if then_dead {
+            Type::Never
+        } else {
+            then_inferencer.infer_expr(consequent, &then_env)?
+        };
+
+        let (mut else_env, else_dead) =
+            refined_branch_env(env, &refinements, RefinedBranch::Else);
+        else_env.define(param.node.clone(), condition_ty);
         let mut else_inferencer = base;
         let alternate_ty = match alternate {
             Some(_) if else_dead => Type::Never,
@@ -4218,6 +4310,31 @@ mod tests {
         assert_eq!(
             infer_one("(cond (1 => (lambda (x) (+ x 10))) (else 0))"),
             "number?"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (cond ((string? x) => (lambda (ok) (string-length x)))
+                         (else 0)))"
+            ),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (cond ((and (pair? x) (number? (car x)))
+                          => (lambda (ok) (car x)))
+                         (else 0)))"
+            ),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   ((lambda (ok) (if ok (string-length x) 0))
+                    (string? x)))"
+            ),
+            "(-> x number?)"
         );
     }
 
