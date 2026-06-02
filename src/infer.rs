@@ -2086,6 +2086,17 @@ impl Inferencer {
             }
             return Ok(None);
         }
+        if let Some(operands) = primitive_variadic_operands(expr, "append", env) {
+            let mut items = Vec::new();
+            for operand in operands {
+                let Some(operand_items) = self.infer_visible_proper_list_items(operand, env)?
+                else {
+                    return Ok(None);
+                };
+                items.extend(operand_items);
+            }
+            return Ok(Some(items));
+        }
 
         match &expr.node {
             Expr::Apply { operator, operands }
@@ -3966,8 +3977,25 @@ fn visible_apply_final_expr_items<'a>(
             items.extend(visible_apply_final_expr_items(cdr, env)?);
             Some(items)
         }
+        _ if let Some(operands) = primitive_variadic_operands(expr, "append", env) => {
+            operands.iter().try_fold(Vec::new(), |mut items, operand| {
+                items.extend(visible_apply_final_expr_items(operand, env)?);
+                Some(items)
+            })
+        }
         _ => None,
     }
+}
+
+fn primitive_variadic_operands<'a>(
+    expr: &'a Spanned<Expr>,
+    name: &str,
+    env: &TypeEnv,
+) -> Option<&'a [Spanned<Expr>]> {
+    let Expr::Apply { operator, operands } = &expr.node else {
+        return None;
+    };
+    (primitive_operator_name(operator, env) == Some(name)).then_some(operands.as_slice())
 }
 
 fn primitive_cons_operands<'a>(
@@ -4713,6 +4741,15 @@ mod tests {
             "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
         assert_eq!(
+            infer_one(
+                "(lambda (pred proc x)
+                   (if (apply pred (append (list x) (quote ())))
+                       (proc x)
+                       #f))"
+            ),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
+        );
+        assert_eq!(
             infer_one("(lambda (pred proc x) (if (apply pred (cons x (quote ()))) (proc x) #f))"),
             "(-> (-> any? boolean? : t0) (-> t0 t3) any? (U #f t3))"
         );
@@ -5078,6 +5115,10 @@ mod tests {
             "number?"
         );
         assert_eq!(
+            infer_one("(apply (lambda (x y) (+ x y)) (append (list 1) (list 2)))"),
+            "number?"
+        );
+        assert_eq!(
             infer_one("(apply (lambda (x y) (+ x y)) (vector->list (vector 1 2)))"),
             "number?"
         );
@@ -5167,6 +5208,15 @@ mod tests {
         assert_eq!(
             infer_one("((lambda (vector) (apply vector 1 '(\"x\"))) (lambda (x y) x))"),
             "number?"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (append pred proc x)
+                   (if (apply pred (append (list x) (quote ())))
+                       (proc x)
+                       #f))"
+            ),
+            "(-> (-> (listof x) null? (listof t1)) (->* t1 t2) (-> x t3) x (U #f t3))"
         );
         assert_eq!(
             infer_one("((lambda (list) (map list '(1) '(\"x\"))) (lambda (x y) x))"),

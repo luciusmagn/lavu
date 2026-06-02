@@ -567,6 +567,10 @@ and output procedures. =any?= means any Scheme value is valid.
   argument lists for =apply= inference. This lets latent predicate
   refinements flow through =(apply pred (cons x '()))= while still
   respecting local shadowing of =cons=.
+- Recognize visibly proper =append= calls as final =apply= argument lists
+  when every appended operand is visibly proper. This keeps R5RS improper
+  final tails conservative while allowing =(apply pred (append (list x)
+  '()))= to refine like a direct one-argument predicate call.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
