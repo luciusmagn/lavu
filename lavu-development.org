@@ -437,6 +437,9 @@ and output procedures. =any?= means any Scheme value is valid.
   accesses, so guards such as =(number? (car x))= refine =x= to a pair
   whose corresponding field has the predicate's positive type within
   the guarded branch.
+- Extend structural predicate refinements through R5RS composed
+  =car=/=cdr= accessors such as =cadr= and =caddr=, so guarded selector
+  chains preserve the proven element type in branch results.
 - Occurrence-typing stress examples should be kept as concrete
   regressions: the heterogeneous =process-element= shape currently
   exposes the coarse =procedure?= result, sibling =and= refinements need

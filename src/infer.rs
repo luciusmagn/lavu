@@ -3379,20 +3379,32 @@ fn predicate_operand_refinement(
                 return None;
             };
 
-            match primitive_operator_name(operator, env) {
-                Some("car") => Some((
-                    variable_name.clone(),
-                    Type::Pair(Box::new(positive), Box::new(Type::Any)),
-                )),
-                Some("cdr") => Some((
-                    variable_name.clone(),
-                    Type::Pair(Box::new(Type::Any), Box::new(positive)),
-                )),
-                _ => None,
-            }
+            let steps = accessor_refinement_steps(operator, env)?;
+            Some((variable_name.clone(), accessor_refinement_type(&steps, positive)))
         }
         _ => None,
     }
+}
+
+fn accessor_refinement_steps(
+    operator: &Spanned<Expr>,
+    env: &TypeEnv,
+) -> Option<Vec<ListAccessResult>> {
+    match primitive_operator_name(operator, env)? {
+        "car" => Some(vec![ListAccessResult::Element]),
+        "cdr" => Some(vec![ListAccessResult::Tail]),
+        name => composed_accessor_steps(name),
+    }
+}
+
+fn accessor_refinement_type(steps: &[ListAccessResult], positive: Type) -> Type {
+    steps
+        .iter()
+        .rev()
+        .fold(positive, |inner, step| match step {
+            ListAccessResult::Element => Type::Pair(Box::new(inner), Box::new(Type::Any)),
+            ListAccessResult::Tail => Type::Pair(Box::new(Type::Any), Box::new(inner)),
+        })
 }
 
 fn variable_name(expr: &Spanned<Expr>) -> Option<&String> {
@@ -3809,6 +3821,40 @@ mod tests {
                        #f))"
             ),
             "(-> x (U boolean? (pair? number? number?)))"
+        );
+    }
+
+    #[test]
+    fn propagates_composed_accessor_predicate_refinements() {
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x) (pair? (cdr x)) (number? (cadr x)))
+                       (list (cadr x))
+                       (quote ())))"
+            ),
+            "(-> x (listof number?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x)
+                            (pair? (cdr x))
+                            (pair? (cddr x))
+                            (string? (caddr x)))
+                       (list (caddr x))
+                       (quote ())))"
+            ),
+            "(-> x (listof string?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x) (pair? (cdr x)) (number? (cadr x)))
+                       (cons (cadr x) (cddr x))
+                       #f))"
+            ),
+            "(-> x (U boolean? (pair? number? t1)))"
         );
     }
 
