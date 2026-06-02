@@ -548,6 +548,21 @@ and output procedures. =any?= means any Scheme value is valid.
 - Narrow explicit =#f= unions in the true branch of generated single-value
   condition applications too, so lowered =let= and derived =and= forms can
   use a bound =(U #f number?)= value as =number?= after a truthiness test.
+- Verified the occurrence-typing stress examples directly. The classic
+  heterogeneous filter currently displays as =(-> x (U number? string? t0))=
+  rather than a closed domain union because Lavu does not yet display
+  complement/domain propositions and the procedure branch may return an
+  arbitrary =t0=. The sibling pair refinement and contradictory path
+  examples infer =number?= results, and =safe-apply= infers
+  =(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))=.
+- Propagate truthy propositions through =(not ...)= when it appears inside
+  an =and= condition, so input loops can use
+  =(and (not (eof-object? char)) ...)= and still refine =char= away from
+  =eof-object?= in the outer true branch.
+- Current stop point: do not chase full complement types such as
+  =(Not number?)= yet. The next sensible inference steps are explicit
+  complement/proposition display design, more latent-predicate call paths,
+  and then reopening the R5RS pitfall corpus one supported slice at a time.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

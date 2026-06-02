@@ -1113,6 +1113,11 @@ impl Inferencer {
             return vec![refinement];
         }
 
+        let not_refinements = self.truthy_not_predicate_refinements(condition, env);
+        if !not_refinements.is_empty() {
+            return not_refinements;
+        }
+
         if let Expr::Apply { operator, operands } = &condition.node
             && let Some((condition, alternate)) =
                 self.desugared_or_operands(operator, operands, env)
@@ -1146,6 +1151,31 @@ impl Inferencer {
         let mut refinements = self.truthy_predicate_refinements(condition, env);
         refinements.extend(self.truthy_predicate_refinements(consequent, env));
         refinements
+    }
+
+    fn truthy_not_predicate_refinements(
+        &mut self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Vec<TruthyRefinement> {
+        let Expr::Apply { operator, operands } = &condition.node else {
+            return Vec::new();
+        };
+        if primitive_operator_name(operator, env) != Some("not") {
+            return Vec::new();
+        }
+        let [operand] = operands.as_slice() else {
+            return Vec::new();
+        };
+
+        let truthy = self.truthy_predicate_refinements(operand, env);
+        self.negative_refinements(&truthy, env, RefinedBranch::Then)
+            .into_iter()
+            .map(|refinement| {
+                let subtractible = can_subtract_refinement(&refinement.positive);
+                TruthyRefinement::new(refinement.name, refinement.positive, subtractible)
+            })
+            .collect()
     }
 
     fn truthy_or_predicate_refinements(
@@ -5369,6 +5399,17 @@ mod tests {
                               (loop (cons char chars)))))))"
             ),
             "(-> input-port? (U string? eof-object?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (port)
+                   (let ((char (read-char port)))
+                     (if (and (not (eof-object? char))
+                              (char=? char #\\newline))
+                         char
+                         #f)))"
+            ),
+            "(-> input-port? (U #f char?))"
         );
         assert_eq!(infer_one("(current-output-port)"), "output-port?");
         assert_eq!(
