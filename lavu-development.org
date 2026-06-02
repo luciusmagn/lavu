@@ -461,6 +461,9 @@ and output procedures. =any?= means any Scheme value is valid.
   function like =(lambda (pred proc x) (if (pred x) (proc x) #f))= now
   displays as =(-> (-> any? boolean? : t0) (-> t0 t1) any?
   (U boolean? t1))=.
+- Give primitive predicate values latent signatures too, so higher-order
+  calls such as =safe-apply= can reject mismatched companion procedures
+  like =string?= with =+= before runtime.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

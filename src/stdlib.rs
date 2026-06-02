@@ -25,7 +25,7 @@ impl Primitive {
     fn predicate(name: &'static str, positive: Type) -> Self {
         Self {
             name,
-            signature: Type::procedure(vec![Type::Any], Type::Boolean),
+            signature: Type::predicate_procedure(Type::Any, positive.clone()),
             predicate: Some(PredicateRefinement {
                 argument: 0,
                 positive,
@@ -748,7 +748,10 @@ mod tests {
     fn exposes_predicate_refinements() {
         let string_predicate = primitive("string?").unwrap();
 
-        assert_eq!(string_predicate.signature.to_string(), "(-> any? boolean?)");
+        assert_eq!(
+            string_predicate.signature.to_string(),
+            "(-> any? boolean? : string?)"
+        );
         assert_eq!(string_predicate.predicate.unwrap().positive, Type::String);
 
         let procedure_predicate = primitive("procedure?").unwrap();
@@ -794,7 +797,7 @@ mod tests {
         );
         assert_eq!(
             primitive("integer?").unwrap().signature.to_string(),
-            "(-> any? boolean?)"
+            "(-> any? boolean? : number?)"
         );
         assert_eq!(
             primitive("zero?").unwrap().signature.to_string(),

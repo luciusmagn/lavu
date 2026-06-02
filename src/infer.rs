@@ -3600,6 +3600,33 @@ mod tests {
             infer_one("(lambda (pred x) (if (pred x) x #f))"),
             "(-> (-> any? boolean? : t0) any? (U boolean? t0))"
         );
+        assert_eq!(
+            infer_one(
+                "((lambda (pred proc x) (if (pred x) (proc x) #f))
+                  string? string-length \"hi\")"
+            ),
+            "(U boolean? number?)"
+        );
+    }
+
+    #[test]
+    fn rejects_latent_predicate_call_site_conflicts() {
+        assert_eq!(
+            infer_error(
+                "((lambda (pred proc x) (if (pred x) (proc x) #f))
+                  string? + \"hi\")"
+            )
+            .to_string(),
+            "type constraint conflict: expected string?, got number?"
+        );
+        assert_eq!(
+            infer_error(
+                "((lambda (pred proc x) (if (pred x) (proc x) #f))
+                  number? string-length 1)"
+            )
+            .to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
     }
 
     #[test]
