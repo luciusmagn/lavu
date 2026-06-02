@@ -824,6 +824,11 @@ and output procedures. =any?= means any Scheme value is valid.
   rule-head syntax, matching R5RS and allowing common heads such as =_=.
   The remaining macro pitfall failures now expose actual hygiene and
   definition-context gaps instead of failing to match the rule.
+- Pin the pitfall work while occurrence typing is the priority. The
+  ignored corpus currently has 11 failures: reusable continuation
+  dynamic-extent cases, macro hygiene/definition-context cases 3.1-3.3,
+  first-class continuation cases 7.1-7.4, and continuation-safe =map=.
+  Return here after the inference plan advances.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
