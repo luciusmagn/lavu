@@ -2598,11 +2598,11 @@ fn parse_body(
         .iter()
         .map(classify_expr)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(vec![Spanned {
-        node: Expr::LetRec { bindings, body },
+    Ok(vec![spanned_expr(
+        Expr::LetRec { bindings, body },
         span,
         origin,
-    }])
+    )])
 }
 
 fn body_sequence_expr(
