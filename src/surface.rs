@@ -2106,11 +2106,7 @@ fn parse_or(
         [] => Ok(boolean_literal(false)),
         [single] => Ok(classify_expr(single)?.node),
         [first, remaining @ ..] => {
-            let temp = Spanned {
-                node: generated_name("or_value", &span),
-                span: first.span.clone(),
-                origin,
-            };
+            let temp = generated_binding("or_value", &span, first.span.clone(), origin);
             let condition = variable_expr(&temp);
             let alternate = spanned_expr(
                 parse_or(span.clone(), origin, remaining)?,
@@ -2208,11 +2204,7 @@ fn parse_cond(
             });
         }
         if body.is_empty() || arrow_recipient.is_some() {
-            let temp = Spanned {
-                node: generated_name("cond_value", &clause.span),
-                span: test.span.clone(),
-                origin,
-            };
+            let temp = generated_binding("cond_value", &clause.span, test.span.clone(), origin);
             let condition_value = variable_expr(&temp);
             let consequent = match arrow_recipient {
                 Some(_) => spanned_expr(
@@ -2288,11 +2280,7 @@ fn parse_case(
     }
 
     let key = classify_expr(&rest[0])?;
-    let temp = Spanned {
-        node: generated_name("case_key", &span),
-        span: rest[0].span.clone(),
-        origin,
-    };
+    let temp = generated_binding("case_key", &span, rest[0].span.clone(), origin);
     let mut result = spanned_expr(boolean_literal(false), span.clone(), origin);
 
     for (index, clause) in rest[1..].iter().enumerate().rev() {
@@ -2443,11 +2431,7 @@ fn parse_do(
         });
     };
 
-    let loop_name = Spanned {
-        node: generated_name("do_loop", &span),
-        span: span.clone(),
-        origin,
-    };
+    let loop_name = generated_binding("do_loop", &span, span.clone(), origin);
     let params = bindings
         .iter()
         .map(|binding| binding.name.clone())
@@ -2675,6 +2659,19 @@ fn sequence_with_tail(body: &[Spanned<Datum>], tail: Spanned<Expr>) -> Result<Ex
 
 fn generated_name(prefix: &str, span: &SourceSpan) -> String {
     format!("#%lavu_{prefix}_{}", span.start)
+}
+
+fn generated_binding(
+    prefix: &str,
+    seed_span: &SourceSpan,
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Spanned<String> {
+    Spanned {
+        node: generated_name(prefix, seed_span),
+        span,
+        origin,
+    }
 }
 
 fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {

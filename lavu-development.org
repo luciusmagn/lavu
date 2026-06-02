@@ -474,6 +474,8 @@ and output procedures. =any?= means any Scheme value is valid.
 - Add a small synthetic surface-expression helper for generated lowering
   nodes in internal definitions, =let=, named =let=, =let*=,
   =and=, =or=, =cond=, =case=, =do=, and sequence classification.
+- Add a small generated-binding helper for temporary names introduced by
+  derived-form lowering, keeping name seeds and diagnostic spans explicit.
 ** Warning Cleanup
 - Remove local lifetime-syntax warnings and update the clipboard
   dependency within existing constraints to clear Cargo's future
