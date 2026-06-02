@@ -426,6 +426,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Refine true branches of =eq?=, =eqv?=, and =equal?= when one side is a
   variable and the other side is a literal or quoted datum, preserving
   shadowing of equality names.
+- Mirror generated =case= key equality refinements back to direct source
+  variables, so datum clauses can refine branch bodies without
+  constraining the whole caller.
 - Carry multiple simple predicate refinements from an =and= condition,
   so independent facts such as =(string? x)= and =(number? y)= can both
   refine the true branch without adding full proposition logic.

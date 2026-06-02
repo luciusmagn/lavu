@@ -362,11 +362,25 @@ fn equality_refinement(
     };
 
     variable_name(left)
-        .and_then(|name| static_expr_type(right).map(|ty| (name.clone(), ty)))
-        .or_else(|| {
-            variable_name(right)
-                .and_then(|name| static_expr_type(left).map(|ty| (name.clone(), ty)))
+        .and_then(|name| {
+            static_expr_type(right).map(|ty| (case_key_refinement_name(name, env), ty))
         })
+        .or_else(|| {
+            variable_name(right).and_then(|name| {
+                static_expr_type(left).map(|ty| (case_key_refinement_name(name, env), ty))
+            })
+        })
+}
+
+fn case_key_refinement_name(name: &str, env: &TypeEnv) -> String {
+    if !name.starts_with("#%lavu_case_key_") {
+        return name.to_string();
+    }
+
+    match env.get(name) {
+        Some(Type::Var(alias)) => alias.clone(),
+        _ => name.to_string(),
+    }
 }
 
 impl Inferencer {
@@ -4374,6 +4388,18 @@ mod tests {
     #[test]
     fn infers_case_result_type() {
         assert_eq!(infer_one("(case 'b ((a c) 10) (else 30))"), "number?");
+        assert_eq!(
+            infer_one("(lambda (x) (case x ((a b) x) (else #f)))"),
+            "(-> x (U boolean? symbol?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (case x ((#\\a #\\b) (char->integer x)) (else 0)))"),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (case x (((1 2)) (+ (car x) 1)) (else 0)))"),
+            "(-> x number?)"
+        );
     }
 
     #[test]
