@@ -839,23 +839,23 @@ fn ensure_distinct_pattern_variables(
     pattern: &Spanned<Datum>,
     literals: &BTreeSet<String>,
 ) -> Result<(), SurfaceError> {
-    let keyword = syntax_rule_keyword(pattern)?;
+    ensure_syntax_rule_head(pattern)?;
     validate_pattern_ellipsis(pattern)?;
     let mut seen = BTreeSet::new();
 
     match &pattern.node {
         Datum::List(items) => {
             for item in &items[1..] {
-                collect_unique_pattern_variables(item, literals, &keyword, &mut seen)?;
+                collect_unique_pattern_variables(item, literals, &mut seen)?;
             }
         }
         Datum::DottedList(items, tail) => {
             for item in &items[1..] {
-                collect_unique_pattern_variables(item, literals, &keyword, &mut seen)?;
+                collect_unique_pattern_variables(item, literals, &mut seen)?;
             }
-            collect_unique_pattern_variables(tail, literals, &keyword, &mut seen)?;
+            collect_unique_pattern_variables(tail, literals, &mut seen)?;
         }
-        _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
+        _ => unreachable!("ensure_syntax_rule_head rejects non-list patterns"),
     }
 
     Ok(())
@@ -868,7 +868,7 @@ fn validate_pattern_ellipsis(pattern: &Spanned<Datum>) -> Result<(), SurfaceErro
             validate_ellipsis_sequence(&items[1..], EllipsisContext::Pattern)?;
             validate_ellipsis_item(tail, EllipsisContext::Pattern)
         }
-        _ => unreachable!("syntax_rule_keyword rejects non-list patterns"),
+        _ => unreachable!("ensure_syntax_rule_head rejects non-list patterns"),
     }
 }
 
@@ -929,7 +929,7 @@ fn validate_ellipsis_sequence(
     Ok(())
 }
 
-fn syntax_rule_keyword(pattern: &Spanned<Datum>) -> Result<String, SurfaceError> {
+fn ensure_syntax_rule_head(pattern: &Spanned<Datum>) -> Result<(), SurfaceError> {
     match &pattern.node {
         Datum::List(items) | Datum::DottedList(items, _) => {
             let Some(head) = items.first() else {
@@ -937,7 +937,7 @@ fn syntax_rule_keyword(pattern: &Spanned<Datum>) -> Result<String, SurfaceError>
                     span: pattern.span.clone(),
                 });
             };
-            expect_identifier(head, "syntax-rules pattern").map(|name| name.node)
+            expect_identifier(head, "syntax-rules pattern").map(|_| ())
         }
         _ => Err(SurfaceError::UnsupportedMacroPattern {
             span: pattern.span.clone(),
@@ -948,13 +948,10 @@ fn syntax_rule_keyword(pattern: &Spanned<Datum>) -> Result<String, SurfaceError>
 fn collect_unique_pattern_variables(
     pattern: &Spanned<Datum>,
     literals: &BTreeSet<String>,
-    keyword: &str,
     seen: &mut BTreeSet<String>,
 ) -> Result<(), SurfaceError> {
     match &pattern.node {
-        Datum::Atom(Atom::Identifier(name))
-            if name != "..." && name != keyword && !literals.contains(name) =>
-        {
+        Datum::Atom(Atom::Identifier(name)) if name != "..." && !literals.contains(name) => {
             if !seen.insert(name.clone()) {
                 return Err(SurfaceError::DuplicateIdentifier {
                     context: "syntax-rules pattern",
@@ -965,20 +962,20 @@ fn collect_unique_pattern_variables(
         }
         Datum::List(items) | Datum::Vector(items) => {
             for item in items {
-                collect_unique_pattern_variables(item, literals, keyword, seen)?;
+                collect_unique_pattern_variables(item, literals, seen)?;
             }
         }
         Datum::DottedList(items, tail) => {
             for item in items {
-                collect_unique_pattern_variables(item, literals, keyword, seen)?;
+                collect_unique_pattern_variables(item, literals, seen)?;
             }
-            collect_unique_pattern_variables(tail, literals, keyword, seen)?;
+            collect_unique_pattern_variables(tail, literals, seen)?;
         }
         Datum::Quote(inner)
         | Datum::Quasiquote(inner)
         | Datum::Unquote(inner)
         | Datum::UnquoteSplicing(inner) => {
-            collect_unique_pattern_variables(inner, literals, keyword, seen)?;
+            collect_unique_pattern_variables(inner, literals, seen)?;
         }
         Datum::Atom(_) => {}
     }
@@ -1015,19 +1012,19 @@ fn match_macro_pattern(
 ) -> Result<bool, SurfaceError> {
     match (&pattern.node, &datum.node) {
         (Datum::List(pattern_items), Datum::List(datum_items)) => {
-            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items)? else {
                 return Ok(false);
             };
-            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+            let Some(datum_rest) = macro_datum_rest(datum_items) else {
                 return Ok(false);
             };
             match_pattern_list(pattern_rest, datum_rest, literals, keyword, captures)
         }
         (Datum::DottedList(pattern_items, pattern_tail), Datum::List(datum_items)) => {
-            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items)? else {
                 return Ok(false);
             };
-            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+            let Some(datum_rest) = macro_datum_rest(datum_items) else {
                 return Ok(false);
             };
             match_pattern_list_with_tail(
@@ -1047,10 +1044,10 @@ fn match_macro_pattern(
             Datum::DottedList(pattern_items, pattern_tail),
             Datum::DottedList(datum_items, datum_tail),
         ) => {
-            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items, keyword)? else {
+            let Some(pattern_rest) = macro_pattern_rest(pattern, pattern_items)? else {
                 return Ok(false);
             };
-            let Some(datum_rest) = macro_datum_rest(datum_items, keyword) else {
+            let Some(datum_rest) = macro_datum_rest(datum_items) else {
                 return Ok(false);
             };
             match_pattern_list_with_tail(
@@ -1073,7 +1070,6 @@ fn match_macro_pattern(
 fn macro_pattern_rest<'a>(
     pattern: &Spanned<Datum>,
     items: &'a [Spanned<Datum>],
-    keyword: &str,
 ) -> Result<Option<&'a [Spanned<Datum>]>, SurfaceError> {
     let Some((head, rest)) = items.split_first() else {
         return Err(SurfaceError::UnsupportedMacroPattern {
@@ -1081,19 +1077,13 @@ fn macro_pattern_rest<'a>(
         });
     };
 
-    Ok(is_keyword_head(head, keyword).then_some(rest))
+    expect_identifier(head, "syntax-rules pattern")?;
+    Ok(Some(rest))
 }
 
-fn macro_datum_rest<'a>(
-    items: &'a [Spanned<Datum>],
-    keyword: &str,
-) -> Option<&'a [Spanned<Datum>]> {
+fn macro_datum_rest(items: &[Spanned<Datum>]) -> Option<&[Spanned<Datum>]> {
     let (head, rest) = items.split_first()?;
-    is_keyword_head(head, keyword).then_some(rest)
-}
-
-fn is_keyword_head(datum: &Spanned<Datum>, keyword: &str) -> bool {
-    identifier_name(datum).as_deref() == Some(keyword)
+    identifier_name(head).map(|_| rest)
 }
 
 fn match_pattern(
@@ -1109,7 +1099,7 @@ fn match_pattern(
                 span: pattern.span.clone(),
             })
         }
-        Datum::Atom(Atom::Identifier(name)) if name == keyword || literals.contains(name) => {
+        Datum::Atom(Atom::Identifier(name)) if literals.contains(name) => {
             Ok(identifier_name(datum).as_deref() == Some(name.as_str()))
         }
         Datum::Atom(Atom::Identifier(name)) => bind_capture(name, datum.clone(), captures),
@@ -1185,7 +1175,7 @@ fn match_pattern_list(
             }
 
             let repeat_count = datum_items.len() - datum_index - minimum_rest;
-            seed_repeated_captures(pattern, literals, keyword, captures)?;
+            seed_repeated_captures(pattern, literals, captures)?;
             for datum in &datum_items[datum_index..datum_index + repeat_count] {
                 let mut local = BTreeMap::new();
                 if !match_pattern(pattern, datum, literals, keyword, &mut local)? {
@@ -1273,7 +1263,7 @@ fn match_pattern_list_with_tail(
             }
 
             let repeat_count = datum.items.len() - datum_index - minimum_rest;
-            seed_repeated_captures(pattern, literals, keyword, captures)?;
+            seed_repeated_captures(pattern, literals, captures)?;
             for datum in &datum.items[datum_index..datum_index + repeat_count] {
                 let mut local = BTreeMap::new();
                 if !match_pattern(pattern, datum, literals, keyword, &mut local)? {
@@ -1343,10 +1333,9 @@ fn minimum_pattern_items(patterns: &[Spanned<Datum>]) -> usize {
 fn seed_repeated_captures(
     pattern: &Spanned<Datum>,
     literals: &BTreeSet<String>,
-    keyword: &str,
     captures: &mut BTreeMap<String, Capture>,
 ) -> Result<(), SurfaceError> {
-    for name in pattern_variables(pattern, literals, keyword) {
+    for name in pattern_variables(pattern, literals) {
         match captures.entry(name) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(Capture::Repeated(Vec::new()));
@@ -1363,44 +1352,37 @@ fn seed_repeated_captures(
     Ok(())
 }
 
-fn pattern_variables(
-    pattern: &Spanned<Datum>,
-    literals: &BTreeSet<String>,
-    keyword: &str,
-) -> BTreeSet<String> {
+fn pattern_variables(pattern: &Spanned<Datum>, literals: &BTreeSet<String>) -> BTreeSet<String> {
     let mut variables = BTreeSet::new();
-    collect_pattern_variables(pattern, literals, keyword, &mut variables);
+    collect_pattern_variables(pattern, literals, &mut variables);
     variables
 }
 
 fn collect_pattern_variables(
     pattern: &Spanned<Datum>,
     literals: &BTreeSet<String>,
-    keyword: &str,
     variables: &mut BTreeSet<String>,
 ) {
     match &pattern.node {
-        Datum::Atom(Atom::Identifier(name))
-            if name != "..." && name != keyword && !literals.contains(name) =>
-        {
+        Datum::Atom(Atom::Identifier(name)) if name != "..." && !literals.contains(name) => {
             variables.insert(name.clone());
         }
         Datum::List(items) | Datum::Vector(items) => {
             for item in items {
-                collect_pattern_variables(item, literals, keyword, variables);
+                collect_pattern_variables(item, literals, variables);
             }
         }
         Datum::DottedList(items, tail) => {
             for item in items {
-                collect_pattern_variables(item, literals, keyword, variables);
+                collect_pattern_variables(item, literals, variables);
             }
-            collect_pattern_variables(tail, literals, keyword, variables);
+            collect_pattern_variables(tail, literals, variables);
         }
         Datum::Quote(inner)
         | Datum::Quasiquote(inner)
         | Datum::Unquote(inner)
         | Datum::UnquoteSplicing(inner) => {
-            collect_pattern_variables(inner, literals, keyword, variables);
+            collect_pattern_variables(inner, literals, variables);
         }
         Datum::Atom(_) => {}
     }
@@ -3172,7 +3154,7 @@ mod tests {
     }
 
     #[test]
-    fn macro_rule_head_must_match_keyword() {
+    fn ignores_syntax_rule_pattern_head_identifier() {
         for input in [
             "(define-syntax m
                (syntax-rules ()
@@ -3184,11 +3166,19 @@ mod tests {
              (m)",
         ] {
             let datums = parse(input).unwrap();
-            assert!(matches!(
-                classify_program(&datums),
-                Err(SurfaceError::NoMatchingMacroRule { name, .. }) if name == "m"
-            ));
+            let program = classify_program(&datums).unwrap();
+            assert!(matches!(program.forms[0].node, TopLevel::Expr(_)));
         }
+
+        let datums = parse(
+            "(define-syntax m
+               (syntax-rules ()
+                 ((_ x) x)))
+             (m 1)",
+        )
+        .unwrap();
+        let program = classify_program(&datums).unwrap();
+        assert!(matches!(program.forms[0].node, TopLevel::Expr(_)));
     }
 
     #[test]

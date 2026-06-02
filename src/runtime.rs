@@ -5057,6 +5057,15 @@ mod tests {
         );
         assert_eq!(
             eval_one(
+                "(let-syntax
+                   ((foo (syntax-rules ()
+                           ((_ expr) (+ expr 1)))))
+                   (foo 3))"
+            ),
+            "4"
+        );
+        assert_eq!(
+            eval_one(
                 "(letrec-syntax
                    ((a (syntax-rules () ((a x) (b x))))
                     (b (syntax-rules () ((b x) (+ x 1)))))

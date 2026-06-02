@@ -803,6 +803,10 @@ and output procedures. =any?= means any Scheme value is valid.
   bindings such as =(let-syntax ((x (syntax-rules ()))) ...)= are valid;
   use-sites still report no matching macro rule. Current pitfall
   baseline: 11 of 22 extracted cases pass, with 3.4 now passing.
+- Treat the first identifier in each =syntax-rules= pattern as ignored
+  rule-head syntax, matching R5RS and allowing common heads such as =_=.
+  The remaining macro pitfall failures now expose actual hygiene and
+  definition-context gaps instead of failing to match the rule.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
