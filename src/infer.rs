@@ -3923,6 +3923,10 @@ mod tests {
             "(-> (pair? any? any?) boolean? : (pair? number? any?))"
         );
         assert_eq!(
+            infer_one("(lambda (x) (eq? x (quote done)))"),
+            "(-> any? boolean? : symbol?)"
+        );
+        assert_eq!(
             infer_one("(lambda (x) (if (string? x) #t #f))"),
             "(-> any? boolean? : string?)"
         );
@@ -3958,6 +3962,16 @@ mod tests {
             vec![
                 "(-> any? boolean? : string?)".to_string(),
                 "(-> (-> string? t1) any? (U boolean? t1))".to_string(),
+            ]
+        );
+        assert_eq!(
+            infer_all(
+                "(define done? (lambda (x) (eq? x (quote done))))
+                 (lambda (x) (if (done? x) x #f))"
+            ),
+            vec![
+                "(-> any? boolean? : symbol?)".to_string(),
+                "(-> any? (U boolean? symbol?))".to_string(),
             ]
         );
     }
