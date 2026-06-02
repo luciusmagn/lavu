@@ -2313,6 +2313,7 @@ impl Inferencer {
 
         match (actual, expected) {
             (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => Ok(ty),
+            (Type::Var(actual), Type::Var(expected)) => self.bind_var(expected, Type::Var(actual)),
             (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
             (Type::Never, _) | (_, Type::Never) => Ok(Type::Never),
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
@@ -3352,7 +3353,7 @@ mod tests {
         assert_eq!(infer_one("(lambda args args)"), "(-> args * (listof args))");
         assert_eq!(
             infer_one("(lambda (x . rest) (reverse rest))"),
-            "(-> x t0 * (listof t0))"
+            "(-> x rest * (listof rest))"
         );
     }
 
@@ -3372,6 +3373,16 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (case x ((a) 1) ((b) \"b\") (else x)))"),
             "(-> x (U number? string? x))"
+        );
+    }
+
+    #[test]
+    fn preserves_caller_names_when_unifying_type_variables() {
+        assert_eq!(infer_one("(lambda (x) (let loop ((y x)) y))"), "(-> x x)");
+        assert_eq!(infer_one("(lambda (x) (do ((y x y)) (#t y)))"), "(-> x x)");
+        assert_eq!(
+            infer_one("(lambda (x) (letrec ((f (lambda (y) y))) (f x)))"),
+            "(-> x x)"
         );
     }
 
