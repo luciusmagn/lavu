@@ -661,6 +661,9 @@ and output procedures. =any?= means any Scheme value is valid.
 ** Dynamic Wind
 - Add ordinary =dynamic-wind= entry/thunk/exit behavior. Continuation
   re-entry behavior remains part of the future =call/cc= work.
+- Run the =after= thunk on escape-continuation exits and let an
+  =after= escape supersede the original thunk escape, while still
+  leaving full continuation re-entry semantics for later work.
 - Type =dynamic-wind= operands as thunks.
 ** Continuations
 - Add initial escape-continuation support for =call/cc= and

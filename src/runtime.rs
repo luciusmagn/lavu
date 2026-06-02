@@ -3257,7 +3257,8 @@ fn dynamic_wind(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, 
     let after_result = apply(after, Vec::new(), span, env);
     match (result, after_result) {
         (Ok(value), Ok(_)) => Ok(value),
-        (Err(error), Ok(_)) | (Ok(_), Err(error)) | (Err(error), Err(_)) => Err(error),
+        (_, Err(error)) => Err(error),
+        (Err(error), Ok(_)) => Err(error),
     }
 }
 
@@ -5543,6 +5544,32 @@ mod tests {
                  xs"
             ),
             "(before during after)"
+        );
+        assert_eq!(
+            eval_one(
+                "(define xs '())
+                 (call/cc
+                   (lambda (exit)
+                     (dynamic-wind
+                       (lambda () (set! xs (append xs '(before))))
+                       (lambda () (set! xs (append xs '(during))) (exit 'escaped))
+                       (lambda () (set! xs (append xs '(after)))))))
+                 xs"
+            ),
+            "(before during after)"
+        );
+        assert_eq!(
+            eval_one(
+                "(call/cc
+                   (lambda (outer)
+                     (call/cc
+                       (lambda (after-exit)
+                         (dynamic-wind
+                           (lambda () #f)
+                           (lambda () (outer 'thunk))
+                           (lambda () (after-exit 'after)))))))"
+            ),
+            "after"
         );
     }
 
