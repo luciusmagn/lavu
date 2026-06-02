@@ -8,6 +8,7 @@ pub mod query;
 pub mod repl;
 pub mod runtime;
 pub mod stdlib;
+pub mod stepper;
 pub mod surface;
 pub mod syntax;
 pub mod types;

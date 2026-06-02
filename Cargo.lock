@@ -567,6 +567,7 @@ dependencies = [
  "chrono",
  "chumsky",
  "color-eyre",
+ "crossterm",
  "dirs",
  "logos",
  "nu-ansi-term",

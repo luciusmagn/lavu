@@ -7,6 +7,7 @@ edition = "2024"
 ariadne = { version = "0.5.0", features = ["concolor", "auto-color"] }
 bigdecimal = "0.4.7"
 chrono = { version = "0.4.40", features = ["serde"] }
+crossterm = "0.28.1"
 chumsky = "0.9.3"
 color-eyre = "0.6.3"
 dirs = "6.0.0"

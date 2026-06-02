@@ -10,6 +10,7 @@ use lavu::infer::{Inferencer, TypeEnv, TypeError};
 use lavu::query::{infer_query_with_context, trace_query_with_context};
 use lavu::repl::{line_editor, print_logo};
 use lavu::runtime::{Env, EvalError, Value, eval_top_level};
+use lavu::stepper;
 use lavu::surface::{SurfaceContext, SurfaceError, TopLevel};
 use lavu::syntax::{Atom, Datum, Spanned};
 use lavu::types::Type;
@@ -70,28 +71,33 @@ fn handle_buffer(
 ) {
     let trimmed = buffer.trim_start();
 
-    // `?? expr` documents the inference engine's steps; check it before `?`.
+    // `?? expr` steps through the inference engine; check it before `?`.
     if let Some(query) = trimmed.strip_prefix("??") {
         // For a bare name we have defined, re-trace its definition's source so
         // the steps are shown, rather than the single "look it up" step.
-        let source = definitions.get(query.trim()).map_or(query, String::as_str);
-        match trace_query_with_context(source, surface, type_env) {
-            Ok((_, steps)) => report_inference_trace(source, &steps),
-            Err(error) => report_query_error(source, &error),
+        let source = definitions
+            .get(query.trim())
+            .map_or(query, String::as_str)
+            .to_string();
+        match trace_query_with_context(&source, surface, type_env) {
+            Ok((_, steps)) => {
+                if std::io::stdout().is_terminal() && !steps.is_empty() {
+                    // Walk the steps interactively, then leave the final type.
+                    if stepper::run(&source, &steps).is_ok() {
+                        print_type_query(query, env, surface, type_env);
+                    }
+                } else {
+                    // No terminal to drive: fall back to the static report.
+                    report_inference_trace(&source, &steps);
+                }
+            }
+            Err(error) => report_query_error(&source, &error),
         }
         return;
     }
 
     if let Some(query) = trimmed.strip_prefix('?') {
-        match infer_query_with_context(query, surface, type_env) {
-            Ok(types) => match eval_query_values(query, env, surface) {
-                Ok(values) => print_query_types(query, &types, &values),
-                Err(ReplError::Datum(error)) => report_datum_error(query, &error),
-                Err(ReplError::Surface(error)) => report_surface_error(query, &error),
-                Err(ReplError::Eval(error)) => report_eval_error(query, &error),
-            },
-            Err(error) => report_query_error(query, &error),
-        }
+        print_type_query(query, env, surface, type_env);
         return;
     }
 
@@ -112,6 +118,21 @@ fn handle_buffer(
         Err(ReplError::Datum(error)) => report_datum_error(buffer, &error),
         Err(ReplError::Surface(error)) => report_surface_error(buffer, &error),
         Err(ReplError::Eval(error)) => report_eval_error(buffer, &error),
+    }
+}
+
+/// Resolve a `? expr` query: infer its type, evaluate it for the displayed
+/// value, and print the `value : type-info` result. Shared by `?` and the
+/// final result shown when leaving `??` inference mode.
+fn print_type_query(query: &str, env: &Env, surface: &SurfaceContext, type_env: &TypeEnv) {
+    match infer_query_with_context(query, surface, type_env) {
+        Ok(types) => match eval_query_values(query, env, surface) {
+            Ok(values) => print_query_types(query, &types, &values),
+            Err(ReplError::Datum(error)) => report_datum_error(query, &error),
+            Err(ReplError::Surface(error)) => report_surface_error(query, &error),
+            Err(ReplError::Eval(error)) => report_eval_error(query, &error),
+        },
+        Err(error) => report_query_error(query, &error),
     }
 }
 
