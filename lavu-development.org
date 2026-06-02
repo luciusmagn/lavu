@@ -440,6 +440,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Extend structural predicate refinements through R5RS composed
   =car=/=cdr= accessors such as =cadr= and =caddr=, so guarded selector
   chains preserve the proven element type in branch results.
+- Parse equivalent nested selector spellings such as =(car (cdr x))= as
+  the same occurrence-typing path, while still respecting local
+  shadowing of accessor names.
 - Occurrence-typing stress examples should be kept as concrete
   regressions: the heterogeneous =process-element= shape currently
   exposes the coarse =procedure?= result, sibling =and= refinements need

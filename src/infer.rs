@@ -3371,16 +3371,32 @@ fn predicate_operand_refinement(
 ) -> Option<(String, Type)> {
     match &operand.node {
         Expr::Variable(variable_name) => Some((variable_name.clone(), positive)),
-        Expr::Apply { operator, operands } => {
-            let [target] = operands.as_slice() else {
-                return None;
-            };
-            let Expr::Variable(variable_name) = &target.node else {
-                return None;
-            };
+        Expr::Apply { .. } => {
+            let (variable_name, steps) = accessor_operand_path(operand, env)?;
+            Some((variable_name, accessor_refinement_type(&steps, positive)))
+        }
+        _ => None,
+    }
+}
 
-            let steps = accessor_refinement_steps(operator, env)?;
-            Some((variable_name.clone(), accessor_refinement_type(&steps, positive)))
+fn accessor_operand_path(
+    operand: &Spanned<Expr>,
+    env: &TypeEnv,
+) -> Option<(String, Vec<ListAccessResult>)> {
+    let Expr::Apply { operator, operands } = &operand.node else {
+        return None;
+    };
+    let [target] = operands.as_slice() else {
+        return None;
+    };
+    let steps = accessor_refinement_steps(operator, env)?;
+
+    match &target.node {
+        Expr::Variable(variable_name) => Some((variable_name.clone(), steps)),
+        Expr::Apply { .. } => {
+            let (variable_name, mut target_steps) = accessor_operand_path(target, env)?;
+            target_steps.extend(steps);
+            Some((variable_name, target_steps))
         }
         _ => None,
     }
@@ -3859,6 +3875,31 @@ mod tests {
     }
 
     #[test]
+    fn propagates_nested_accessor_predicate_refinements() {
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x) (pair? (cdr x)) (number? (car (cdr x))))
+                       (list (car (cdr x)))
+                       (quote ())))"
+            ),
+            "(-> x (listof number?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x)
+                            (pair? (cdr x))
+                            (pair? (cdr (cdr x)))
+                            (string? (car (cdr (cdr x)))))
+                       (list (car (cdr (cdr x))))
+                       (quote ())))"
+            ),
+            "(-> x (listof string?))"
+        );
+    }
+
+    #[test]
     fn treats_contradictory_refinement_paths_as_never() {
         assert_eq!(
             infer_one("(lambda (x) (if (and (number? x) (string? x)) \"dead\" 0))"),
@@ -4329,6 +4370,13 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (string? x) (if (string? x) (+ x 1) 0))"),
             "(-> (-> any? boolean? : number?) any? number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(let ((car (lambda (x) x)))
+                   (lambda (x) (if (number? (car x)) x #f)))"
+            ),
+            "(-> x (U boolean? x))"
         );
     }
 
