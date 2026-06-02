@@ -672,8 +672,8 @@ fn apply_primitive(
             exact_integer_binary(args, span, "non-zero integer?", |left, right| left % right)
         }
         "modulo" => exact_integer_binary(args, span, "non-zero integer?", modulo_value),
-        "gcd" => exact_integer_fold(args, span, BigInt::zero(), |left, right| left.gcd(&right)),
-        "lcm" => exact_integer_fold(args, span, BigInt::one(), |left, right| left.lcm(&right)),
+        "gcd" => integer_fold(args, span, BigInt::zero(), |left, right| left.gcd(&right)),
+        "lcm" => integer_fold(args, span, BigInt::one(), |left, right| left.lcm(&right)),
         "numerator" => numerator(args, span),
         "denominator" => denominator(args, span),
         "floor" => numeric_round(args, span, BigRational::floor, RoundingMode::Floor),
@@ -1455,16 +1455,26 @@ fn decimal_integer(number: &BigDecimal, span: SourceSpan) -> Result<BigInt, Eval
     }
 }
 
-fn exact_integer_fold(
+fn integer_fold(
     args: Vec<Value>,
     span: SourceSpan,
     identity: BigInt,
     f: impl Fn(BigInt, BigInt) -> BigInt,
 ) -> Result<Value, EvalError> {
-    args.iter()
-        .map(|value| exact_integer(value, span.clone()))
-        .try_fold(identity, |acc, n| n.map(|n| f(acc, n).abs()))
-        .map(Value::Integer)
+    let mut result = identity;
+    let mut inexact = false;
+
+    for value in args {
+        let value = integer_argument(&value, span.clone())?;
+        inexact |= value.inexact;
+        result = f(result, value.value).abs();
+    }
+
+    if inexact {
+        Ok(Value::Decimal(BigDecimal::from(result)))
+    } else {
+        Ok(Value::Integer(result))
+    }
 }
 
 fn modulo_value(left: BigInt, right: BigInt) -> BigInt {
@@ -5062,7 +5072,11 @@ mod tests {
         assert_eq!(eval_one("(remainder -13.0 5)"), "-3");
         assert_eq!(eval_one("(modulo -13 5.0)"), "2");
         assert_eq!(eval_one("(gcd 32 -36)"), "4");
+        assert_eq!(eval_one("(gcd 32.0 -36)"), "4");
+        assert_eq!(eval_one("(inexact? (gcd 32.0 -36))"), "#t");
         assert_eq!(eval_one("(lcm 4 6)"), "12");
+        assert_eq!(eval_one("(lcm 4 6.0)"), "12");
+        assert_eq!(eval_one("(inexact? (lcm 4 6.0))"), "#t");
         assert_eq!(eval_one("(numerator 6/8)"), "3");
         assert_eq!(eval_one("(denominator 6/8)"), "4");
         assert_eq!(eval_one("(floor 3/2)"), "1");
