@@ -661,7 +661,11 @@ impl Inferencer {
 
         let mut local = env.clone();
         for (param, ty) in params.iter().zip(argument_tys.iter()) {
-            local.define(param.node.clone(), ty.clone());
+            if generalize_direct_argument(ty) {
+                local.define_inferred(param.node.clone(), ty.clone());
+            } else {
+                local.define(param.node.clone(), ty.clone());
+            }
         }
         if let Some(rest) = rest {
             let rest_tys = argument_tys[params.len()..].to_vec();
@@ -2849,6 +2853,21 @@ fn predicate_lambda_param_type(param_name: &str, ty: Type) -> Type {
     }
 }
 
+fn generalize_direct_argument(ty: &Type) -> bool {
+    matches!(ty, Type::Procedure(_)) && has_type_var(ty) && !procedure_returns_never(ty)
+}
+
+fn procedure_returns_never(ty: &Type) -> bool {
+    match ty {
+        Type::Procedure(ProcedureType::Fixed { result, .. })
+        | Type::Procedure(ProcedureType::Optional { result, .. })
+        | Type::Procedure(ProcedureType::UniformVariadic { result, .. })
+        | Type::Procedure(ProcedureType::Rest { result, .. }) => result.as_ref() == &Type::Never,
+        Type::Procedure(ProcedureType::Predicate { .. }) => false,
+        _ => false,
+    }
+}
+
 fn wildcard_type_vars(ty: Type) -> Type {
     match ty {
         Type::Var(_) => Type::Any,
@@ -3540,6 +3559,23 @@ mod tests {
             infer_one("(lambda (x) (case x ((a) 1) ((b) \"b\") (else x)))"),
             "(-> x (U number? string? x))"
         );
+    }
+
+    #[test]
+    fn generalizes_direct_lambda_arguments() {
+        assert_eq!(
+            infer_one("(let ((id (lambda (x) x))) (list (id 1) (id \"x\")))"),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(
+            infer_one("(let ((wrap (lambda (x) (list x)))) (list (wrap 1) (wrap \"x\")))"),
+            "(listof (listof (U number? string?)))"
+        );
+        assert_eq!(
+            infer_one("((lambda (id) (list (id 1) (id \"x\"))) (lambda (x) x))"),
+            "(listof (U number? string?))"
+        );
+        assert_eq!(infer_one("(call/cc (lambda (k) (k 5)))"), "number?");
     }
 
     #[test]

@@ -493,6 +493,10 @@ and output procedures. =any?= means any Scheme value is valid.
   propositions, while leaving different-variable disjunctions unrefined.
 - Treat boolean wrapper shapes such as =(if (string? x) #t (number? x))=
   and equivalent multi-clause =cond= predicates as union propositions.
+- Generalize procedure-valued direct lambda argument bindings that still
+  contain type variables, recovering local =let=-style polymorphism for
+  values like =(let ((id (lambda (x) x))) ...)= without generalizing
+  plain aliases or escape continuations.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
