@@ -780,17 +780,63 @@ impl Inferencer {
             return None;
         };
 
-        if !env.is_primitive(predicate_name) {
-            return None;
+        if env.is_primitive(predicate_name) {
+            let positive = primitive(predicate_name)?
+                .predicate
+                .filter(|predicate| predicate.argument == 0)?
+                .positive;
+            let positive = self.instantiate_scheme(&positive);
+
+            return predicate_operand_refinement(&operands[0], positive, env);
         }
 
-        let positive = primitive(predicate_name)?
-            .predicate
-            .filter(|predicate| predicate.argument == 0)?
-            .positive;
-        let positive = self.instantiate_scheme(&positive);
-
+        let positive = self.latent_predicate_positive(predicate_name, env)?;
+        self.widen_latent_predicate_operand(&operands[0], env);
         predicate_operand_refinement(&operands[0], positive, env)
+    }
+
+    fn latent_predicate_positive(&mut self, name: &str, env: &TypeEnv) -> Option<Type> {
+        match self.resolve(env.get(name)?.clone()) {
+            Type::Procedure(ProcedureType::Predicate { positive, .. }) => {
+                Some(self.resolve(*positive))
+            }
+            Type::Var(var) => {
+                let positive = self.fresh_type_var();
+                self.bind_var(var, Type::predicate_procedure(Type::Any, positive.clone()))
+                    .ok()?;
+                Some(positive)
+            }
+            _ => None,
+        }
+    }
+
+    fn widen_latent_predicate_operand(&mut self, operand: &Spanned<Expr>, env: &TypeEnv) {
+        match &operand.node {
+            Expr::Variable(name) => self.widen_env_var(name, Type::Any, env),
+            Expr::Apply { operator, operands } => {
+                let [target] = operands.as_slice() else {
+                    return;
+                };
+                let Expr::Variable(target_name) = &target.node else {
+                    return;
+                };
+                match primitive_operator_name(operator, env) {
+                    Some("car") | Some("cdr") => self.widen_env_var(
+                        target_name,
+                        Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                        env,
+                    ),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn widen_env_var(&mut self, name: &str, ty: Type, env: &TypeEnv) {
+        if let Some(Type::Var(var)) = env.get(name).cloned().map(|ty| self.resolve(ty)) {
+            self.substitutions.insert(var, ty);
+        }
     }
 
     fn infer_application(
@@ -3545,6 +3591,18 @@ mod tests {
     }
 
     #[test]
+    fn infers_latent_predicate_refinements() {
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (if (pred x) (proc x) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred x) (if (pred x) x #f))"),
+            "(-> (-> any? boolean? : t0) any? (U boolean? t0))"
+        );
+    }
+
+    #[test]
     fn does_not_export_unused_predicate_refinements() {
         assert_eq!(
             infer_one("(lambda (x) (if (number? x) 1 0))"),
@@ -3808,7 +3866,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (string? x) (if (string? x) (+ x 1) 0))"),
-            "(-> (-> number? t0) number? number?)"
+            "(-> (-> any? boolean? : number?) any? number?)"
         );
     }
 
