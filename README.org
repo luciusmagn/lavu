@@ -71,6 +71,8 @@ are recorded here instead.
 - (Done) =?= query prefix to show inferred types for expressions and procedures
 - (Done) Syntax highlighting and enhanced UI via reedline
 - (Done, growing) Rich error messages with source locations via Ariadne
+- (Done) Type query display as =value : type-info=, with evaluated
+  values isolated from persistent REPL state
 - (Planned) Inspection of evaluation steps
 
 ** R5RS Compliance

@@ -186,19 +186,19 @@ Example REPL output:
 
 #+begin_src scheme
 ? 1
-number?
+1 : number?
 
 ? "hi"
-string?
+"hi" : string?
 
 ? '(1 2 3)
-(listof number?)
+(1 2 3) : (listof number?)
 
 ? (lambda (x) (+ x 1))
-(-> number? number?)
+#<procedure> : (-> number? number?)
 
 ? reverse
-(-> (listof a) (listof a))
+#<procedure> : (-> (listof a) (listof a))
 #+end_src
 
 =unknown?= means Lavu could not infer a useful type yet.
