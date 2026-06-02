@@ -766,6 +766,20 @@ and output procedures. =any?= means any Scheme value is valid.
   infer selected elements precisely.
 - Print circular mutable vectors with a diagnostic marker so the REPL
   display path does not hang on self-referential vectors.
+** R5RS Compliance Fixtures
+- Vendor the SISC =r5rs_pitfall.scm= corpus under
+  =tests/fixtures/r5rs= as an edge-case R5RS compliance fixture.
+- Keep the upstream Scheme file verbatim and extract its
+  =(should-be id expected expression)= cases in a Rust integration
+  runner, because the original harness uses SISC-specific exception
+  syntax.
+- Mark the full pitfall runner ignored for now, so it can document
+  remaining R5RS gaps without making ordinary unit tests red:
+  =cargo test sisc_r5rs_pitfall_suite -- --ignored=.
+- First baseline: 7 of 22 extracted cases pass. The current failures
+  cluster around full reusable continuations, macro hygiene/local syntax
+  edge cases, keyword shadowing, named =let= behavior, and
+  continuation-safe =map=.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

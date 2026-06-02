@@ -80,3 +80,5 @@ are recorded here instead.
 - (Done, growing) Top-level/local =syntax-rules= expansion
 - (Planned) Full R5RS macro hygiene
 - (In progress) Native Rust standard library with type metadata
+- (Added) SISC R5RS pitfall fixture under =tests/fixtures/r5rs= with an
+  ignored manual compliance runner
