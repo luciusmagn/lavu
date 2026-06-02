@@ -468,6 +468,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Reuse =Spanned::with_node= in syntax-rules template expansion when
   rebuilding list, vector, dotted-list, quote, quasiquote, unquote, and
   unquote-splicing template nodes.
+- Reuse =Spanned::with_node= in surface classification for top-level
+  definitions, expression classification, shorthand =define= lambdas,
+  and identifier-to-variable conversion.
 ** Warning Cleanup
 - Remove local lifetime-syntax warnings and update the clipboard
   dependency within existing constraints to clear Cargo's future

@@ -1629,11 +1629,7 @@ fn top_level_begin_body(datum: &Spanned<Datum>) -> Option<&[Spanned<Datum>]> {
 
 pub fn classify_top_level(datum: &Spanned<Datum>) -> Result<Spanned<TopLevel>, SurfaceError> {
     if let Some((name, value)) = parse_define(datum)? {
-        return Ok(Spanned {
-            node: TopLevel::Define { name, value },
-            span: datum.span.clone(),
-            origin: datum.origin,
-        });
+        return Ok(datum.with_node(TopLevel::Define { name, value }));
     }
 
     Ok(classify_expr(datum)?.map(TopLevel::Expr))
@@ -1656,11 +1652,7 @@ pub fn classify_expr(datum: &Spanned<Datum>) -> Result<Spanned<Expr>, SurfaceErr
         }
     };
 
-    Ok(Spanned {
-        node: expr,
-        span: datum.span.clone(),
-        origin: datum.origin,
-    })
+    Ok(datum.with_node(expr))
 }
 
 fn classify_list(
@@ -1743,15 +1735,11 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
             }
             let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
-            let value = Spanned {
-                node: Expr::Lambda {
-                    params,
-                    rest: rest_param,
-                    body,
-                },
-                span: datum.span.clone(),
-                origin: datum.origin,
-            };
+            let value = datum.with_node(Expr::Lambda {
+                params,
+                rest: rest_param,
+                body,
+            });
 
             Ok(Some((name, value)))
         }
@@ -1764,15 +1752,11 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
                 ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
             }
             let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
-            let value = Spanned {
-                node: Expr::Lambda {
-                    params,
-                    rest: rest_param,
-                    body,
-                },
-                span: datum.span.clone(),
-                origin: datum.origin,
-            };
+            let value = datum.with_node(Expr::Lambda {
+                params,
+                rest: rest_param,
+                body,
+            });
 
             Ok(Some((name, value)))
         }
@@ -1954,11 +1938,7 @@ fn parse_named_let(
     let lambda_body = parse_body(&rest[2..], span.clone(), origin)?;
     let call = Spanned {
         node: Expr::Apply {
-            operator: Box::new(Spanned {
-                node: Expr::Variable(name.node.clone()),
-                span: name.span.clone(),
-                origin: name.origin,
-            }),
+            operator: Box::new(variable_expr(&name)),
             operands,
         },
         span: span.clone(),
@@ -2730,11 +2710,7 @@ fn generated_name(prefix: &str, span: &SourceSpan) -> String {
 }
 
 fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {
-    Spanned {
-        node: Expr::Variable(name.node.clone()),
-        span: name.span.clone(),
-        origin: name.origin,
-    }
+    name.with_node(Expr::Variable(name.node.clone()))
 }
 
 fn boolean_literal(value: bool) -> Expr {
@@ -2842,11 +2818,7 @@ fn expect_identifier(
     context: &'static str,
 ) -> Result<Spanned<String>, SurfaceError> {
     if let Some(name) = identifier_name(datum) {
-        Ok(Spanned {
-            node: name,
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(name))
     } else {
         Err(SurfaceError::ExpectedIdentifier {
             context,
