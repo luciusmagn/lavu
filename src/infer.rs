@@ -2077,6 +2077,15 @@ impl Inferencer {
         if let Some(vector) = primitive_unary_operand(expr, "vector->list", env) {
             return self.infer_visible_vector_items(vector, env);
         }
+        if let Some((car, cdr)) = primitive_cons_operands(expr, env) {
+            let car_ty = self.infer_expr(car, env)?;
+            let mut items = vec![self.resolve(car_ty)];
+            if let Some(cdr_items) = self.infer_visible_proper_list_items(cdr, env)? {
+                items.extend(cdr_items);
+                return Ok(Some(items));
+            }
+            return Ok(None);
+        }
 
         match &expr.node {
             Expr::Apply { operator, operands }
@@ -3952,8 +3961,30 @@ fn visible_apply_final_expr_items<'a>(
         {
             Some(operands.iter().collect())
         }
+        _ if let Some((car, cdr)) = primitive_cons_operands(expr, env) => {
+            let mut items = vec![car];
+            items.extend(visible_apply_final_expr_items(cdr, env)?);
+            Some(items)
+        }
         _ => None,
     }
+}
+
+fn primitive_cons_operands<'a>(
+    expr: &'a Spanned<Expr>,
+    env: &TypeEnv,
+) -> Option<(&'a Spanned<Expr>, &'a Spanned<Expr>)> {
+    let Expr::Apply { operator, operands } = &expr.node else {
+        return None;
+    };
+    if primitive_operator_name(operator, env) != Some("cons") {
+        return None;
+    }
+
+    let [car, cdr] = operands.as_slice() else {
+        return None;
+    };
+    Some((car, cdr))
 }
 
 fn predicate_operand_refinement(
@@ -4682,6 +4713,10 @@ mod tests {
             "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
         assert_eq!(
+            infer_one("(lambda (pred proc x) (if (apply pred (cons x (quote ()))) (proc x) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t3) any? (U #f t3))"
+        );
+        assert_eq!(
             infer_one("(lambda (pred proc x) (if (apply pred x (quote ())) (proc x) #f))"),
             "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
@@ -5039,6 +5074,10 @@ mod tests {
             "number?"
         );
         assert_eq!(
+            infer_one("(apply (lambda (x y) (+ x y)) (cons 1 (cons 2 (quote ()))))"),
+            "number?"
+        );
+        assert_eq!(
             infer_one("(apply (lambda (x y) (+ x y)) (vector->list (vector 1 2)))"),
             "number?"
         );
@@ -5151,6 +5190,15 @@ mod tests {
                    (lambda (x) (if (number? (car x)) x #f)))"
             ),
             "(-> x (U #f x))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (cons pred proc x)
+                   (if (apply pred (cons x (quote ())))
+                       (proc x)
+                       #f))"
+            ),
+            "(-> (-> x null? (listof t1)) (->* t1 t2) (-> x t3) x (U #f t3))"
         );
     }
 

@@ -563,6 +563,10 @@ and output procedures. =any?= means any Scheme value is valid.
   =(Not number?)= yet. The next sensible inference steps are explicit
   complement/proposition display design, more latent-predicate call paths,
   and then reopening the R5RS pitfall corpus one supported slice at a time.
+- Recognize proper =cons= chains such as =(cons x '())= as visible final
+  argument lists for =apply= inference. This lets latent predicate
+  refinements flow through =(apply pred (cons x '()))= while still
+  respecting local shadowing of =cons=.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
