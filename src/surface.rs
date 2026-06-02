@@ -2083,19 +2083,15 @@ fn parse_and(
         [single] => Ok(classify_expr(single)?.node),
         [first, remaining @ ..] => {
             let condition = classify_expr(first)?;
-            let consequent = Spanned {
-                node: parse_and(span.clone(), origin, remaining)?,
-                span: span.clone(),
+            let consequent = spanned_expr(
+                parse_and(span.clone(), origin, remaining)?,
+                span.clone(),
                 origin,
-            };
+            );
             Ok(Expr::If {
                 condition: Box::new(condition),
                 consequent: Box::new(consequent),
-                alternate: Some(Box::new(Spanned {
-                    node: boolean_literal(false),
-                    span,
-                    origin,
-                })),
+                alternate: Some(Box::new(spanned_expr(boolean_literal(false), span, origin))),
             })
         }
     }
@@ -2115,39 +2111,31 @@ fn parse_or(
                 span: first.span.clone(),
                 origin,
             };
-            let condition = Spanned {
-                node: Expr::Variable(temp.node.clone()),
-                span: first.span.clone(),
+            let condition = variable_expr(&temp);
+            let alternate = spanned_expr(
+                parse_or(span.clone(), origin, remaining)?,
+                span.clone(),
                 origin,
-            };
-            let alternate = Spanned {
-                node: parse_or(span.clone(), origin, remaining)?,
-                span: span.clone(),
-                origin,
-            };
+            );
 
             Ok(Expr::Apply {
-                operator: Box::new(Spanned {
-                    node: Expr::Lambda {
+                operator: Box::new(spanned_expr(
+                    Expr::Lambda {
                         params: vec![temp.clone()],
                         rest: None,
-                        body: vec![Spanned {
-                            node: Expr::If {
+                        body: vec![spanned_expr(
+                            Expr::If {
                                 condition: Box::new(condition),
-                                consequent: Box::new(Spanned {
-                                    node: Expr::Variable(temp.node),
-                                    span: temp.span,
-                                    origin,
-                                }),
+                                consequent: Box::new(variable_expr(&temp)),
                                 alternate: Some(Box::new(alternate)),
                             },
-                            span: span.clone(),
+                            span.clone(),
                             origin,
-                        }],
+                        )],
                     },
-                    span: span.clone(),
+                    span.clone(),
                     origin,
-                }),
+                )),
                 operands: vec![classify_expr(first)?],
             })
         }
@@ -2167,11 +2155,7 @@ fn parse_cond(
         });
     }
 
-    let mut result = Spanned {
-        node: boolean_literal(false),
-        span: span.clone(),
-        origin,
-    };
+    let mut result = spanned_expr(boolean_literal(false), span.clone(), origin);
 
     for (index, clause) in clauses.iter().enumerate().rev() {
         let Datum::List(items) = &clause.node else {
@@ -2204,11 +2188,11 @@ fn parse_cond(
                 });
             }
 
-            result = Spanned {
-                node: body_expr(body, clause.span.clone(), origin)?,
-                span: clause.span.clone(),
+            result = spanned_expr(
+                body_expr(body, clause.span.clone(), origin)?,
+                clause.span.clone(),
                 origin,
-            };
+            );
             continue;
         }
 
@@ -2231,60 +2215,60 @@ fn parse_cond(
             };
             let condition_value = variable_expr(&temp);
             let consequent = match arrow_recipient {
-                Some(_) => Spanned {
-                    node: Expr::Apply {
+                Some(_) => spanned_expr(
+                    Expr::Apply {
                         operator: Box::new(classify_expr(&body[1])?),
                         operands: vec![condition_value.clone()],
                     },
-                    span: clause.span.clone(),
+                    clause.span.clone(),
                     origin,
-                },
+                ),
                 None => condition_value.clone(),
             };
-            let branch = Spanned {
-                node: Expr::If {
+            let branch = spanned_expr(
+                Expr::If {
                     condition: Box::new(condition_value),
                     consequent: Box::new(consequent),
                     alternate: Some(Box::new(result)),
                 },
-                span: clause.span.clone(),
+                clause.span.clone(),
                 origin,
-            };
+            );
 
-            result = Spanned {
-                node: Expr::Apply {
-                    operator: Box::new(Spanned {
-                        node: Expr::Lambda {
+            result = spanned_expr(
+                Expr::Apply {
+                    operator: Box::new(spanned_expr(
+                        Expr::Lambda {
                             params: vec![temp],
                             rest: None,
                             body: vec![branch],
                         },
-                        span: clause.span.clone(),
+                        clause.span.clone(),
                         origin,
-                    }),
+                    )),
                     operands: vec![condition],
                 },
-                span: clause.span.clone(),
+                clause.span.clone(),
                 origin,
-            };
+            );
             continue;
         }
 
-        let consequent = Spanned {
-            node: body_expr(body, clause.span.clone(), origin)?,
-            span: clause.span.clone(),
+        let consequent = spanned_expr(
+            body_expr(body, clause.span.clone(), origin)?,
+            clause.span.clone(),
             origin,
-        };
+        );
 
-        result = Spanned {
-            node: Expr::If {
+        result = spanned_expr(
+            Expr::If {
                 condition: Box::new(condition),
                 consequent: Box::new(consequent),
                 alternate: Some(Box::new(result)),
             },
-            span: clause.span.clone(),
+            clause.span.clone(),
             origin,
-        };
+        );
     }
 
     Ok(result.node)
@@ -2665,11 +2649,11 @@ fn body_expr(
         )),
     }
     .map(|expr| match expr {
-        Expr::Begin(exprs) if exprs.is_empty() => Expr::Begin(vec![Spanned {
-            node: Expr::Literal(Atom::Boolean(false)),
+        Expr::Begin(exprs) if exprs.is_empty() => Expr::Begin(vec![spanned_expr(
+            Expr::Literal(Atom::Boolean(false)),
             span,
             origin,
-        }]),
+        )]),
         expr => expr,
     })
 }
@@ -2689,7 +2673,7 @@ fn sequence_expr(
         ),
     };
 
-    Ok(Spanned { node, span, origin })
+    Ok(spanned_expr(node, span, origin))
 }
 
 fn sequence_with_tail(body: &[Spanned<Datum>], tail: Spanned<Expr>) -> Result<Expr, SurfaceError> {
@@ -2711,6 +2695,14 @@ fn generated_name(prefix: &str, span: &SourceSpan) -> String {
 
 fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {
     name.with_node(Expr::Variable(name.node.clone()))
+}
+
+fn spanned_expr(
+    node: Expr,
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+) -> Spanned<Expr> {
+    Spanned { node, span, origin }
 }
 
 fn boolean_literal(value: bool) -> Expr {
