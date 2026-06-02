@@ -702,6 +702,10 @@ and output procedures. =any?= means any Scheme value is valid.
   improper final tails.
 - Infer fixed and optional procedure applications through quoted final
   proper lists, preserving visible arity and result types for =apply=.
+- Infer fixed and optional procedure applications through visible
+  constructed final lists such as =(list ...)= and simple
+  =vector->list= forms, so direct =apply= queries preserve arity and
+  parameter constraints beyond quoted data.
 - Infer =apply= through visible =list= and =vector= constructors without
   forcing heterogeneous elements through uniform variadic metadata.
 - Bind unknown procedure variables through quoted final =apply= lists so

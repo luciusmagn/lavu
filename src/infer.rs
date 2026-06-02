@@ -1369,13 +1369,17 @@ impl Inferencer {
         fixed_argument_tys: Vec<Type>,
         final_list_ty: Type,
         final_operand: &Spanned<Expr>,
+        visible_final_arguments: Option<Vec<Type>>,
     ) -> Result<Type, TypeError> {
         let mut element_tys = fixed_argument_tys
             .into_iter()
             .map(|ty| self.resolve(ty))
             .collect::<Vec<_>>();
-        element_tys
-            .extend(self.infer_apply_constructor_final_elements(final_list_ty, final_operand)?);
+        element_tys.extend(self.infer_apply_constructor_final_elements(
+            final_list_ty,
+            final_operand,
+            visible_final_arguments,
+        )?);
 
         Ok(match constructor {
             ConstructorKind::List => self.infer_list_constructor(element_tys),
@@ -1387,8 +1391,9 @@ impl Inferencer {
         &mut self,
         actual: Type,
         operand: &Spanned<Expr>,
+        visible_arguments: Option<Vec<Type>>,
     ) -> Result<Vec<Type>, TypeError> {
-        if let Some(types) = quoted_proper_list_types(operand) {
+        if let Some(types) = visible_arguments {
             return Ok(types);
         }
 
@@ -1407,6 +1412,71 @@ impl Inferencer {
                 Ok(vec![Type::Any])
             }
         }
+    }
+
+    fn infer_visible_proper_list_items(
+        &mut self,
+        expr: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Result<Option<Vec<Type>>, TypeError> {
+        if let Some(types) = quoted_proper_list_types(expr) {
+            return Ok(Some(types.into_iter().map(|ty| self.resolve(ty)).collect()));
+        }
+        if let Some(vector) = primitive_unary_operand(expr, "vector->list", env) {
+            return self.infer_visible_vector_items(vector, env);
+        }
+
+        match &expr.node {
+            Expr::Apply { operator, operands }
+                if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
+            {
+                self.infer_visible_expr_items(operands, env).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn infer_visible_vector_items(
+        &mut self,
+        expr: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Result<Option<Vec<Type>>, TypeError> {
+        if let Some(list) = primitive_unary_operand(expr, "list->vector", env) {
+            return self.infer_visible_proper_list_items(list, env);
+        }
+
+        match &expr.node {
+            Expr::Quote(datum) => match &datum.node {
+                Datum::Vector(items) => Ok(Some(
+                    items
+                        .iter()
+                        .map(type_of_datum)
+                        .map(|ty| self.resolve(ty))
+                        .collect(),
+                )),
+                _ => Ok(None),
+            },
+            Expr::Apply { operator, operands }
+                if constructor_kind(operator, env) == Some(ConstructorKind::Vector) =>
+            {
+                self.infer_visible_expr_items(operands, env).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn infer_visible_expr_items(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Result<Vec<Type>, TypeError> {
+        operands
+            .iter()
+            .map(|operand| {
+                let ty = self.infer_expr(operand, env)?;
+                Ok(self.resolve(ty))
+            })
+            .collect()
     }
 
     fn infer_higher_order_list(
@@ -1786,14 +1856,21 @@ impl Inferencer {
         let final_operand = operands
             .last()
             .expect("arity check ensures a final list operand");
+        let visible_final_arguments = self.infer_visible_proper_list_items(final_operand, env)?;
 
         if let Some(constructor) = constructor_kind(&operands[0], env) {
-            return self.infer_apply_constructor(constructor, arguments, final_list, final_operand);
+            return self.infer_apply_constructor(
+                constructor,
+                arguments,
+                final_list,
+                final_operand,
+                visible_final_arguments,
+            );
         }
 
         match self.resolve(procedure_ty) {
             Type::Var(name) => {
-                let Some(final_arguments) = quoted_proper_list_types(final_operand) else {
+                let Some(final_arguments) = visible_final_arguments else {
                     return Ok(Type::Any);
                 };
                 self.unify(final_list, Type::List, final_operand.span.clone())?;
@@ -1816,7 +1893,7 @@ impl Inferencer {
             Type::Procedure(
                 procedure @ (ProcedureType::Fixed { .. } | ProcedureType::Optional { .. }),
             ) => {
-                let Some(final_arguments) = quoted_proper_list_types(final_operand) else {
+                let Some(final_arguments) = visible_final_arguments else {
                     return Ok(Type::Any);
                 };
                 self.unify(final_list, Type::List, final_operand.span.clone())?;
@@ -3285,7 +3362,23 @@ mod tests {
             "number?"
         );
         assert_eq!(
+            infer_one("(apply (lambda (x y) (+ x y)) (list 1 2))"),
+            "number?"
+        );
+        assert_eq!(
+            infer_one("(apply (lambda (x y) (+ x y)) (vector->list (vector 1 2)))"),
+            "number?"
+        );
+        assert_eq!(
+            infer_one("(lambda (x y) (apply (lambda (a b) (+ a b)) (list x y)))"),
+            "(-> number? number? number?)"
+        );
+        assert_eq!(
             infer_error("(apply (lambda (x y) (+ x y)) '(1 2 3))").to_string(),
+            "wrong number of arguments: expected 2, got 3"
+        );
+        assert_eq!(
+            infer_error("(apply (lambda (x y) (+ x y)) (list 1 2 3))").to_string(),
             "wrong number of arguments: expected 2, got 3"
         );
         assert_eq!(
