@@ -1029,6 +1029,11 @@ impl Inferencer {
             return self.truthy_or_predicate_refinements(condition, alternate, env);
         }
 
+        let lambda_refinements = self.direct_lambda_predicate_refinements(condition, env);
+        if !lambda_refinements.is_empty() {
+            return lambda_refinements;
+        }
+
         let Expr::If {
             condition,
             consequent,
@@ -1070,6 +1075,70 @@ impl Inferencer {
         }
 
         disjoin_refinements(condition_refinements, alternate_refinements)
+    }
+
+    fn direct_lambda_predicate_refinements(
+        &mut self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Vec<(String, Type)> {
+        let Expr::Apply { operator, operands } = &condition.node else {
+            return Vec::new();
+        };
+        let Expr::Lambda { params, rest, body } = &operator.node else {
+            return Vec::new();
+        };
+        let ([body], None) = (body.as_slice(), rest) else {
+            return Vec::new();
+        };
+        if params.len() != operands.len() {
+            return Vec::new();
+        }
+
+        let mut local = env.clone();
+        let mut param_operands = BTreeMap::new();
+        for (param, operand) in params.iter().zip(operands) {
+            let Ok(ty) = self.infer_expr(operand, env) else {
+                return Vec::new();
+            };
+            local.define(param.node.clone(), self.resolve(ty));
+            param_operands.insert(param.node.clone(), operand);
+        }
+
+        let mut probe = self.clone();
+        let refinements = probe.truthy_predicate_refinements(body, &local);
+        self.copy_predicate_substitutions(&probe);
+        self.next_var = self.next_var.max(probe.next_var);
+
+        refinements
+            .into_iter()
+            .flat_map(|(name, positive)| {
+                if let Some(operand) = param_operands.get(&name)
+                    && let Some(refinement) =
+                        predicate_operand_refinement(operand, positive.clone(), env)
+                {
+                    return vec![refinement];
+                }
+
+                refinement_target_names(&local, &name)
+                    .into_iter()
+                    .filter(|name| env.get(name).is_some())
+                    .map(|name| (name, positive.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    fn copy_predicate_substitutions(&mut self, probe: &Inferencer) {
+        for (name, ty) in &probe.substitutions {
+            let ty = probe.resolve(ty.clone());
+            if matches!(
+                ty,
+                Type::Procedure(ProcedureType::Predicate { .. })
+            ) {
+                self.substitutions.insert(name.clone(), ty);
+            }
+        }
     }
 
     fn direct_predicate_refinement(
@@ -4124,6 +4193,46 @@ mod tests {
                          0)))"
             ),
             "(-> x number?)"
+        );
+    }
+
+    #[test]
+    fn propagates_direct_lambda_predicate_refinements() {
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if ((lambda (y) (string? y)) x)
+                       (string-length x)
+                       x))"
+            ),
+            "(-> x (U number? x))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (let ((p string?)) (p x))
+                       (string-length x)
+                       x))"
+            ),
+            "(-> x (U number? x))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if ((lambda (y) (string? y)) (car x))
+                       (string-length (car x))
+                       0))"
+            ),
+            "(-> (pair? t0 t1) number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (pred proc x)
+                   (if (let ((p pred)) (p x))
+                       (proc x)
+                       #f))"
+            ),
+            "(-> (-> any? boolean? : t0) (-> t0 t2) x (U boolean? t2))"
         );
     }
 

@@ -497,6 +497,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Propagate branch predicate refinements through direct type-variable
   aliases, so =(let ((y x)) (if (string? y) ...))= refines both =y= and
   =x= inside the guarded branch without exporting the guard to callers.
+- Recognize direct-lambda predicate wrapper conditions, including
+  lowered =let= predicate aliases, so guarded facts survive educational
+  rewrites without making the caller satisfy branch-only constraints.
 - Prefer caller-side type variable names when unifying two unknowns, so
   named =let=, =do=, and local helper parameters do not replace enclosing
   lambda parameter names in displayed types.
