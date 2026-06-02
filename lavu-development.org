@@ -427,6 +427,12 @@ and output procedures. =any?= means any Scheme value is valid.
 - Keep predicate-guarded branch refinements from escaping when the
   opposite branch accepts the unrefined value, so guarded =and= forms do
   not incorrectly require every caller to pass the refined type.
+- Future stress targets should cover nested predicate filters such as a
+  heterogeneous =process-element= function, sibling refinements through
+  =and= over =(pair? x)=, =(number? (car x))=, and =(number? (cdr x))=,
+  contradictory paths such as =number?= followed by =string?=, and
+  higher-order latent predicate propositions for functions like
+  =safe-apply=.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
@@ -780,6 +786,11 @@ and output procedures. =any?= means any Scheme value is valid.
   cluster around full reusable continuations, macro hygiene/local syntax
   edge cases, keyword shadowing, named =let= behavior, and
   continuation-safe =map=.
+- Add lexical value-binding scope to surface classification so R5RS
+  syntax keywords can be shadowed by local bindings, including quote
+  abbreviations that read as applications when =quote= is rebound.
+- Current baseline after keyword shadowing: 9 of 22 extracted cases pass.
+  Pitfall cases 4.2 and 4.3 now pass.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

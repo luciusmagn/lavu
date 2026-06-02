@@ -5427,6 +5427,23 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_shadowed_syntax_keywords() {
+        assert_eq!(
+            eval_one("((lambda (begin) (begin 1 2 3)) (lambda lambda lambda))"),
+            "(1 2 3)"
+        );
+        assert_eq!(eval_one("(let ((quote -)) (eqv? '1 1))"), "#f");
+        assert_eq!(
+            eval_one("(let* ((begin (lambda lambda lambda)) (x (begin 1 2))) x)"),
+            "(1 2)"
+        );
+        assert_eq!(
+            eval_one("(do ((begin (lambda lambda lambda) (begin 1 2))) ((pair? begin) begin))"),
+            "(1 2)"
+        );
+    }
+
+    #[test]
     fn evaluates_define_procedure_shorthand() {
         assert_eq!(eval_one("(define (add1 x) (+ x 1)) (add1 4)"), "5");
         assert_eq!(eval_one("(define X 1) x"), "1");

@@ -1635,13 +1635,67 @@ pub fn classify_top_level(datum: &Spanned<Datum>) -> Result<Spanned<TopLevel>, S
     Ok(classify_expr(datum)?.map(TopLevel::Expr))
 }
 
+#[derive(Debug, Clone, Default)]
+struct LexicalScope {
+    bindings: BTreeSet<String>,
+}
+
+impl LexicalScope {
+    fn is_bound(&self, name: &str) -> bool {
+        self.bindings.contains(name)
+    }
+
+    fn with_names<'a>(&self, names: impl IntoIterator<Item = &'a Spanned<String>>) -> Self {
+        let mut scope = self.clone();
+        scope
+            .bindings
+            .extend(names.into_iter().map(|name| name.node.clone()));
+        scope
+    }
+
+    fn with_name(&self, name: &Spanned<String>) -> Self {
+        self.with_names(std::iter::once(name))
+    }
+
+    fn with_strings<'a>(&self, names: impl IntoIterator<Item = &'a String>) -> Self {
+        let mut scope = self.clone();
+        scope.bindings.extend(names.into_iter().cloned());
+        scope
+    }
+}
+
 pub fn classify_expr(datum: &Spanned<Datum>) -> Result<Spanned<Expr>, SurfaceError> {
+    classify_expr_in(datum, &LexicalScope::default())
+}
+
+fn classify_expr_in(
+    datum: &Spanned<Datum>,
+    scope: &LexicalScope,
+) -> Result<Spanned<Expr>, SurfaceError> {
     let expr = match &datum.node {
         Datum::Atom(Atom::Identifier(name)) => Expr::Variable(name.clone()),
         Datum::Atom(atom) => Expr::Literal(atom.clone()),
+        Datum::Quote(inner) if scope.is_bound("quote") => {
+            parse_prefix_abbreviation("quote", inner, datum.span.clone(), datum.origin, scope)?
+        }
         Datum::Quote(inner) => Expr::Quote(inner.clone()),
+        Datum::Quasiquote(inner) if scope.is_bound("quasiquote") => {
+            parse_prefix_abbreviation("quasiquote", inner, datum.span.clone(), datum.origin, scope)?
+        }
         Datum::Quasiquote(inner) => Expr::Quasiquote(inner.clone()),
-        Datum::List(items) => classify_list(datum.span.clone(), datum.origin, items)?,
+        Datum::Unquote(inner) if scope.is_bound("unquote") => {
+            parse_prefix_abbreviation("unquote", inner, datum.span.clone(), datum.origin, scope)?
+        }
+        Datum::UnquoteSplicing(inner) if scope.is_bound("unquote-splicing") => {
+            parse_prefix_abbreviation(
+                "unquote-splicing",
+                inner,
+                datum.span.clone(),
+                datum.origin,
+                scope,
+            )?
+        }
+        Datum::List(items) => classify_list(datum.span.clone(), datum.origin, items, scope)?,
         Datum::DottedList(_, _)
         | Datum::Vector(_)
         | Datum::Unquote(_)
@@ -1655,16 +1709,37 @@ pub fn classify_expr(datum: &Spanned<Datum>) -> Result<Spanned<Expr>, SurfaceErr
     Ok(datum.with_node(expr))
 }
 
+fn parse_prefix_abbreviation(
+    name: &str,
+    datum: &Spanned<Datum>,
+    span: SourceSpan,
+    origin: Option<crate::syntax::NodeId>,
+    scope: &LexicalScope,
+) -> Result<Expr, SurfaceError> {
+    Ok(Expr::Apply {
+        operator: Box::new(spanned_expr(Expr::Variable(name.to_string()), span, origin)),
+        operands: vec![classify_expr_in(datum, scope)?],
+    })
+}
+
 fn classify_list(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     items: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     let Some((head, rest)) = items.split_first() else {
         return Err(SurfaceError::EmptyApplication { span });
     };
 
     let head_name = identifier_name(head);
+    if head_name
+        .as_deref()
+        .is_some_and(|name| scope.is_bound(name))
+    {
+        return parse_apply(origin, head, rest, scope);
+    }
+
     match head_name.as_deref() {
         Some("quote") => parse_quote(span, rest),
         Some("quasiquote") => parse_quasiquote(span, rest),
@@ -1676,24 +1751,31 @@ fn classify_list(
             form: "define-syntax",
             span,
         }),
-        Some("lambda") => parse_lambda(span, origin, rest),
-        Some("if") => parse_if(rest),
-        Some("begin") => parse_begin(span, rest),
-        Some("set!") => parse_set(rest),
-        Some("delay") => parse_delay(span, rest),
-        Some("let") => parse_let(span, origin, rest),
-        Some("let*") => parse_let_star(span, origin, rest),
-        Some("letrec") => parse_letrec(span, origin, rest),
-        Some("and") => parse_and(span, origin, rest),
-        Some("or") => parse_or(span, origin, rest),
-        Some("cond") => parse_cond(span, origin, rest),
-        Some("case") => parse_case(span, origin, rest),
-        Some("do") => parse_do(span, origin, rest),
-        _ => parse_apply(origin, head, rest),
+        Some("lambda") => parse_lambda(span, origin, rest, scope),
+        Some("if") => parse_if(rest, scope),
+        Some("begin") => parse_begin(span, rest, scope),
+        Some("set!") => parse_set(rest, scope),
+        Some("delay") => parse_delay(span, rest, scope),
+        Some("let") => parse_let(span, origin, rest, scope),
+        Some("let*") => parse_let_star(span, origin, rest, scope),
+        Some("letrec") => parse_letrec(span, origin, rest, scope),
+        Some("and") => parse_and(span, origin, rest, scope),
+        Some("or") => parse_or(span, origin, rest, scope),
+        Some("cond") => parse_cond(span, origin, rest, scope),
+        Some("case") => parse_case(span, origin, rest, scope),
+        Some("do") => parse_do(span, origin, rest, scope),
+        _ => parse_apply(origin, head, rest, scope),
     }
 }
 
 fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, SurfaceError> {
+    parse_define_in(datum, &LexicalScope::default())
+}
+
+fn parse_define_in(
+    datum: &Spanned<Datum>,
+    scope: &LexicalScope,
+) -> Result<Option<DefineBinding>, SurfaceError> {
     let Datum::List(items) = &datum.node else {
         return Ok(None);
     };
@@ -1723,7 +1805,7 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
             }
 
             let name = expect_identifier(&rest[0], "define")?;
-            let value = classify_expr(&rest[1])?;
+            let value = classify_expr_in(&rest[1], scope)?;
             Ok(Some((name, value)))
         }
         Datum::List(formals) => {
@@ -1734,7 +1816,8 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
             if let Some(rest_param) = &rest_param {
                 ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
             }
-            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
+            let body_scope = procedure_scope(scope, &name, &params, rest_param.as_ref());
+            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin, &body_scope)?;
             let value = datum.with_node(Expr::Lambda {
                 params,
                 rest: rest_param,
@@ -1751,7 +1834,8 @@ fn parse_define(datum: &Spanned<Datum>) -> Result<Option<DefineBinding>, Surface
             if let Some(rest_param) = &rest_param {
                 ensure_distinct_extra_name(&params, rest_param, "define procedure formals")?;
             }
-            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin)?;
+            let body_scope = procedure_scope(scope, &name, &params, rest_param.as_ref());
+            let body = parse_body(&rest[1..], datum.span.clone(), datum.origin, &body_scope)?;
             let value = datum.with_node(Expr::Lambda {
                 params,
                 rest: rest_param,
@@ -1795,6 +1879,7 @@ fn parse_lambda(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         let span = rest.first().map(|item| item.span.clone()).unwrap_or(0..0);
@@ -1806,7 +1891,8 @@ fn parse_lambda(
     }
 
     let (params, rest_param) = parse_formals(&rest[0])?;
-    let body = parse_body(&rest[1..], span, origin)?;
+    let body_scope = lambda_scope(scope, &params, rest_param.as_ref());
+    let body = parse_body(&rest[1..], span, origin, &body_scope)?;
 
     Ok(Expr::Lambda {
         params,
@@ -1815,7 +1901,7 @@ fn parse_lambda(
     })
 }
 
-fn parse_if(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_if(rest: &[Spanned<Datum>], scope: &LexicalScope) -> Result<Expr, SurfaceError> {
     if !(2..=3).contains(&rest.len()) {
         let span = rest.first().map(|item| item.span.clone()).unwrap_or(0..0);
         return Err(SurfaceError::BadArity {
@@ -1826,13 +1912,21 @@ fn parse_if(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
     }
 
     Ok(Expr::If {
-        condition: Box::new(classify_expr(&rest[0])?),
-        consequent: Box::new(classify_expr(&rest[1])?),
-        alternate: rest.get(2).map(classify_expr).transpose()?.map(Box::new),
+        condition: Box::new(classify_expr_in(&rest[0], scope)?),
+        consequent: Box::new(classify_expr_in(&rest[1], scope)?),
+        alternate: rest
+            .get(2)
+            .map(|datum| classify_expr_in(datum, scope))
+            .transpose()?
+            .map(Box::new),
     })
 }
 
-fn parse_begin(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_begin(
+    span: SourceSpan,
+    rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
+) -> Result<Expr, SurfaceError> {
     if rest.is_empty() {
         return Err(SurfaceError::BadArity {
             form: "begin",
@@ -1843,12 +1937,12 @@ fn parse_begin(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfac
 
     Ok(Expr::Begin(
         rest.iter()
-            .map(classify_expr)
+            .map(|datum| classify_expr_in(datum, scope))
             .collect::<Result<Vec<_>, _>>()?,
     ))
 }
 
-fn parse_set(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_set(rest: &[Spanned<Datum>], scope: &LexicalScope) -> Result<Expr, SurfaceError> {
     if rest.len() != 2 {
         let span = rest.first().map(|item| item.span.clone()).unwrap_or(0..0);
         return Err(SurfaceError::BadArity {
@@ -1860,11 +1954,15 @@ fn parse_set(rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
 
     Ok(Expr::Set {
         name: expect_identifier(&rest[0], "set!")?,
-        value: Box::new(classify_expr(&rest[1])?),
+        value: Box::new(classify_expr_in(&rest[1], scope)?),
     })
 }
 
-fn parse_delay(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, SurfaceError> {
+fn parse_delay(
+    span: SourceSpan,
+    rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
+) -> Result<Expr, SurfaceError> {
     if rest.len() != 1 {
         return Err(SurfaceError::BadArity {
             form: "delay",
@@ -1873,13 +1971,14 @@ fn parse_delay(span: SourceSpan, rest: &[Spanned<Datum>]) -> Result<Expr, Surfac
         });
     }
 
-    Ok(Expr::Delay(Box::new(classify_expr(&rest[0])?)))
+    Ok(Expr::Delay(Box::new(classify_expr_in(&rest[0], scope)?)))
 }
 
 fn parse_let(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -1890,13 +1989,14 @@ fn parse_let(
     }
 
     if identifier_name(&rest[0]).is_some() {
-        return parse_named_let(span, origin, rest);
+        return parse_named_let(span, origin, rest, scope);
     }
 
-    let bindings = parse_bindings(&rest[0], "let bindings")?;
+    let bindings = parse_bindings(&rest[0], "let bindings", scope)?;
     ensure_distinct_bindings(&bindings, "let bindings")?;
     let (params, operands): (Vec<_>, Vec<_>) = bindings.into_iter().unzip();
-    let body = parse_body(&rest[1..], span.clone(), origin)?;
+    let body_scope = scope.with_names(&params);
+    let body = parse_body(&rest[1..], span.clone(), origin, &body_scope)?;
 
     Ok(Expr::Apply {
         operator: Box::new(spanned_expr(
@@ -1916,6 +2016,7 @@ fn parse_named_let(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 3 {
         return Err(SurfaceError::BadArity {
@@ -1926,7 +2027,7 @@ fn parse_named_let(
     }
 
     let name = expect_identifier(&rest[0], "named let")?;
-    let bindings = parse_bindings(&rest[1], "named let bindings")?;
+    let bindings = parse_bindings(&rest[1], "named let bindings", scope)?;
     ensure_distinct_bindings(&bindings, "named let bindings")?;
     let mut params = Vec::new();
     let mut operands = Vec::new();
@@ -1935,7 +2036,8 @@ fn parse_named_let(
         operands.push(operand);
     }
 
-    let lambda_body = parse_body(&rest[2..], span.clone(), origin)?;
+    let body_scope = scope.with_name(&name).with_names(&params);
+    let lambda_body = parse_body(&rest[2..], span.clone(), origin, &body_scope)?;
     let call = spanned_expr(
         Expr::Apply {
             operator: Box::new(variable_expr(&name)),
@@ -1966,6 +2068,7 @@ fn parse_let_star(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -1975,9 +2078,10 @@ fn parse_let_star(
         });
     }
 
-    let bindings = parse_bindings(&rest[0], "let* bindings")?;
+    let bindings = parse_let_star_bindings(&rest[0], "let* bindings", scope)?;
+    let body_scope = scope.with_names(bindings.iter().map(|(name, _)| name));
     let mut current = spanned_expr(
-        body_sequence_expr(&rest[1..], span.clone(), origin)?,
+        body_sequence_expr(&rest[1..], span.clone(), origin, &body_scope)?,
         span.clone(),
         origin,
     );
@@ -2007,6 +2111,7 @@ fn parse_let_star(
 fn parse_bindings(
     bindings: &Spanned<Datum>,
     context: &'static str,
+    scope: &LexicalScope,
 ) -> Result<Vec<Binding>, SurfaceError> {
     let Datum::List(binding_datums) = &bindings.node else {
         return Err(SurfaceError::ExpectedList {
@@ -2034,10 +2139,48 @@ fn parse_bindings(
 
             Ok((
                 expect_identifier(&pair[0], "binding")?,
-                classify_expr(&pair[1])?,
+                classify_expr_in(&pair[1], scope)?,
             ))
         })
         .collect()
+}
+
+fn parse_let_star_bindings(
+    bindings: &Spanned<Datum>,
+    context: &'static str,
+    scope: &LexicalScope,
+) -> Result<Vec<Binding>, SurfaceError> {
+    let Datum::List(binding_datums) = &bindings.node else {
+        return Err(SurfaceError::ExpectedList {
+            context,
+            span: bindings.span.clone(),
+        });
+    };
+
+    let mut scope = scope.clone();
+    let mut parsed = Vec::new();
+    for binding in binding_datums {
+        let Datum::List(pair) = &binding.node else {
+            return Err(SurfaceError::ExpectedList {
+                context: "binding",
+                span: binding.span.clone(),
+            });
+        };
+        if pair.len() != 2 {
+            return Err(SurfaceError::BadArity {
+                form: "binding",
+                expected: "a name and a value",
+                span: binding.span.clone(),
+            });
+        }
+
+        let name = expect_identifier(&pair[0], "binding")?;
+        let value = classify_expr_in(&pair[1], &scope)?;
+        scope = scope.with_name(&name);
+        parsed.push((name, value));
+    }
+
+    Ok(parsed)
 }
 
 fn ensure_distinct_bindings(
@@ -2055,6 +2198,7 @@ fn parse_letrec(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -2064,12 +2208,14 @@ fn parse_letrec(
         });
     }
 
-    let bindings = parse_bindings(&rest[0], "letrec bindings")?;
+    let binding_names = binding_names(&rest[0]);
+    let binding_scope = scope.with_strings(binding_names.iter());
+    let bindings = parse_bindings(&rest[0], "letrec bindings", &binding_scope)?;
     ensure_distinct_bindings(&bindings, "letrec bindings")?;
 
     Ok(Expr::LetRec {
         bindings,
-        body: parse_body(&rest[1..], span.clone(), origin)?,
+        body: parse_body(&rest[1..], span.clone(), origin, &binding_scope)?,
     })
 }
 
@@ -2077,14 +2223,15 @@ fn parse_and(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     match rest {
         [] => Ok(boolean_literal(true)),
-        [single] => Ok(classify_expr(single)?.node),
+        [single] => Ok(classify_expr_in(single, scope)?.node),
         [first, remaining @ ..] => {
-            let condition = classify_expr(first)?;
+            let condition = classify_expr_in(first, scope)?;
             let consequent = spanned_expr(
-                parse_and(span.clone(), origin, remaining)?,
+                parse_and(span.clone(), origin, remaining, scope)?,
                 span.clone(),
                 origin,
             );
@@ -2101,15 +2248,16 @@ fn parse_or(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     match rest {
         [] => Ok(boolean_literal(false)),
-        [single] => Ok(classify_expr(single)?.node),
+        [single] => Ok(classify_expr_in(single, scope)?.node),
         [first, remaining @ ..] => {
             let temp = generated_binding("or_value", &span, first.span.clone(), origin);
             let condition = variable_expr(&temp);
             let alternate = spanned_expr(
-                parse_or(span.clone(), origin, remaining)?,
+                parse_or(span.clone(), origin, remaining, scope)?,
                 span.clone(),
                 origin,
             );
@@ -2132,7 +2280,7 @@ fn parse_or(
                     span.clone(),
                     origin,
                 )),
-                operands: vec![classify_expr(first)?],
+                operands: vec![classify_expr_in(first, scope)?],
             })
         }
     }
@@ -2142,6 +2290,7 @@ fn parse_cond(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     clauses: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if clauses.is_empty() {
         return Err(SurfaceError::BadArity {
@@ -2185,14 +2334,14 @@ fn parse_cond(
             }
 
             result = spanned_expr(
-                body_expr(body, clause.span.clone(), origin)?,
+                body_expr(body, clause.span.clone(), origin, scope)?,
                 clause.span.clone(),
                 origin,
             );
             continue;
         }
 
-        let condition = classify_expr(test)?;
+        let condition = classify_expr_in(test, scope)?;
         let arrow_recipient = body
             .first()
             .filter(|datum| identifier_name(datum).as_deref() == Some("=>"));
@@ -2209,7 +2358,7 @@ fn parse_cond(
             let consequent = match arrow_recipient {
                 Some(_) => spanned_expr(
                     Expr::Apply {
-                        operator: Box::new(classify_expr(&body[1])?),
+                        operator: Box::new(classify_expr_in(&body[1], scope)?),
                         operands: vec![condition_value.clone()],
                     },
                     clause.span.clone(),
@@ -2247,7 +2396,7 @@ fn parse_cond(
         }
 
         let consequent = spanned_expr(
-            body_expr(body, clause.span.clone(), origin)?,
+            body_expr(body, clause.span.clone(), origin, scope)?,
             clause.span.clone(),
             origin,
         );
@@ -2270,6 +2419,7 @@ fn parse_case(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -2279,7 +2429,7 @@ fn parse_case(
         });
     }
 
-    let key = classify_expr(&rest[0])?;
+    let key = classify_expr_in(&rest[0], scope)?;
     let temp = generated_binding("case_key", &span, rest[0].span.clone(), origin);
     let mut result = spanned_expr(boolean_literal(false), span.clone(), origin);
 
@@ -2315,7 +2465,7 @@ fn parse_case(
             }
 
             result = spanned_expr(
-                body_expr(body, clause.span.clone(), origin)?,
+                body_expr(body, clause.span.clone(), origin, scope)?,
                 clause.span.clone(),
                 origin,
             );
@@ -2331,7 +2481,7 @@ fn parse_case(
 
         let condition = case_datum_tests(&temp, datums, clause.span.clone(), origin);
         let consequent = spanned_expr(
-            body_expr(body, clause.span.clone(), origin)?,
+            body_expr(body, clause.span.clone(), origin, scope)?,
             clause.span.clone(),
             origin,
         );
@@ -2406,6 +2556,7 @@ fn parse_do(
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     if rest.len() < 2 {
         return Err(SurfaceError::BadArity {
@@ -2415,7 +2566,9 @@ fn parse_do(
         });
     }
 
-    let bindings = parse_do_bindings(&rest[0])?;
+    let binding_names = binding_names(&rest[0]);
+    let loop_scope = scope.with_strings(binding_names.iter());
+    let bindings = parse_do_bindings(&rest[0], scope, &loop_scope)?;
     ensure_distinct_do_bindings(&bindings, "do bindings")?;
     let Datum::List(test_clause) = &rest[1].node else {
         return Err(SurfaceError::ExpectedList {
@@ -2459,14 +2612,19 @@ fn parse_do(
         origin,
     );
     let alternate = spanned_expr(
-        sequence_with_tail(&rest[2..], recursive_call)?,
+        sequence_with_tail(&rest[2..], recursive_call, &loop_scope)?,
         span.clone(),
         origin,
     );
     let loop_body = spanned_expr(
         Expr::If {
-            condition: Box::new(classify_expr(test)?),
-            consequent: Box::new(sequence_expr(result_datums, rest[1].span.clone(), origin)?),
+            condition: Box::new(classify_expr_in(test, &loop_scope)?),
+            consequent: Box::new(sequence_expr(
+                result_datums,
+                rest[1].span.clone(),
+                origin,
+                &loop_scope,
+            )?),
             alternate: Some(Box::new(alternate)),
         },
         span.clone(),
@@ -2505,7 +2663,11 @@ struct DoBinding {
     step: Option<Spanned<Expr>>,
 }
 
-fn parse_do_bindings(bindings: &Spanned<Datum>) -> Result<Vec<DoBinding>, SurfaceError> {
+fn parse_do_bindings(
+    bindings: &Spanned<Datum>,
+    init_scope: &LexicalScope,
+    step_scope: &LexicalScope,
+) -> Result<Vec<DoBinding>, SurfaceError> {
     let Datum::List(binding_datums) = &bindings.node else {
         return Err(SurfaceError::ExpectedList {
             context: "do bindings",
@@ -2532,8 +2694,11 @@ fn parse_do_bindings(bindings: &Spanned<Datum>) -> Result<Vec<DoBinding>, Surfac
 
             Ok(DoBinding {
                 name: expect_identifier(&spec[0], "do binding")?,
-                init: classify_expr(&spec[1])?,
-                step: spec.get(2).map(classify_expr).transpose()?,
+                init: classify_expr_in(&spec[1], init_scope)?,
+                step: spec
+                    .get(2)
+                    .map(|datum| classify_expr_in(datum, step_scope))
+                    .transpose()?,
             })
         })
         .collect()
@@ -2554,12 +2719,13 @@ fn parse_body(
     body: &[Spanned<Datum>],
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
+    scope: &LexicalScope,
 ) -> Result<Vec<Spanned<Expr>>, SurfaceError> {
     let mut bindings = Vec::new();
     let mut index = 0;
 
     while index < body.len() {
-        let Some(binding) = parse_define(&body[index])? else {
+        let Some(binding) = parse_define_in(&body[index], scope)? else {
             break;
         };
         bindings.push(binding);
@@ -2567,7 +2733,10 @@ fn parse_body(
     }
 
     if bindings.is_empty() {
-        return body.iter().map(classify_expr).collect();
+        return body
+            .iter()
+            .map(|datum| classify_expr_in(datum, scope))
+            .collect();
     }
     ensure_distinct_bindings(&bindings, "internal definitions")?;
     if index == body.len() {
@@ -2580,7 +2749,7 @@ fn parse_body(
 
     let body = body[index..]
         .iter()
-        .map(classify_expr)
+        .map(|datum| classify_expr_in(datum, scope))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(vec![spanned_expr(
         Expr::LetRec { bindings, body },
@@ -2593,8 +2762,9 @@ fn body_sequence_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
-    let exprs = parse_body(body, span.clone(), origin)?;
+    let exprs = parse_body(body, span.clone(), origin, scope)?;
     Ok(match exprs.as_slice() {
         [] => Expr::Begin(Vec::new()),
         [single] => single.node.clone(),
@@ -2606,13 +2776,14 @@ fn body_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     match body {
         [] => Ok(Expr::Begin(Vec::new())),
-        [single] => Ok(classify_expr(single)?.node),
+        [single] => Ok(classify_expr_in(single, scope)?.node),
         many => Ok(Expr::Begin(
             many.iter()
-                .map(classify_expr)
+                .map(|datum| classify_expr_in(datum, scope))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
     }
@@ -2630,13 +2801,14 @@ fn sequence_expr(
     body: &[Spanned<Datum>],
     span: SourceSpan,
     origin: Option<crate::syntax::NodeId>,
+    scope: &LexicalScope,
 ) -> Result<Spanned<Expr>, SurfaceError> {
     let node = match body {
         [] => Expr::Begin(Vec::new()),
-        [single] => classify_expr(single)?.node,
+        [single] => classify_expr_in(single, scope)?.node,
         many => Expr::Begin(
             many.iter()
-                .map(classify_expr)
+                .map(|datum| classify_expr_in(datum, scope))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
     };
@@ -2644,14 +2816,18 @@ fn sequence_expr(
     Ok(spanned_expr(node, span, origin))
 }
 
-fn sequence_with_tail(body: &[Spanned<Datum>], tail: Spanned<Expr>) -> Result<Expr, SurfaceError> {
+fn sequence_with_tail(
+    body: &[Spanned<Datum>],
+    tail: Spanned<Expr>,
+    scope: &LexicalScope,
+) -> Result<Expr, SurfaceError> {
     if body.is_empty() {
         return Ok(tail.node);
     }
 
     let mut exprs = body
         .iter()
-        .map(classify_expr)
+        .map(|datum| classify_expr_in(datum, scope))
         .collect::<Result<Vec<_>, _>>()?;
     exprs.push(tail);
     Ok(Expr::Begin(exprs))
@@ -2678,6 +2854,24 @@ fn variable_expr(name: &Spanned<String>) -> Spanned<Expr> {
     name.with_node(Expr::Variable(name.node.clone()))
 }
 
+fn lambda_scope(
+    scope: &LexicalScope,
+    params: &[Spanned<String>],
+    rest: Option<&Spanned<String>>,
+) -> LexicalScope {
+    let scope = scope.with_names(params);
+    rest.map_or(scope.clone(), |rest| scope.with_name(rest))
+}
+
+fn procedure_scope(
+    scope: &LexicalScope,
+    name: &Spanned<String>,
+    params: &[Spanned<String>],
+    rest: Option<&Spanned<String>>,
+) -> LexicalScope {
+    lambda_scope(&scope.with_name(name), params, rest)
+}
+
 fn spanned_expr(
     node: Expr,
     span: SourceSpan,
@@ -2694,12 +2888,13 @@ fn parse_apply(
     _origin: Option<crate::syntax::NodeId>,
     head: &Spanned<Datum>,
     rest: &[Spanned<Datum>],
+    scope: &LexicalScope,
 ) -> Result<Expr, SurfaceError> {
     Ok(Expr::Apply {
-        operator: Box::new(classify_expr(head)?),
+        operator: Box::new(classify_expr_in(head, scope)?),
         operands: rest
             .iter()
-            .map(classify_expr)
+            .map(|datum| classify_expr_in(datum, scope))
             .collect::<Result<Vec<_>, _>>()?,
     })
 }
