@@ -267,6 +267,9 @@ and output procedures. =any?= means any Scheme value is valid.
   preserve exact complex values too.
 - Respect the explicit radix argument for unprefixed complex strings in
   =string->number=, including exactness prefixes on those strings.
+- Emit exact rational and exact complex values in the requested
+  non-decimal radix for =number->string=, matching the reader support
+  already present in =string->number=.
 - Add non-transcendental complex helpers =make-rectangular=,
   =real-part=, and =imag-part= using the current decimal complex
   representation.

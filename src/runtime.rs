@@ -2448,6 +2448,35 @@ fn exact_rational_to_string(number: &BigRational) -> String {
     }
 }
 
+fn exact_rational_to_radix_string(number: &BigRational, radix: u32) -> String {
+    if number.denom() == &BigInt::one() {
+        number.numer().to_str_radix(radix)
+    } else {
+        format!(
+            "{}/{}",
+            number.numer().to_str_radix(radix),
+            number.denom().to_str_radix(radix)
+        )
+    }
+}
+
+fn exact_complex_to_radix_string(number: &Complex<BigRational>, radix: u32) -> String {
+    let real = exact_rational_to_radix_string(&number.re, radix);
+    if number.im.is_negative() {
+        format!(
+            "{}-{}i",
+            real,
+            exact_rational_to_radix_string(&number.im.abs(), radix)
+        )
+    } else {
+        format!(
+            "{}+{}i",
+            real,
+            exact_rational_to_radix_string(&number.im, radix)
+        )
+    }
+}
+
 fn exact_complex_to_decimal(number: &Complex<BigRational>) -> Complex<BigDecimal> {
     Complex::new(
         rational_to_decimal(&number.re),
@@ -3578,8 +3607,19 @@ fn number_to_string(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalErr
         };
     }
 
-    let integer = exact_integer(&number, span)?;
-    Ok(string_value(integer.to_str_radix(radix)))
+    match number {
+        Value::Integer(n) => Ok(string_value(n.to_str_radix(radix))),
+        Value::Rational(n) => Ok(string_value(exact_rational_to_radix_string(&n, radix))),
+        Value::ExactComplex(n) => Ok(string_value(exact_complex_to_radix_string(&n, radix))),
+        Value::Decimal(_) | Value::Complex(_) => Err(EvalError::TypeError {
+            expected: "exact number?",
+            span,
+        }),
+        _ => Err(EvalError::TypeError {
+            expected: "number?",
+            span,
+        }),
+    }
 }
 
 fn string_to_number_primitive(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
@@ -5799,6 +5839,16 @@ mod tests {
         assert_eq!(eval_one("(number->string 1/2)"), "\"1/2\"");
         assert_eq!(eval_one("(number->string 16 16)"), "\"10\"");
         assert_eq!(eval_one("(number->string 10 2)"), "\"1010\"");
+        assert_eq!(eval_one("(number->string 1/2 2)"), "\"1/10\"");
+        assert_eq!(eval_one("(number->string #x1f/10 16)"), "\"1f/10\"");
+        assert_eq!(
+            eval_one("(number->string #x1f/10-a/7i 16)"),
+            "\"1f/10-a/7i\""
+        );
+        assert_eq!(
+            eval_one("(= (string->number (number->string #x1f/10-a/7i 16) 16) #x1f/10-a/7i)"),
+            "#t"
+        );
         assert_eq!(eval_one("(string->number \"1+2i\")"), "1+2i");
         assert_eq!(eval_one("(exact? (string->number \"1+2i\"))"), "#t");
         assert_eq!(eval_one("(string->number \"#e1.5+2.25i\")"), "3/2+9/4i");
