@@ -352,7 +352,7 @@ fn paint_procedure_block(value: &str, procedure: &ProcedureType, names: &[String
             paint_type(slot.ty()),
         ));
     }
-    out.push_str(&format!("{} {}", arrow("->"), paint_type(result)));
+    out.push_str(&paint_procedure_result(procedure, result));
     out
 }
 
@@ -370,8 +370,32 @@ fn format_procedure_block(value: &str, procedure: &ProcedureType, names: &[Strin
             slot.ty(),
         ));
     }
-    out.push_str(&format!("-> {result}"));
+    out.push_str(&format_procedure_result(procedure, result));
     out
+}
+
+fn paint_procedure_result(procedure: &ProcedureType, result: &Type) -> String {
+    match procedure {
+        ProcedureType::Predicate { positive, .. } => {
+            format!(
+                "{} {} {} {}",
+                arrow("->"),
+                paint_type(result),
+                marker(":"),
+                paint_type(positive)
+            )
+        }
+        _ => format!("{} {}", arrow("->"), paint_type(result)),
+    }
+}
+
+fn format_procedure_result(procedure: &ProcedureType, result: &Type) -> String {
+    match procedure {
+        ProcedureType::Predicate { positive, .. } => {
+            format!("-> {result} : {positive}")
+        }
+        _ => format!("-> {result}"),
+    }
 }
 
 fn procedure_labels(slots: &[Slot<'_>], names: &[String]) -> Vec<(String, &'static str)> {
@@ -568,6 +592,20 @@ mod tests {
         assert_eq!(
             format_query("#<procedure>", &procedure, &names),
             "#<procedure> :\n    n : number?\n-> number?"
+        );
+    }
+
+    #[test]
+    fn formats_predicate_procedure_queries_with_latent_results() {
+        let procedure = Type::predicate_procedure(Type::Any, Type::String);
+
+        assert_eq!(
+            strip(&paint_query("#<procedure>", &procedure, &[])),
+            "#<procedure> :\n    arg 1 : any?\n-> boolean? : string?"
+        );
+        assert_eq!(
+            format_query("#<procedure>", &procedure, &[]),
+            "#<procedure> :\n    arg 1 : any?\n-> boolean? : string?"
         );
     }
 
