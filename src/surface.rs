@@ -2466,49 +2466,49 @@ fn parse_do(
         })
         .collect::<Vec<_>>();
 
-    let recursive_call = Spanned {
-        node: Expr::Apply {
+    let recursive_call = spanned_expr(
+        Expr::Apply {
             operator: Box::new(variable_expr(&loop_name)),
             operands: steps,
         },
-        span: span.clone(),
+        span.clone(),
         origin,
-    };
-    let alternate = Spanned {
-        node: sequence_with_tail(&rest[2..], recursive_call)?,
-        span: span.clone(),
+    );
+    let alternate = spanned_expr(
+        sequence_with_tail(&rest[2..], recursive_call)?,
+        span.clone(),
         origin,
-    };
-    let loop_body = Spanned {
-        node: Expr::If {
+    );
+    let loop_body = spanned_expr(
+        Expr::If {
             condition: Box::new(classify_expr(test)?),
             consequent: Box::new(sequence_expr(result_datums, rest[1].span.clone(), origin)?),
             alternate: Some(Box::new(alternate)),
         },
-        span: span.clone(),
+        span.clone(),
         origin,
-    };
-    let initial_call = Spanned {
-        node: Expr::Apply {
+    );
+    let initial_call = spanned_expr(
+        Expr::Apply {
             operator: Box::new(variable_expr(&loop_name)),
             operands: inits,
         },
-        span: span.clone(),
+        span.clone(),
         origin,
-    };
+    );
 
     Ok(Expr::LetRec {
         bindings: vec![(
             loop_name,
-            Spanned {
-                node: Expr::Lambda {
+            spanned_expr(
+                Expr::Lambda {
                     params,
                     rest: None,
                     body: vec![loop_body],
                 },
-                span: span.clone(),
+                span.clone(),
                 origin,
-            },
+            ),
         )],
         body: vec![initial_call],
     })
