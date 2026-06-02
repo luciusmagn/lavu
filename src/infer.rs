@@ -630,8 +630,10 @@ impl Inferencer {
         let ([param], None, [expr]) = (params, rest, body) else {
             return None;
         };
-        let (name, positive) = self.direct_predicate_refinement(expr, env)?;
-        (name == param.node).then_some(positive)
+        self.truthy_predicate_refinements(expr, env)
+            .into_iter()
+            .filter_map(|(name, positive)| (name == param.node).then_some(positive))
+            .reduce(intersect_types)
     }
 
     fn infer_lambda_with_argument_types(
@@ -3573,6 +3575,18 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (number? (car x)))"),
             "(-> (pair? any? any?) boolean? : (pair? number? any?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (string? x) #t #f))"),
+            "(-> any? boolean? : string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (and (string? x) #t))"),
+            "(-> any? boolean? : string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (and (pair? x) (number? (car x))))"),
+            "(-> any? boolean? : (pair? number? any?))"
         );
         assert_eq!(
             infer_all(

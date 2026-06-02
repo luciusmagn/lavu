@@ -487,6 +487,8 @@ and output procedures. =any?= means any Scheme value is valid.
 - Infer simple unary predicate lambdas latently when their body is a
   direct predicate test of their parameter, so user-defined predicates
   like =(define stringy? (lambda (x) (string? x)))= refine callers too.
+- Extend unary predicate-lambda inference through boolean wrappers such
+  as =(if (string? x) #t #f)= and derived =and= predicate chains.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
