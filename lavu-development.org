@@ -940,6 +940,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Expose membership and association metadata in terms of list element
   flow, so querying the primitive values preserves successful result
   shapes.
+- Treat successful association results as pair entries and constrain
+  unknown alists to =listof= pair shapes, so =assoc= results can be used
+  with =car= and =cdr= after a false-result guard.
 - Infer membership results as false-or-tail and association results as
   false-or-entry, preserving visible =listof= element shapes.
 - Make membership scans reject circular mutable-pair chains as non-list

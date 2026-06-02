@@ -46,6 +46,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
     let continuation = Type::procedure(vec![a.clone()], Type::Never);
     let continuation_receiver = Type::procedure(vec![continuation], b.clone());
     let continuation_result = Type::union(vec![a.clone(), b.clone()]);
+    let association_entry = Type::Pair(Box::new(Type::Any), Box::new(a.clone()));
 
     let mut primitives = vec![
         Primitive::predicate("boolean?", Type::Boolean),
@@ -644,22 +645,22 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::new(
             "assq",
             Type::procedure(
-                vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, a.clone()]),
+                vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
+                Type::union(vec![Type::Boolean, association_entry.clone()]),
             ),
         ),
         Primitive::new(
             "assv",
             Type::procedure(
-                vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, a.clone()]),
+                vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
+                Type::union(vec![Type::Boolean, association_entry.clone()]),
             ),
         ),
         Primitive::new(
             "assoc",
             Type::procedure(
-                vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, a.clone()]),
+                vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
+                Type::union(vec![Type::Boolean, association_entry.clone()]),
             ),
         ),
         Primitive::new("map", map_signature()),
@@ -973,7 +974,7 @@ mod tests {
         );
         assert_eq!(
             primitive("assoc").unwrap().signature.to_string(),
-            "(-> any? (listof a) (U boolean? a))"
+            "(-> any? (listof (pair? any? a)) (U boolean? (pair? any? a)))"
         );
     }
 

@@ -2352,32 +2352,69 @@ impl Inferencer {
         result: MembershipResult,
     ) -> Result<Type, TypeError> {
         match self.resolve(actual) {
-            Type::ListOf(element) => Ok(match result {
-                MembershipResult::Tail => Type::ListOf(element),
-                MembershipResult::Entry => self.resolve(*element),
-            }),
+            Type::ListOf(element) => match result {
+                MembershipResult::Tail => Ok(Type::ListOf(element)),
+                MembershipResult::Entry => {
+                    self.association_entry_type(*element, operand.span.clone())
+                }
+            },
             Type::Null => Ok(Type::Never),
             Type::List => Ok(match result {
                 MembershipResult::Tail => Type::List,
-                MembershipResult::Entry => Type::Any,
+                MembershipResult::Entry => Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
             }),
             Type::Var(name) => {
                 let element = self.fresh_type_var();
-                self.substitutions
-                    .insert(name, Type::ListOf(Box::new(element.clone())));
                 Ok(match result {
-                    MembershipResult::Tail => Type::ListOf(Box::new(element)),
-                    MembershipResult::Entry => element,
+                    MembershipResult::Tail => {
+                        self.substitutions
+                            .insert(name, Type::ListOf(Box::new(element.clone())));
+                        Type::ListOf(Box::new(element))
+                    }
+                    MembershipResult::Entry => {
+                        let entry = Type::Pair(Box::new(Type::Any), Box::new(element));
+                        self.substitutions
+                            .insert(name, Type::ListOf(Box::new(entry.clone())));
+                        entry
+                    }
                 })
             }
-            Type::Any | Type::Unknown => Ok(Type::Any),
+            Type::Any | Type::Unknown => Ok(match result {
+                MembershipResult::Tail => Type::Any,
+                MembershipResult::Entry => Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+            }),
             actual => {
                 self.unify(actual, Type::List, operand.span.clone())?;
                 Ok(match result {
                     MembershipResult::Tail => Type::List,
-                    MembershipResult::Entry => Type::Any,
+                    MembershipResult::Entry => Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
                 })
             }
+        }
+    }
+
+    fn association_entry_type(
+        &mut self,
+        element: Type,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        match self.resolve(element) {
+            Type::Var(name) => {
+                let entry = Type::Pair(Box::new(Type::Any), Box::new(self.fresh_type_var()));
+                self.bind_var(name, entry.clone())?;
+                Ok(entry)
+            }
+            Type::Pair(car, cdr) => Ok(Type::Pair(car, cdr)),
+            Type::ListOf(element) => {
+                Ok(Type::Pair(element.clone(), Box::new(Type::ListOf(element))))
+            }
+            Type::List => Ok(Type::Pair(Box::new(Type::Any), Box::new(Type::List))),
+            Type::Any | Type::Unknown => Ok(Type::Pair(Box::new(Type::Any), Box::new(Type::Any))),
+            actual => self.unify(
+                actual,
+                Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
+                span,
+            ),
         }
     }
 
@@ -4687,7 +4724,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x xs) (cond ((assoc x xs) => cdr) (else #f)))"),
-            "(-> x (listof (pair? t1 t2)) (U boolean? t2))"
+            "(-> x (listof (pair? any? t0)) (U boolean? t0))"
         );
         assert_eq!(
             infer_one("(lambda (x) (cond ((member x (quote ())) => car) (else 0)))"),
@@ -5044,18 +5081,33 @@ mod tests {
             infer_one("member"),
             "(-> any? (listof t0) (U boolean? (listof t0)))"
         );
-        assert_eq!(infer_one("assoc"), "(-> any? (listof t0) (U boolean? t0))");
+        assert_eq!(
+            infer_one("assoc"),
+            "(-> any? (listof (pair? any? t0)) (U boolean? (pair? any? t0)))"
+        );
         assert_eq!(
             infer_one("(member 'b '(a b c))"),
             "(U boolean? (listof symbol?))"
         );
         assert_eq!(
             infer_one("(assoc 'b '((a 1) (b 2)))"),
-            "(U boolean? (listof (U number? symbol?)))"
+            "(U boolean? (pair? (U number? symbol?) (listof (U number? symbol?))))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (xs)
+                   (let ((entry (assoc (quote a) xs)))
+                     (if (boolean? entry) entry (car entry))))"
+            ),
+            "(-> (listof (pair? any? t0)) any?)"
         );
         assert_eq!(
             infer_one("(lambda (xs) (member 'b xs))"),
             "(-> (listof t0) (U boolean? (listof t0)))"
+        );
+        assert_eq!(
+            infer_one("(lambda (xs) (assoc 'b xs))"),
+            "(-> (listof (pair? any? t0)) (U boolean? (pair? any? t0)))"
         );
     }
 
