@@ -433,6 +433,10 @@ and output procedures. =any?= means any Scheme value is valid.
   contradictory paths such as =number?= followed by =string?=, and
   higher-order latent predicate propositions for functions like
   =safe-apply=.
+- Add structural predicate refinements for direct =car= and =cdr=
+  accesses, so guards such as =(number? (car x))= refine =x= to a pair
+  whose corresponding field has the predicate's positive type within
+  the guarded branch.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

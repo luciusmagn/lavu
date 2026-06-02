@@ -2896,20 +2896,48 @@ fn direct_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Opti
     let Expr::Variable(predicate_name) = &operator.node else {
         return None;
     };
-    let Expr::Variable(variable_name) = &operands[0].node else {
-        return None;
-    };
 
     if !env.is_primitive(predicate_name) {
         return None;
     }
 
-    primitive(predicate_name).and_then(|primitive| {
-        primitive
-            .predicate
-            .filter(|predicate| predicate.argument == 0)
-            .map(|predicate| (variable_name.clone(), predicate.positive))
-    })
+    let positive = primitive(predicate_name)?
+        .predicate
+        .filter(|predicate| predicate.argument == 0)?
+        .positive;
+
+    predicate_operand_refinement(&operands[0], positive, env)
+}
+
+fn predicate_operand_refinement(
+    operand: &Spanned<Expr>,
+    positive: Type,
+    env: &TypeEnv,
+) -> Option<(String, Type)> {
+    match &operand.node {
+        Expr::Variable(variable_name) => Some((variable_name.clone(), positive)),
+        Expr::Apply { operator, operands } => {
+            let [target] = operands.as_slice() else {
+                return None;
+            };
+            let Expr::Variable(variable_name) = &target.node else {
+                return None;
+            };
+
+            match primitive_operator_name(operator, env) {
+                Some("car") => Some((
+                    variable_name.clone(),
+                    Type::Pair(Box::new(positive), Box::new(Type::Any)),
+                )),
+                Some("cdr") => Some((
+                    variable_name.clone(),
+                    Type::Pair(Box::new(Type::Any), Box::new(positive)),
+                )),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn desugared_or_operands<'a>(
@@ -3247,6 +3275,18 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
             "(-> (U number? string?) (U boolean? number?))"
+        );
+    }
+
+    #[test]
+    fn propagates_pair_accessor_predicate_refinements() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (and (pair? x) (number? (car x))) (car x) 0))"),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (and (pair? x) (number? (cdr x))) (cdr x) 0))"),
+            "(-> x number?)"
         );
     }
 
