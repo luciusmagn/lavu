@@ -490,6 +490,9 @@ and output procedures. =any?= means any Scheme value is valid.
   =char-alphabetic?= as =(-> char? boolean? : char?)=.
 - Keep latent predicate refinements flowing through simple =apply= calls
   with visible final argument lists, including mismatch diagnostics.
+- Recognize simple visible =apply= calls as predicate tests too, so
+  =(apply pred (list x))= and =(apply pred x '())= refine like
+  =(pred x)= and still display the condition result as =boolean?=.
 - Infer simple unary predicate lambdas latently when their body is a
   direct predicate test of their parameter, so user-defined predicates
   like =(define stringy? (lambda (x) (string? x)))= refine callers too.

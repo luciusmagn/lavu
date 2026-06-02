@@ -916,6 +916,9 @@ impl Inferencer {
         let Expr::Apply { operator, operands } = &condition.node else {
             return None;
         };
+        if primitive_operator_name(operator, env) == Some("apply") {
+            return self.apply_predicate_refinement(operands, env);
+        }
         if operands.len() != 1 {
             return None;
         }
@@ -924,6 +927,27 @@ impl Inferencer {
             return None;
         };
 
+        self.predicate_call_refinement(predicate_name, &operands[0], env)
+    }
+
+    fn apply_predicate_refinement(
+        &mut self,
+        operands: &[Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Option<(String, Type)> {
+        let Expr::Variable(predicate_name) = &operands.first()?.node else {
+            return None;
+        };
+        let argument = visible_apply_predicate_argument(operands, env)?;
+        self.predicate_call_refinement(predicate_name, argument, env)
+    }
+
+    fn predicate_call_refinement(
+        &mut self,
+        predicate_name: &str,
+        operand: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Option<(String, Type)> {
         if env.is_primitive(predicate_name) {
             let positive = primitive(predicate_name)?
                 .predicate
@@ -931,12 +955,12 @@ impl Inferencer {
                 .positive;
             let positive = self.instantiate_scheme(&positive);
 
-            return predicate_operand_refinement(&operands[0], positive, env);
+            return predicate_operand_refinement(operand, positive, env);
         }
 
         let positive = self.latent_predicate_positive(predicate_name, env)?;
-        self.widen_latent_predicate_variable_operand(&operands[0], env);
-        predicate_operand_refinement(&operands[0], positive, env)
+        self.widen_latent_predicate_variable_operand(operand, env);
+        predicate_operand_refinement(operand, positive, env)
     }
 
     fn latent_predicate_positive(&mut self, name: &str, env: &TypeEnv) -> Option<Type> {
@@ -2165,7 +2189,10 @@ impl Inferencer {
                 Ok(self.resolve(result))
             }
             Type::Procedure(
-                procedure @ (ProcedureType::Fixed { .. } | ProcedureType::Optional { .. }),
+                procedure
+                @ (ProcedureType::Fixed { .. }
+                | ProcedureType::Optional { .. }
+                | ProcedureType::Predicate { .. }),
             ) => {
                 let Some(final_arguments) = visible_final_arguments else {
                     return Ok(Type::Any);
@@ -3364,6 +3391,41 @@ fn is_true_literal(expr: &Spanned<Expr>) -> bool {
     matches!(expr.node, Expr::Literal(Atom::Boolean(true)))
 }
 
+fn visible_apply_predicate_argument<'a>(
+    operands: &'a [Spanned<Expr>],
+    env: &TypeEnv,
+) -> Option<&'a Spanned<Expr>> {
+    if operands.len() < 2 {
+        return None;
+    }
+
+    let final_operand = operands.last()?;
+    let mut arguments = operands[1..operands.len() - 1].iter().collect::<Vec<_>>();
+    arguments.extend(visible_apply_final_expr_items(final_operand, env)?);
+
+    match arguments.as_slice() {
+        [argument] => Some(*argument),
+        _ => None,
+    }
+}
+
+fn visible_apply_final_expr_items<'a>(
+    expr: &'a Spanned<Expr>,
+    env: &TypeEnv,
+) -> Option<Vec<&'a Spanned<Expr>>> {
+    match &expr.node {
+        Expr::Quote(datum) if matches!(&datum.node, Datum::List(items) if items.is_empty()) => {
+            Some(Vec::new())
+        }
+        Expr::Apply { operator, operands }
+            if constructor_kind(operator, env) == Some(ConstructorKind::List) =>
+        {
+            Some(operands.iter().collect())
+        }
+        _ => None,
+    }
+}
+
 fn predicate_operand_refinement(
     operand: &Spanned<Expr>,
     positive: Type,
@@ -3931,6 +3993,10 @@ mod tests {
             "(-> (-> any? boolean? : t0) any? boolean?)"
         );
         assert_eq!(
+            infer_one("(lambda (pred x) (or (apply pred (list x)) #f))"),
+            "(-> (-> any? boolean? : t0) any? boolean?)"
+        );
+        assert_eq!(
             infer_one("(lambda (pred proc x) (or (pred x) (proc x)))"),
             "(-> (-> any? boolean? : t0) (-> any? t1) any? (U boolean? t1))"
         );
@@ -3987,6 +4053,18 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (pred x) (proc x) #f))"),
             "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (if (apply pred (list x)) (proc x) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (if (apply pred x (quote ())) (proc x) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (apply string? (list x)) (string-length x) 0))"),
+            "(-> x number?)"
         );
         assert_eq!(
             infer_one("(lambda (pred x) (if (pred x) x #f))"),
@@ -4090,6 +4168,14 @@ mod tests {
         assert_eq!(
             infer_error(
                 "((lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))
+                  string? + \"hi\")"
+            )
+            .to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
+        assert_eq!(
+            infer_error(
+                "((lambda (pred proc x) (if (apply pred (list x)) (proc x) #f))
                   string? + \"hi\")"
             )
             .to_string(),
