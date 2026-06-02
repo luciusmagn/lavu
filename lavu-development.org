@@ -438,6 +438,12 @@ and output procedures. =any?= means any Scheme value is valid.
   block comments still wait for more input.
 - Highlight rational and complex numeric tokens with the same numeric
   style as integers, decimals, and radix-prefixed integers.
+- Fall back to in-memory Reedline history when the persistent history
+  database cannot be opened, so history storage failures do not prevent
+  the REPL from starting.
+- Treat non-interactive stdin as one batch input or =?= query instead of
+  entering Reedline, so piped smoke tests and scripted runs do not loop
+  on terminal read errors.
 ** Diagnostics
 - Include expected/actual details in type constraint conflict, arity, and
   non-procedure inference errors so Ariadne labels are more informative.

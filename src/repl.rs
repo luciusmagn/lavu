@@ -20,11 +20,14 @@ pub fn history() -> Result<Box<dyn History>> {
         .unwrap_or(env::current_dir()?)
         .join(".lavu-history.db");
 
-    Ok(Box::new(SqliteBackedHistory::with_file(
+    match SqliteBackedHistory::with_file(
         history_path,
         Reedline::create_history_session_id(),
         Some(Utc::now()),
-    )?))
+    ) {
+        Ok(history) => Ok(Box::new(history)),
+        Err(_) => Ok(Box::new(SqliteBackedHistory::in_memory()?)),
+    }
 }
 
 pub fn highlighter() -> Result<Box<dyn Highlighter>> {

@@ -15,15 +15,25 @@ use lavu::syntax::{Atom, Datum, Spanned};
 use lavu::types::Type;
 use reedline::Signal;
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Read};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let (mut line_editor, prompt) = line_editor()?;
     let env = Env::new();
     let mut surface = SurfaceContext::new();
     let mut type_env = TypeEnv::new();
+
+    if !std::io::stdin().is_terminal() {
+        let mut buffer = String::new();
+        std::io::stdin().read_to_string(&mut buffer)?;
+        if !buffer.trim().is_empty() {
+            handle_buffer(&buffer, &env, &mut surface, &mut type_env);
+        }
+        return Ok(());
+    }
+
+    let (mut line_editor, prompt) = line_editor()?;
 
     print_logo();
 
@@ -31,46 +41,51 @@ fn main() -> Result<()> {
         let sig = line_editor.read_line(&*prompt);
         match sig {
             Ok(Signal::Success(buffer)) => {
-                if let Some(query) = buffer.trim_start().strip_prefix('?') {
-                    match infer_query_with_context(query, &surface, &type_env) {
-                        Ok(types) => match eval_query_values(query, &env, &surface) {
-                            Ok(values) => print_query_types(query, &types, &values),
-                            Err(ReplError::Datum(error)) => report_datum_error(query, &error),
-                            Err(ReplError::Surface(error)) => report_surface_error(query, &error),
-                            Err(ReplError::Eval(error)) => report_eval_error(query, &error),
-                        },
-                        Err(error) => report_query_error(query, &error),
-                    }
-                    continue;
-                }
-
-                match eval_input(&buffer, &env, &mut surface, &mut type_env) {
-                    Ok(output) => {
-                        for value in output.values {
-                            if value != Value::Unspecified {
-                                println!("{}", value);
-                            }
-                        }
-                        if let Some(error) = output.type_error {
-                            report_type_error(&buffer, &error);
-                        }
-                    }
-                    Err(ReplError::Datum(error)) => report_datum_error(&buffer, &error),
-                    Err(ReplError::Surface(error)) => report_surface_error(&buffer, &error),
-                    Err(ReplError::Eval(error)) => report_eval_error(&buffer, &error),
-                }
+                handle_buffer(&buffer, &env, &mut surface, &mut type_env);
             }
             Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
                 println!("\nAborted!");
                 break;
             }
-            x => {
-                println!("Event: {:?}", x);
+            Err(error) => {
+                eprintln!("read error: {error}");
+                break;
             }
         }
     }
 
     Ok(())
+}
+
+fn handle_buffer(buffer: &str, env: &Env, surface: &mut SurfaceContext, type_env: &mut TypeEnv) {
+    if let Some(query) = buffer.trim_start().strip_prefix('?') {
+        match infer_query_with_context(query, surface, type_env) {
+            Ok(types) => match eval_query_values(query, env, surface) {
+                Ok(values) => print_query_types(query, &types, &values),
+                Err(ReplError::Datum(error)) => report_datum_error(query, &error),
+                Err(ReplError::Surface(error)) => report_surface_error(query, &error),
+                Err(ReplError::Eval(error)) => report_eval_error(query, &error),
+            },
+            Err(error) => report_query_error(query, &error),
+        }
+        return;
+    }
+
+    match eval_input(buffer, env, surface, type_env) {
+        Ok(output) => {
+            for value in output.values {
+                if value != Value::Unspecified {
+                    println!("{}", value);
+                }
+            }
+            if let Some(error) = output.type_error {
+                report_type_error(buffer, &error);
+            }
+        }
+        Err(ReplError::Datum(error)) => report_datum_error(buffer, &error),
+        Err(ReplError::Surface(error)) => report_surface_error(buffer, &error),
+        Err(ReplError::Eval(error)) => report_eval_error(buffer, &error),
+    }
 }
 
 /// Print each inferred query type as `value : type-info`, using evaluated
