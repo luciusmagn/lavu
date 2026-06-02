@@ -2,19 +2,20 @@ use color_eyre::eyre::Result;
 use lavu::datum_parser::DatumParseError;
 use lavu::datum_parser::parse;
 use lavu::diagnostics::{
-    report_datum_error, report_eval_error, report_query_error, report_surface_error,
-    report_type_error,
+    report_datum_error, report_eval_error, report_inference_trace, report_query_error,
+    report_surface_error, report_type_error,
 };
 use lavu::highlight::{format_query, paint_query, paint_type};
 use lavu::infer::{Inferencer, TypeEnv, TypeError};
-use lavu::query::infer_query_with_context;
+use lavu::query::{infer_query_with_context, trace_query_with_context};
 use lavu::repl::{line_editor, print_logo};
 use lavu::runtime::{Env, EvalError, Value, eval_top_level};
-use lavu::surface::{SurfaceContext, SurfaceError};
+use lavu::surface::{SurfaceContext, SurfaceError, TopLevel};
 use lavu::syntax::{Atom, Datum, Spanned};
 use lavu::types::Type;
 use reedline::Signal;
 
+use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
 
 fn main() -> Result<()> {
@@ -23,12 +24,15 @@ fn main() -> Result<()> {
     let env = Env::new();
     let mut surface = SurfaceContext::new();
     let mut type_env = TypeEnv::new();
+    // Source text of each top-level definition, so `?? name` can re-trace how
+    // a previously defined procedure was inferred instead of just looking it up.
+    let mut definitions = HashMap::new();
 
     if !std::io::stdin().is_terminal() {
         let mut buffer = String::new();
         std::io::stdin().read_to_string(&mut buffer)?;
         if !buffer.trim().is_empty() {
-            handle_buffer(&buffer, &env, &mut surface, &mut type_env);
+            handle_buffer(&buffer, &env, &mut surface, &mut type_env, &mut definitions);
         }
         return Ok(());
     }
@@ -41,7 +45,7 @@ fn main() -> Result<()> {
         let sig = line_editor.read_line(&*prompt);
         match sig {
             Ok(Signal::Success(buffer)) => {
-                handle_buffer(&buffer, &env, &mut surface, &mut type_env);
+                handle_buffer(&buffer, &env, &mut surface, &mut type_env, &mut definitions);
             }
             Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
                 println!("\nAborted!");
@@ -57,8 +61,28 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_buffer(buffer: &str, env: &Env, surface: &mut SurfaceContext, type_env: &mut TypeEnv) {
-    if let Some(query) = buffer.trim_start().strip_prefix('?') {
+fn handle_buffer(
+    buffer: &str,
+    env: &Env,
+    surface: &mut SurfaceContext,
+    type_env: &mut TypeEnv,
+    definitions: &mut HashMap<String, String>,
+) {
+    let trimmed = buffer.trim_start();
+
+    // `?? expr` documents the inference engine's steps; check it before `?`.
+    if let Some(query) = trimmed.strip_prefix("??") {
+        // For a bare name we have defined, re-trace its definition's source so
+        // the steps are shown, rather than the single "look it up" step.
+        let source = definitions.get(query.trim()).map_or(query, String::as_str);
+        match trace_query_with_context(source, surface, type_env) {
+            Ok((_, steps)) => report_inference_trace(source, &steps),
+            Err(error) => report_query_error(source, &error),
+        }
+        return;
+    }
+
+    if let Some(query) = trimmed.strip_prefix('?') {
         match infer_query_with_context(query, surface, type_env) {
             Ok(types) => match eval_query_values(query, env, surface) {
                 Ok(values) => print_query_types(query, &types, &values),
@@ -80,6 +104,9 @@ fn handle_buffer(buffer: &str, env: &Env, surface: &mut SurfaceContext, type_env
             }
             if let Some(error) = output.type_error {
                 report_type_error(buffer, &error);
+            }
+            for (name, source) in output.definitions {
+                definitions.insert(name, source);
             }
         }
         Err(ReplError::Datum(error)) => report_datum_error(buffer, &error),
@@ -206,6 +233,9 @@ enum ReplError {
 struct EvalOutput {
     values: Vec<Value>,
     type_error: Option<TypeError>,
+    /// Newly evaluated top-level definitions as `(name, source text)`, so the
+    /// REPL can later re-trace them for `?? name`.
+    definitions: Vec<(String, String)>,
 }
 
 fn eval_input(
@@ -217,6 +247,7 @@ fn eval_input(
     let datums = parse(input)?;
     let mut inferencer = Inferencer::new();
     let mut values = Vec::new();
+    let mut definitions = Vec::new();
 
     for datum in &datums {
         let mut next_surface = surface.clone();
@@ -228,11 +259,17 @@ fn eval_input(
                 return Ok(EvalOutput {
                     values,
                     type_error: Some(error),
+                    definitions,
                 });
             }
 
             values.push(eval_top_level(form, env).map_err(ReplError::Eval)?);
             *type_env = next_env;
+
+            // Remember the definition's source for later `?? name` tracing.
+            if let TopLevel::Define { name, .. } = &form.node {
+                definitions.push((name.node.clone(), input[form.span.clone()].to_string()));
+            }
         }
 
         *surface = next_surface;
@@ -241,6 +278,7 @@ fn eval_input(
     Ok(EvalOutput {
         values,
         type_error: None,
+        definitions,
     })
 }
 

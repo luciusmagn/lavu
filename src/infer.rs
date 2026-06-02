@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::rc::Rc;
 
 use num::ToPrimitive;
 use thiserror::Error;
@@ -7,6 +9,37 @@ use crate::stdlib::primitive;
 use crate::surface::{Expr, Program, TopLevel, classify_expr};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 use crate::types::{ProcedureType, Type};
+
+/// One recorded step of the inference walk: the source span of a
+/// subexpression, a short human description, and the type the engine gave it.
+/// Collected for the `?? expr` REPL trace.
+#[derive(Debug, Clone)]
+pub struct TraceStep {
+    pub span: SourceSpan,
+    pub detail: String,
+    pub ty: Type,
+}
+
+/// A short, human description of an expression node for the inference trace.
+fn describe_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(_) => "literal".to_string(),
+        Expr::Variable(name) => format!("variable `{name}`"),
+        Expr::Quote(_) => "quoted datum".to_string(),
+        Expr::Quasiquote(_) => "quasiquote".to_string(),
+        Expr::Lambda { .. } => "lambda".to_string(),
+        Expr::If { .. } => "conditional".to_string(),
+        Expr::Begin(_) => "sequence".to_string(),
+        Expr::Set { name, .. } => format!("assignment to `{}`", name.node),
+        Expr::Delay(_) => "delay".to_string(),
+        Expr::LetRec { .. } => "recursive bindings".to_string(),
+        Expr::Apply { operator, .. } => match &operator.node {
+            Expr::Variable(name) => format!("application of `{name}`"),
+            Expr::Lambda { .. } => "let / lambda application".to_string(),
+            _ => "application".to_string(),
+        },
+    }
+}
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum TypeError {
@@ -116,6 +149,9 @@ impl TypeBinding {
 pub struct Inferencer {
     substitutions: BTreeMap<String, Type>,
     next_var: usize,
+    /// Optional trace buffer. Shared across branch-clone inferencers via `Rc`
+    /// so occurrence-typed branches record their steps in execution order.
+    trace: Option<Rc<RefCell<Vec<TraceStep>>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,6 +427,43 @@ impl Inferencer {
         Self::default()
     }
 
+    /// Enable step tracing for the `?? expr` REPL command. The buffer is shared
+    /// with any clones this inferencer spawns for occurrence-typed branches.
+    pub fn enable_trace(&mut self) {
+        self.trace = Some(Rc::new(RefCell::new(Vec::new())));
+    }
+
+    /// The recorded steps, deduplicated by span (keeping each span's final,
+    /// most-resolved reading) and ordered by when the engine settled them.
+    pub fn trace_steps(&self) -> Vec<TraceStep> {
+        let Some(trace) = &self.trace else {
+            return Vec::new();
+        };
+        let steps = trace.borrow();
+
+        let mut last: HashMap<SourceSpan, usize> = HashMap::new();
+        for (index, step) in steps.iter().enumerate() {
+            last.insert(step.span.clone(), index);
+        }
+
+        steps
+            .iter()
+            .enumerate()
+            .filter(|(index, step)| last.get(&step.span) == Some(index))
+            .map(|(_, step)| step.clone())
+            .collect()
+    }
+
+    fn record_step(&self, expr: &Spanned<Expr>, ty: &Type) {
+        if let Some(trace) = &self.trace {
+            trace.borrow_mut().push(TraceStep {
+                span: expr.span.clone(),
+                detail: describe_expr(&expr.node),
+                ty: self.resolve(ty.clone()),
+            });
+        }
+    }
+
     pub fn infer_program(
         &mut self,
         program: &Program,
@@ -430,6 +503,12 @@ impl Inferencer {
     }
 
     pub fn infer_expr(&mut self, expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeError> {
+        let ty = self.infer_expr_inner(expr, env)?;
+        self.record_step(expr, &ty);
+        Ok(ty)
+    }
+
+    fn infer_expr_inner(&mut self, expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeError> {
         match &expr.node {
             Expr::Literal(atom) => Ok(type_of_atom(atom)),
             Expr::Variable(name) => self.infer_variable(name, expr.span.clone(), env),

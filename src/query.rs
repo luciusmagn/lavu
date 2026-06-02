@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::datum_parser::{DatumParseError, parse};
-use crate::infer::{Inferencer, TypeEnv, TypeError};
+use crate::infer::{Inferencer, TraceStep, TypeEnv, TypeError};
 use crate::surface::{SurfaceContext, SurfaceError, classify_program};
 use crate::types::Type;
 
@@ -47,9 +47,29 @@ pub fn infer_query_with_context(
     Ok(inferencer.infer_program(&program, &mut env)?)
 }
 
+/// Infer `input` while recording the engine's steps, for the `?? expr` REPL
+/// command. Returns the inferred types alongside the ordered trace.
+pub fn trace_query_with_context(
+    input: &str,
+    surface: &SurfaceContext,
+    env: &TypeEnv,
+) -> Result<(Vec<Type>, Vec<TraceStep>), QueryError> {
+    let datums = parse(input)?;
+    let mut surface = surface.clone();
+    let program = surface.classify_program(&datums)?;
+    let mut env = env.clone();
+    let mut inferencer = Inferencer::new();
+    inferencer.enable_trace();
+
+    let types = inferencer.infer_program(&program, &mut env)?;
+    Ok((types, inferencer.trace_steps()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{infer_query, infer_query_with_context, infer_query_with_surface};
+    use super::{
+        infer_query, infer_query_with_context, infer_query_with_surface, trace_query_with_context,
+    };
     use crate::datum_parser::parse;
     use crate::infer::{Inferencer, TypeEnv};
     use crate::surface::SurfaceContext;
@@ -59,6 +79,24 @@ mod tests {
         let types = infer_query("(lambda (x) (+ x 1))").unwrap();
 
         assert_eq!(types[0].to_string(), "(-> number? number?)");
+    }
+
+    #[test]
+    fn trace_records_steps_innermost_first() {
+        let (types, steps) =
+            trace_query_with_context("(+ 1 2)", &SurfaceContext::new(), &TypeEnv::new()).unwrap();
+
+        assert_eq!(types[0].to_string(), "number?");
+
+        // Operands are settled before the application that combines them.
+        assert_eq!(steps.first().unwrap().detail, "literal");
+        let last = steps.last().unwrap();
+        assert_eq!(last.detail, "application of `+`");
+        assert_eq!(last.ty.to_string(), "number?");
+        assert_eq!(
+            steps.iter().filter(|step| step.detail == "literal").count(),
+            2
+        );
     }
 
     #[test]

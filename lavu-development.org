@@ -1138,3 +1138,15 @@ and output procedures. =any?= means any Scheme value is valid.
   its span with a message arrow.
 - Print a trailing blank line after =?= type query output and after every
   Ariadne diagnostic so REPL results and errors stay visually separated.
+** Inference Step Trace
+- Add a =?? expr= REPL command that documents the inference engine's steps
+  with Ariadne, labelling each subexpression's source span with the type the
+  engine settled on, in innermost-first execution order.
+- Record steps by wrapping the central =infer_expr= dispatch with an optional
+  trace buffer shared across occurrence-typing branch clones via =Rc=, so
+  branch steps appear in execution order; untraced inference is unaffected.
+- Deduplicate trace steps by span, keeping each span's final reading, so
+  refinement probing does not show a subexpression twice.
+- Re-trace a previously defined name's definition for =?? name= instead of
+  reporting the one-step variable lookup, by remembering each top-level
+  definition's source text in the REPL.

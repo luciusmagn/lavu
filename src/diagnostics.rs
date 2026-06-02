@@ -1,8 +1,10 @@
-use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use std::io::IsTerminal;
+
+use ariadne::{Color, ColorGenerator, Config, Label, Report, ReportKind, Source};
 
 use crate::datum_parser::DatumParseError;
-use crate::highlight::segments;
-use crate::infer::TypeError;
+use crate::highlight::{paint_type, segments};
+use crate::infer::{TraceStep, TypeError};
 use crate::query::QueryError;
 use crate::runtime::EvalError;
 use crate::surface::SurfaceError;
@@ -42,6 +44,43 @@ pub fn report_eval_error(input: &str, error: &EvalError) {
         &error.to_string(),
         eval_span(error),
     );
+}
+
+/// Render the `?? expr` inference trace: an Ariadne report whose labels pin
+/// each recorded step to its source span, numbered in the order the engine
+/// settled them and annotated with the inferred type.
+pub fn report_inference_trace(input: &str, steps: &[TraceStep]) {
+    if steps.is_empty() {
+        return;
+    }
+
+    // Match Ariadne's own auto-color: embed colored type text only for a
+    // terminal, so piped output stays free of stray escape codes.
+    let colored = std::io::stderr().is_terminal();
+    let mut colors = ColorGenerator::new();
+    let mut builder = Report::build(
+        ReportKind::Custom("Trace", Color::Fixed(147)),
+        (REPL_SOURCE, normalize_span(input, 0..input.len())),
+    )
+    .with_message("inference steps, innermost first");
+
+    for (index, step) in steps.iter().enumerate() {
+        let span = normalize_span(input, step.span.clone());
+        let ty = if colored {
+            paint_type(&step.ty)
+        } else {
+            step.ty.to_string()
+        };
+        builder.add_label(
+            Label::new((REPL_SOURCE, span))
+                .with_message(format!("{}. {ty} — {}", index + 1, step.detail))
+                .with_color(colors.next())
+                .with_order(index as i32),
+        );
+    }
+
+    let _ = builder.finish().eprint((REPL_SOURCE, Source::from(input)));
+    eprintln!();
 }
 
 fn report(input: &str, title: &'static str, message: &str, span: SourceSpan) {
