@@ -1899,15 +1899,15 @@ fn parse_let(
     let body = parse_body(&rest[1..], span.clone(), origin)?;
 
     Ok(Expr::Apply {
-        operator: Box::new(Spanned {
-            node: Expr::Lambda {
+        operator: Box::new(spanned_expr(
+            Expr::Lambda {
                 params,
                 rest: None,
                 body,
             },
-            span: span.clone(),
+            span.clone(),
             origin,
-        }),
+        )),
         operands,
     })
 }
@@ -1936,27 +1936,27 @@ fn parse_named_let(
     }
 
     let lambda_body = parse_body(&rest[2..], span.clone(), origin)?;
-    let call = Spanned {
-        node: Expr::Apply {
+    let call = spanned_expr(
+        Expr::Apply {
             operator: Box::new(variable_expr(&name)),
             operands,
         },
-        span: span.clone(),
+        span.clone(),
         origin,
-    };
+    );
 
     Ok(Expr::LetRec {
         bindings: vec![(
             name,
-            Spanned {
-                node: Expr::Lambda {
+            spanned_expr(
+                Expr::Lambda {
                     params,
                     rest: None,
                     body: lambda_body,
                 },
-                span: span.clone(),
+                span.clone(),
                 origin,
-            },
+            ),
         )],
         body: vec![call],
     })
@@ -1976,29 +1976,29 @@ fn parse_let_star(
     }
 
     let bindings = parse_bindings(&rest[0], "let* bindings")?;
-    let mut current = Spanned {
-        node: body_sequence_expr(&rest[1..], span.clone(), origin)?,
-        span: span.clone(),
+    let mut current = spanned_expr(
+        body_sequence_expr(&rest[1..], span.clone(), origin)?,
+        span.clone(),
         origin,
-    };
+    );
 
     for (name, value) in bindings.into_iter().rev() {
-        current = Spanned {
-            node: Expr::Apply {
-                operator: Box::new(Spanned {
-                    node: Expr::Lambda {
+        current = spanned_expr(
+            Expr::Apply {
+                operator: Box::new(spanned_expr(
+                    Expr::Lambda {
                         params: vec![name],
                         rest: None,
                         body: vec![current],
                     },
-                    span: span.clone(),
+                    span.clone(),
                     origin,
-                }),
+                )),
                 operands: vec![value],
             },
-            span: span.clone(),
+            span.clone(),
             origin,
-        };
+        );
     }
 
     Ok(current.node)

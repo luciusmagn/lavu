@@ -472,8 +472,8 @@ and output procedures. =any?= means any Scheme value is valid.
   definitions, expression classification, shorthand =define= lambdas,
   and identifier-to-variable conversion.
 - Add a small synthetic surface-expression helper for generated lowering
-  nodes in =and=, =or=, =cond=, =case=, =do=, and sequence
-  classification.
+  nodes in =let=, named =let=, =let*=, =and=, =or=, =cond=,
+  =case=, =do=, and sequence classification.
 ** Warning Cleanup
 - Remove local lifetime-syntax warnings and update the clipboard
   dependency within existing constraints to clear Cargo's future
