@@ -854,6 +854,13 @@ impl Inferencer {
             return vec![refinement];
         }
 
+        if let Expr::Apply { operator, operands } = &condition.node
+            && let Some((condition, alternate)) =
+                self.desugared_or_operands(operator, operands, env)
+        {
+            return self.truthy_or_predicate_refinements(condition, alternate, env);
+        }
+
         let Expr::If {
             condition,
             consequent,
@@ -869,6 +876,26 @@ impl Inferencer {
         let mut refinements = self.truthy_predicate_refinements(condition, env);
         refinements.extend(self.truthy_predicate_refinements(consequent, env));
         refinements
+    }
+
+    fn truthy_or_predicate_refinements(
+        &mut self,
+        condition: &Spanned<Expr>,
+        alternate: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Vec<(String, Type)> {
+        let condition_refinements = self.truthy_predicate_refinements(condition, env);
+        let alternate_refinements = self.truthy_predicate_refinements(alternate, env);
+
+        if alternate_refinements.is_empty() {
+            return if is_false_literal(alternate) {
+                condition_refinements
+            } else {
+                Vec::new()
+            };
+        }
+
+        disjoin_refinements(condition_refinements, alternate_refinements)
     }
 
     fn direct_predicate_refinement(
@@ -3182,6 +3209,40 @@ fn branch_refinement_type(
         .reduce(intersect_types)
 }
 
+fn disjoin_refinements(
+    left: Vec<(String, Type)>,
+    right: Vec<(String, Type)>,
+) -> Vec<(String, Type)> {
+    let left = refinement_map(left);
+    let right = refinement_map(right);
+    if left.is_empty() || left.keys().collect::<Vec<_>>() != right.keys().collect::<Vec<_>>() {
+        return Vec::new();
+    }
+
+    left.into_iter()
+        .map(|(name, left)| {
+            let right = right
+                .get(&name)
+                .cloned()
+                .expect("key equality ensures a right refinement");
+            (name, Type::union(vec![left, right]))
+        })
+        .collect()
+}
+
+fn refinement_map(refinements: Vec<(String, Type)>) -> BTreeMap<String, Type> {
+    refinements
+        .into_iter()
+        .fold(BTreeMap::new(), |mut map, (name, ty)| {
+            map.entry(name)
+                .and_modify(|existing| {
+                    *existing = intersect_types(existing.clone(), ty.clone());
+                })
+                .or_insert(ty);
+            map
+        })
+}
+
 fn refined_branch_env(
     env: &TypeEnv,
     refinements: &[BranchRefinement],
@@ -3589,6 +3650,14 @@ mod tests {
             "(-> any? boolean? : (pair? number? any?))"
         );
         assert_eq!(
+            infer_one("(lambda (x) (or (string? x) #f))"),
+            "(-> any? boolean? : string?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (or (string? x) (number? x)))"),
+            "(-> any? boolean? : (U number? string?))"
+        );
+        assert_eq!(
             infer_all(
                 "(define stringy? (lambda (x) (string? x)))
                  (lambda (proc x) (if (stringy? x) (proc x) #f))"
@@ -3714,7 +3783,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (or (string? x) #f))"),
-            "(-> x boolean?)"
+            "(-> any? boolean? : string?)"
         );
         assert_eq!(
             infer_one("(lambda (pred x) (or (pred x) #f))"),
@@ -3731,6 +3800,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x flag) (or (and (string? x) flag) #f))"),
             "(-> x flag (U boolean? flag))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (or (string? x) (number? x)) x #f))"),
+            "(-> x (U boolean? number? string?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x y) (if (or (string? x) (number? y)) x #f))"),
+            "(-> x y (U boolean? x))"
         );
     }
 
