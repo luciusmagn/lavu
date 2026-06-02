@@ -2,7 +2,8 @@
 //!
 //! A long inference produces dozens of steps; rendered together as Ariadne
 //! labels they overlap into a wall. Instead this walks the recorded steps one
-//! at a time in the alternate screen: `←` / `→` move between steps and
+//! at a time in the alternate screen, each shown as an Ariadne report whose
+//! caret points at the current subexpression: `←` / `→` move between steps and
 //! `space` / `enter` / `esc` leave the mode, after which the caller prints the
 //! final type the way `? expr` does.
 
@@ -15,8 +16,10 @@ use crossterm::terminal::{
 };
 use crossterm::{execute, queue};
 
-use crate::highlight::{paint_source, paint_type};
+use crate::diagnostics::render_inference_step;
+use crate::highlight::paint_type;
 use crate::infer::TraceStep;
+use crate::syntax::SourceSpan;
 
 /// Step through `steps` against `source` until the user leaves the mode.
 pub fn run(source: &str, steps: &[TraceStep]) -> io::Result<()> {
@@ -76,31 +79,12 @@ fn read_action() -> io::Result<Action> {
 fn render(out: &mut impl Write, source: &str, steps: &[TraceStep], index: usize) -> io::Result<()> {
     let step = &steps[index];
     let last = index + 1 == steps.len();
-    let start = step.span.start.min(source.len());
-    let end = step.span.end.clamp(start, source.len());
+    let snippet = snippet(source, &step.span);
+    let message = narrative(step, &snippet, last);
+    let report = render_inference_step(source, &step.span, index, steps.len(), &message);
 
-    let mut frame = String::new();
-    frame.push_str(&format!(
-        "  inference mode    step {}/{}    ←/→ step · space/enter/esc finish\n\n",
-        index + 1,
-        steps.len()
-    ));
-
-    // The source, with the current subexpression emphasized in place so the
-    // step is visible without a separate caret line (works across newlines).
-    frame.push_str("  ");
-    frame.push_str(&paint_source(&source[..start]));
-    frame.push_str(&emphasize(&source[start..end]));
-    frame.push_str(&paint_source(&source[end..]));
-    frame.push_str("\n\n");
-
-    frame.push_str(&format!("  {}\n", narrative(step)));
-    let label = if last {
-        "final inferred type"
-    } else {
-        "inferred shape so far"
-    };
-    frame.push_str(&format!("  {label}:  {}\n", paint_type(&step.ty)));
+    let mut frame = report;
+    frame.push_str("\n  ←/→ step · space/enter/esc finish\n");
 
     queue!(out, MoveTo(0, 0), Clear(ClearType::All))?;
     // Raw mode needs an explicit carriage return on every line break.
@@ -108,42 +92,48 @@ fn render(out: &mut impl Write, source: &str, steps: &[TraceStep], index: usize)
     out.flush()
 }
 
-fn emphasize(text: &str) -> String {
-    if text.is_empty() {
-        String::new()
-    } else {
-        format!("\x1b[1;7m{text}\x1b[0m")
-    }
-}
-
-/// A short narrative for the current step, phrased as a reasoning sentence.
-fn narrative(step: &TraceStep) -> String {
+/// The label message for a step: it names the pointed-at subexpression and the
+/// type the engine gave it, so "the inferred shape" is always of something.
+fn narrative(step: &TraceStep, snippet: &str, last: bool) -> String {
     let ty = paint_type(&step.ty);
     let detail = &step.detail;
 
-    if detail == "literal" {
-        format!("A literal value, so its type is {ty} directly.")
-    } else if let Some(name) = detail.strip_prefix("variable ") {
-        format!("Looking up the variable {name}, its type is {ty}.")
+    let body = if detail == "literal" {
+        format!("the literal {snippet} has type {ty}")
+    } else if detail.starts_with("variable") {
+        format!("looking up the variable {snippet}, its type is {ty}")
     } else if detail.starts_with("application") {
-        format!(
-            "{}: combining the operands here yields {ty}.",
-            sentence(detail)
-        )
+        format!("the call {snippet} combines its operands to {ty}")
     } else if detail == "lambda" {
-        format!("Gathering the parameter and body types, the lambda is {ty}.")
+        format!("the lambda {snippet} has type {ty}")
     } else if detail == "conditional" {
-        format!("Merging both branches, the conditional is {ty}.")
+        format!("the conditional {snippet} merges its branches to {ty}")
     } else {
-        format!("{}, inferred as {ty}.", sentence(detail))
+        format!("{snippet} has type {ty}")
+    };
+
+    if last {
+        format!("{body} — the final inferred type")
+    } else {
+        body
     }
 }
 
-fn sentence(detail: &str) -> String {
-    let mut chars = detail.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
+/// A one-line, backtick-quoted excerpt of the stepped subexpression, with
+/// internal whitespace collapsed and long spans truncated, used to name it.
+fn snippet(source: &str, span: &SourceSpan) -> String {
+    let start = span.start.min(source.len());
+    let end = span.end.clamp(start, source.len());
+    let text = source[start..end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if text.chars().count() > 32 {
+        let head: String = text.chars().take(31).collect();
+        format!("`{head}…`")
+    } else {
+        format!("`{text}`")
     }
 }
 
@@ -168,7 +158,7 @@ impl Drop for AltScreen {
 
 #[cfg(test)]
 mod tests {
-    use super::{narrative, sentence};
+    use super::{narrative, snippet};
     use crate::infer::TraceStep;
     use crate::types::Type;
 
@@ -181,26 +171,35 @@ mod tests {
     }
 
     #[test]
-    fn narratives_read_as_reasoning_sentences() {
+    fn narratives_name_the_subexpression_and_its_type() {
         // ANSI from the painted type is stripped here for a stable assertion.
         assert_eq!(
-            strip(&narrative(&step("literal", Type::Number))),
-            "A literal value, so its type is number? directly."
+            strip(&narrative(&step("literal", Type::Number), "`1`", false)),
+            "the literal `1` has type number?"
         );
         assert_eq!(
-            strip(&narrative(&step("variable `x`", Type::String))),
-            "Looking up the variable `x`, its type is string?."
+            strip(&narrative(
+                &step("application of `+`", Type::Number),
+                "`(+ x 1)`",
+                false
+            )),
+            "the call `(+ x 1)` combines its operands to number?"
         );
         assert_eq!(
-            strip(&narrative(&step("application of `+`", Type::Number))),
-            "Application of `+`: combining the operands here yields number?."
+            strip(&narrative(
+                &step("lambda", Type::Boolean),
+                "`(lambda (x) …)`",
+                true
+            )),
+            "the lambda `(lambda (x) …)` has type boolean? — the final inferred type"
         );
     }
 
     #[test]
-    fn sentence_capitalizes_the_first_letter() {
-        assert_eq!(sentence("lambda"), "Lambda");
-        assert_eq!(sentence(""), "");
+    fn snippet_collapses_whitespace_and_truncates() {
+        assert_eq!(snippet("(+  x\n  1)", &(0..10)), "`(+ x 1)`");
+        let long = "(lambda (a b c d e f g) (+ a b c d e f g))";
+        assert!(snippet(long, &(0..long.len())).ends_with("…`"));
     }
 
     fn strip(painted: &str) -> String {

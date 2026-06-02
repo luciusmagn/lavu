@@ -1155,8 +1155,9 @@ and output procedures. =any?= means any Scheme value is valid.
   alternate-screen stepper, since long inferences produced dozens of Ariadne
   labels rendered over each other.
 - Walk one step at a time with =←=/=→= (=home=/=end= jump to the ends),
-  emphasizing the current subexpression in place and showing a reasoning
-  narrative plus the inferred shape so far.
+  rendering each step as an Ariadne report whose caret points at the current
+  subexpression, with a label that names that subexpression and the type the
+  engine inferred for it.
 - Leave the mode with =space=, =enter=, or =esc=, then print the final type
   the same way =? expr= would.
 - Restore raw mode and the alternate screen through a drop guard so the

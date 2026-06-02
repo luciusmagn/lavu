@@ -83,6 +83,33 @@ pub fn report_inference_trace(input: &str, steps: &[TraceStep]) {
     eprintln!();
 }
 
+/// Render one inference step as an Ariadne report string: the source with a
+/// caret pointing at the stepped subexpression and `message` on its label.
+/// Colored for stdout, which the interactive stepper targets.
+pub fn render_inference_step(
+    source: &str,
+    span: &SourceSpan,
+    index: usize,
+    total: usize,
+    message: &str,
+) -> String {
+    let span = normalize_span(source, span.clone());
+    let mut buffer = Vec::new();
+    let _ = Report::build(
+        ReportKind::Custom("Inference", Color::Fixed(147)),
+        (REPL_SOURCE, span.clone()),
+    )
+    .with_message(format!("step {} of {}", index + 1, total))
+    .with_label(
+        Label::new((REPL_SOURCE, span))
+            .with_message(message)
+            .with_color(Color::Fixed(147)),
+    )
+    .finish()
+    .write_for_stdout((REPL_SOURCE, Source::from(source)), &mut buffer);
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
 fn report(input: &str, title: &'static str, message: &str, span: SourceSpan) {
     let span = normalize_span(input, span);
 
