@@ -503,6 +503,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Narrow finite union values in the opposite branch of concrete
   predicates, so after =(eof-object? char)= fails a =(U char?
   eof-object?)= value from =read-char= is available as =char?=.
+- Do not use broad equality refinements for opposite-branch subtraction:
+  =(eqv? c #\newline)= proves =char?= when true, but false still allows
+  other characters until singleton literal types exist.
 - Prefer caller-side type variable names when unifying two unknowns, so
   named =let=, =do=, and local helper parameters do not replace enclosing
   lambda parameter names in displayed types.

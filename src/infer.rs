@@ -752,7 +752,7 @@ impl Inferencer {
         };
         self.truthy_predicate_refinements(expr, env)
             .into_iter()
-            .filter_map(|(name, positive)| (name == param.node).then_some(positive))
+            .filter_map(|refinement| (refinement.name == param.node).then_some(refinement.positive))
             .reduce(intersect_types)
     }
 
@@ -985,12 +985,7 @@ impl Inferencer {
         if !truthy.is_empty() {
             let mut refinements = truthy
                 .iter()
-                .cloned()
-                .map(|(name, positive)| BranchRefinement {
-                    branch: RefinedBranch::Then,
-                    name,
-                    positive,
-                })
+                .map(|refinement| refinement.branch(RefinedBranch::Then))
                 .collect::<Vec<_>>();
             refinements.extend(self.negative_refinements(&truthy, env, RefinedBranch::Else));
             return refinements;
@@ -1009,12 +1004,7 @@ impl Inferencer {
         let truthy = self.truthy_predicate_refinements(&operands[0], env);
         let mut refinements = truthy
             .iter()
-            .cloned()
-            .map(|(name, positive)| BranchRefinement {
-                branch: RefinedBranch::Else,
-                name,
-                positive,
-            })
+            .map(|refinement| refinement.branch(RefinedBranch::Else))
             .collect::<Vec<_>>();
         refinements.extend(self.negative_refinements(&truthy, env, RefinedBranch::Then));
         refinements
@@ -1022,19 +1012,23 @@ impl Inferencer {
 
     fn negative_refinements(
         &self,
-        positives: &[(String, Type)],
+        positives: &[TruthyRefinement],
         env: &TypeEnv,
         branch: RefinedBranch,
     ) -> Vec<BranchRefinement> {
         positives
             .iter()
-            .filter_map(|(name, positive)| {
-                subtract_refinement_type(self.refinement_source_type(name, env)?, positive.clone())
-                    .map(|positive| BranchRefinement {
-                        branch,
-                        name: name.clone(),
-                        positive,
-                    })
+            .filter(|refinement| refinement.subtractible)
+            .filter_map(|refinement| {
+                subtract_refinement_type(
+                    self.refinement_source_type(&refinement.name, env)?,
+                    refinement.positive.clone(),
+                )
+                .map(|positive| BranchRefinement {
+                    branch,
+                    name: refinement.name.clone(),
+                    positive,
+                })
             })
             .collect()
     }
@@ -1050,7 +1044,7 @@ impl Inferencer {
         &mut self,
         condition: &Spanned<Expr>,
         env: &TypeEnv,
-    ) -> Vec<(String, Type)> {
+    ) -> Vec<TruthyRefinement> {
         if let Some(refinement) = self.direct_predicate_refinement(condition, env) {
             return vec![refinement];
         }
@@ -1095,7 +1089,7 @@ impl Inferencer {
         condition: &Spanned<Expr>,
         alternate: &Spanned<Expr>,
         env: &TypeEnv,
-    ) -> Vec<(String, Type)> {
+    ) -> Vec<TruthyRefinement> {
         let condition_refinements = self.truthy_predicate_refinements(condition, env);
         let alternate_refinements = self.truthy_predicate_refinements(alternate, env);
 
@@ -1114,7 +1108,7 @@ impl Inferencer {
         &mut self,
         condition: &Spanned<Expr>,
         env: &TypeEnv,
-    ) -> Vec<(String, Type)> {
+    ) -> Vec<TruthyRefinement> {
         let Expr::Apply { operator, operands } = &condition.node else {
             return Vec::new();
         };
@@ -1145,18 +1139,28 @@ impl Inferencer {
 
         refinements
             .into_iter()
-            .flat_map(|(name, positive)| {
-                if let Some(operand) = param_operands.get(&name)
-                    && let Some(refinement) =
-                        predicate_operand_refinement(operand, positive.clone(), env)
+            .flat_map(|refinement| {
+                if let Some(operand) = param_operands.get(&refinement.name)
+                    && let Some((name, positive)) =
+                        predicate_operand_refinement(operand, refinement.positive.clone(), env)
                 {
-                    return vec![refinement];
+                    return vec![TruthyRefinement::new(
+                        name,
+                        positive,
+                        refinement.subtractible,
+                    )];
                 }
 
-                refinement_target_names(&local, &name)
+                refinement_target_names(&local, &refinement.name)
                     .into_iter()
                     .filter(|name| env.get(name).is_some())
-                    .map(|name| (name, positive.clone()))
+                    .map(|name| {
+                        TruthyRefinement::new(
+                            name,
+                            refinement.positive.clone(),
+                            refinement.subtractible,
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .collect()
@@ -1175,7 +1179,7 @@ impl Inferencer {
         &mut self,
         condition: &Spanned<Expr>,
         env: &TypeEnv,
-    ) -> Option<(String, Type)> {
+    ) -> Option<TruthyRefinement> {
         let Expr::Apply { operator, operands } = &condition.node else {
             return None;
         };
@@ -1183,7 +1187,7 @@ impl Inferencer {
             return self.apply_predicate_refinement(operands, env);
         }
         if let Some(refinement) = equality_refinement(operator, operands, env) {
-            return Some(refinement);
+            return Some(TruthyRefinement::new(refinement.0, refinement.1, false));
         }
         if operands.len() != 1 {
             return None;
@@ -1200,7 +1204,7 @@ impl Inferencer {
         &mut self,
         operands: &[Spanned<Expr>],
         env: &TypeEnv,
-    ) -> Option<(String, Type)> {
+    ) -> Option<TruthyRefinement> {
         let Expr::Variable(predicate_name) = &operands.first()?.node else {
             return None;
         };
@@ -1213,7 +1217,7 @@ impl Inferencer {
         predicate_name: &str,
         operand: &Spanned<Expr>,
         env: &TypeEnv,
-    ) -> Option<(String, Type)> {
+    ) -> Option<TruthyRefinement> {
         if env.is_primitive(predicate_name) {
             let positive = primitive(predicate_name)?
                 .predicate
@@ -1221,12 +1225,14 @@ impl Inferencer {
                 .positive;
             let positive = self.instantiate_scheme(&positive);
 
-            return predicate_operand_refinement(operand, positive, env);
+            return predicate_operand_refinement(operand, positive, env)
+                .map(|(name, positive)| TruthyRefinement::new(name, positive, true));
         }
 
         let positive = self.latent_predicate_positive(predicate_name, env)?;
         self.widen_latent_predicate_variable_operand(operand, env);
         predicate_operand_refinement(operand, positive, env)
+            .map(|(name, positive)| TruthyRefinement::new(name, positive, true))
     }
 
     fn latent_predicate_positive(&mut self, name: &str, env: &TypeEnv) -> Option<Type> {
@@ -3567,6 +3573,31 @@ struct BranchRefinement {
     positive: Type,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TruthyRefinement {
+    name: String,
+    positive: Type,
+    subtractible: bool,
+}
+
+impl TruthyRefinement {
+    fn new(name: String, positive: Type, subtractible: bool) -> Self {
+        Self {
+            name,
+            positive,
+            subtractible,
+        }
+    }
+
+    fn branch(&self, branch: RefinedBranch) -> BranchRefinement {
+        BranchRefinement {
+            branch,
+            name: self.name.clone(),
+            positive: self.positive.clone(),
+        }
+    }
+}
+
 fn branch_refinement_type(
     refinements: &[BranchRefinement],
     name: &str,
@@ -3580,9 +3611,9 @@ fn branch_refinement_type(
 }
 
 fn disjoin_refinements(
-    left: Vec<(String, Type)>,
-    right: Vec<(String, Type)>,
-) -> Vec<(String, Type)> {
+    left: Vec<TruthyRefinement>,
+    right: Vec<TruthyRefinement>,
+) -> Vec<TruthyRefinement> {
     let left = refinement_map(left);
     let right = refinement_map(right);
     if left.is_empty() || left.keys().collect::<Vec<_>>() != right.keys().collect::<Vec<_>>() {
@@ -3595,20 +3626,26 @@ fn disjoin_refinements(
                 .get(&name)
                 .cloned()
                 .expect("key equality ensures a right refinement");
-            (name, Type::union(vec![left, right]))
+            TruthyRefinement::new(
+                name,
+                Type::union(vec![left.positive, right.positive]),
+                left.subtractible && right.subtractible,
+            )
         })
         .collect()
 }
 
-fn refinement_map(refinements: Vec<(String, Type)>) -> BTreeMap<String, Type> {
+fn refinement_map(refinements: Vec<TruthyRefinement>) -> BTreeMap<String, TruthyRefinement> {
     refinements
         .into_iter()
-        .fold(BTreeMap::new(), |mut map, (name, ty)| {
-            map.entry(name)
-                .and_modify(|existing| {
-                    *existing = intersect_types(existing.clone(), ty.clone());
+        .fold(BTreeMap::new(), |mut map, refinement| {
+            map.entry(refinement.name.clone())
+                .and_modify(|existing: &mut TruthyRefinement| {
+                    existing.positive =
+                        intersect_types(existing.positive.clone(), refinement.positive.clone());
+                    existing.subtractible &= refinement.subtractible;
                 })
-                .or_insert(ty);
+                .or_insert(refinement);
             map
         })
 }
@@ -5015,6 +5052,17 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (if (eqv? #\\a x) x #f))"),
             "(-> x (U boolean? char?))"
+        );
+        assert_eq!(
+            infer_error(
+                "(lambda (port)
+                   (let ((c (read-char port)))
+                     (if (eqv? c #\\newline)
+                         0
+                         (char=? c #\\space))))"
+            )
+            .to_string(),
+            "type constraint conflict: expected char?, got (U char? eof-object?)"
         );
         assert_eq!(
             infer_one("(lambda (x) (if (equal? x (quote (1 2))) x #f))"),
