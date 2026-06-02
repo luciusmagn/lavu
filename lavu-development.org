@@ -421,7 +421,8 @@ and output procedures. =any?= means any Scheme value is valid.
   conditional shape used by =cond =>= clauses, so arrow receivers can use
   guarded facts without constraining the whole caller.
 - Narrow =cond =>= receiver arguments for false-or-success primitives
-  like =member= and =assoc= to the success arm in the true branch.
+  like =string->number=, =member=, and =assoc= to the success arm in
+  the true branch.
 - Refine true branches of =eq?=, =eqv?=, and =equal?= when one side is a
   variable and the other side is a literal or quoted datum, preserving
   shadowing of equality names.

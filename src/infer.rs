@@ -329,7 +329,7 @@ fn false_or_success_condition(condition: &Spanned<Expr>, env: &TypeEnv) -> bool 
     };
     matches!(
         primitive_operator_name(operator, env),
-        Some("memq" | "memv" | "member" | "assq" | "assv" | "assoc")
+        Some("string->number" | "memq" | "memv" | "member" | "assq" | "assv" | "assoc")
     )
 }
 
@@ -4418,6 +4418,22 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (cond ((member x (quote ())) => car) (else 0)))"),
             "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (s)
+                   (cond ((string->number s) => (lambda (n) (+ n 1)))
+                         (else 0)))"
+            ),
+            "(-> string? number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (s)
+                   ((lambda (n) (if n (+ n 1) 0))
+                    (string->number s)))"
+            ),
+            "(-> string? number?)"
         );
     }
 
