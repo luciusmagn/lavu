@@ -1477,60 +1477,30 @@ fn expand_template_at(
             }
             None => Ok(template.clone()),
         },
-        Datum::List(items) => {
-            expand_template_list(items, captures, repetition).map(|items| Spanned {
-                node: Datum::List(items),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
-        }
-        Datum::Vector(items) => {
-            expand_template_list(items, captures, repetition).map(|items| Spanned {
-                node: Datum::Vector(items),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
-        }
+        Datum::List(items) => expand_template_list(items, captures, repetition)
+            .map(|items| template.with_node(Datum::List(items))),
+        Datum::Vector(items) => expand_template_list(items, captures, repetition)
+            .map(|items| template.with_node(Datum::Vector(items))),
         Datum::DottedList(items, tail) => {
             let items = expand_template_list(items, captures, repetition)?;
             let tail = expand_template_at(tail, captures, repetition)?;
-            Ok(Spanned {
-                node: Datum::DottedList(items, Box::new(tail)),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
+            Ok(template.with_node(Datum::DottedList(items, Box::new(tail))))
         }
         Datum::Quote(inner) => {
             let inner = expand_template_at(inner, captures, repetition)?;
-            Ok(Spanned {
-                node: Datum::Quote(Box::new(inner)),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
+            Ok(template.with_node(Datum::Quote(Box::new(inner))))
         }
         Datum::Quasiquote(inner) => {
             let inner = expand_template_at(inner, captures, repetition)?;
-            Ok(Spanned {
-                node: Datum::Quasiquote(Box::new(inner)),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
+            Ok(template.with_node(Datum::Quasiquote(Box::new(inner))))
         }
         Datum::Unquote(inner) => {
             let inner = expand_template_at(inner, captures, repetition)?;
-            Ok(Spanned {
-                node: Datum::Unquote(Box::new(inner)),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
+            Ok(template.with_node(Datum::Unquote(Box::new(inner))))
         }
         Datum::UnquoteSplicing(inner) => {
             let inner = expand_template_at(inner, captures, repetition)?;
-            Ok(Spanned {
-                node: Datum::UnquoteSplicing(Box::new(inner)),
-                span: template.span.clone(),
-                origin: template.origin,
-            })
+            Ok(template.with_node(Datum::UnquoteSplicing(Box::new(inner))))
         }
         Datum::Atom(_) => Ok(template.clone()),
     }
