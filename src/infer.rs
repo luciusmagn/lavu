@@ -610,25 +610,18 @@ impl Inferencer {
 
         let base = self.clone();
 
-        let mut then_env = env.clone();
-        for refinement in refinements
-            .iter()
-            .filter(|refinement| refinement.branch == RefinedBranch::Then)
-        {
-            then_env.define(refinement.name.clone(), refinement.positive.clone());
-        }
+        let (then_env, then_dead) = refined_branch_env(env, &refinements, RefinedBranch::Then);
         let mut then_inferencer = base.clone();
-        let consequent_ty = then_inferencer.infer_expr(consequent, &then_env)?;
+        let consequent_ty = if then_dead {
+            Type::Never
+        } else {
+            then_inferencer.infer_expr(consequent, &then_env)?
+        };
 
-        let mut else_env = env.clone();
-        for refinement in refinements
-            .iter()
-            .filter(|refinement| refinement.branch == RefinedBranch::Else)
-        {
-            else_env.define(refinement.name.clone(), refinement.positive.clone());
-        }
+        let (else_env, else_dead) = refined_branch_env(env, &refinements, RefinedBranch::Else);
         let mut else_inferencer = base;
         let alternate_ty = match alternate {
+            Some(_) if else_dead => Type::Never,
             Some(expr) => else_inferencer.infer_expr(expr, &else_env)?,
             None => Type::Unspecified,
         };
@@ -2816,13 +2809,99 @@ fn branch_refinement_type(
     name: &str,
     branch: RefinedBranch,
 ) -> Option<Type> {
-    let positives = refinements
+    refinements
         .iter()
         .filter(|refinement| refinement.branch == branch && refinement.name == name)
         .map(|refinement| refinement.positive.clone())
-        .collect::<Vec<_>>();
+        .reduce(intersect_types)
+}
 
-    (!positives.is_empty()).then(|| Type::union(positives))
+fn refined_branch_env(
+    env: &TypeEnv,
+    refinements: &[BranchRefinement],
+    branch: RefinedBranch,
+) -> (TypeEnv, bool) {
+    let mut refined = env.clone();
+    let mut dead = false;
+
+    for refinement in refinements
+        .iter()
+        .filter(|refinement| refinement.branch == branch)
+    {
+        let ty = refined
+            .get(&refinement.name)
+            .cloned()
+            .map(|existing| intersect_types(existing, refinement.positive.clone()))
+            .unwrap_or_else(|| refinement.positive.clone());
+        dead |= ty == Type::Never;
+        refined.define(refinement.name.clone(), ty);
+    }
+
+    (refined, dead)
+}
+
+fn intersect_types(left: Type, right: Type) -> Type {
+    match (left, right) {
+        (Type::Never, _) | (_, Type::Never) => Type::Never,
+        (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => ty,
+        (Type::Var(_), ty) | (ty, Type::Var(_)) => ty,
+        (Type::Union(left), Type::Union(right)) => intersect_union(left, Type::Union(right)),
+        (Type::Union(types), ty) | (ty, Type::Union(types)) => intersect_union(types, ty),
+        (Type::Pair(left_car, left_cdr), Type::Pair(right_car, right_cdr)) => {
+            let car = intersect_types(*left_car, *right_car);
+            let cdr = intersect_types(*left_cdr, *right_cdr);
+            if car == Type::Never || cdr == Type::Never {
+                Type::Never
+            } else {
+                Type::Pair(Box::new(car), Box::new(cdr))
+            }
+        }
+        (Type::ListOf(left), Type::ListOf(right)) => match intersect_types(*left, *right) {
+            Type::Never => Type::Null,
+            element => Type::ListOf(Box::new(element)),
+        },
+        (Type::List, Type::ListOf(element)) | (Type::ListOf(element), Type::List) => {
+            Type::ListOf(element)
+        }
+        (Type::List, Type::Null) | (Type::Null, Type::List) => Type::Null,
+        (Type::ListOf(_), Type::Null) | (Type::Null, Type::ListOf(_)) => Type::Null,
+        (Type::VectorOf(left), Type::VectorOf(right)) => match intersect_types(*left, *right) {
+            Type::Never => Type::Never,
+            element => Type::VectorOf(Box::new(element)),
+        },
+        (Type::Vector, Type::VectorOf(element)) | (Type::VectorOf(element), Type::Vector) => {
+            Type::VectorOf(element)
+        }
+        (Type::PromiseOf(left), Type::PromiseOf(right)) => match intersect_types(*left, *right) {
+            Type::Never => Type::Never,
+            element => Type::PromiseOf(Box::new(element)),
+        },
+        (Type::Values(left), Type::Values(right)) if left.len() == right.len() => {
+            let values = left
+                .into_iter()
+                .zip(right)
+                .map(|(left, right)| intersect_types(left, right))
+                .collect::<Vec<_>>();
+            if values.iter().any(|ty| ty == &Type::Never) {
+                Type::Never
+            } else {
+                Type::Values(values)
+            }
+        }
+        (Type::Port, Type::InputPort) | (Type::InputPort, Type::Port) => Type::InputPort,
+        (Type::Port, Type::OutputPort) | (Type::OutputPort, Type::Port) => Type::OutputPort,
+        (left, right) if left == right => left,
+        _ => Type::Never,
+    }
+}
+
+fn intersect_union(types: Vec<Type>, ty: Type) -> Type {
+    Type::union(
+        types
+            .into_iter()
+            .map(|item| intersect_types(item, ty.clone()))
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn predicate_refinements(condition: &Spanned<Expr>, env: &TypeEnv) -> Vec<BranchRefinement> {
@@ -3286,6 +3365,32 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (if (and (pair? x) (number? (cdr x))) (cdr x) 0))"),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (and (pair? x) (number? (car x)) (number? (cdr x)))
+                       (cons (car x) (cdr x))
+                       #f))"
+            ),
+            "(-> x (U boolean? (pair? number? number?)))"
+        );
+    }
+
+    #[test]
+    fn treats_contradictory_refinement_paths_as_never() {
+        assert_eq!(
+            infer_one("(lambda (x) (if (and (number? x) (string? x)) \"dead\" 0))"),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (if (number? x)
+                       (if (string? x) \"dead\" (+ x 5))
+                       0))"
+            ),
             "(-> x number?)"
         );
     }

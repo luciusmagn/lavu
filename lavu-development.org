@@ -437,6 +437,18 @@ and output procedures. =any?= means any Scheme value is valid.
   accesses, so guards such as =(number? (car x))= refine =x= to a pair
   whose corresponding field has the predicate's positive type within
   the guarded branch.
+- Occurrence-typing stress examples should be kept as concrete
+  regressions: the heterogeneous =process-element= shape currently
+  exposes the coarse =procedure?= result, sibling =and= refinements need
+  pair-field intersection, contradictory =number?=/=string?= paths
+  should behave as unreachable =never?= branches, and =safe-apply=
+  needs future latent predicate propositions rather than only ordinary
+  higher-order procedure constraints.
+- Combine repeated branch refinements with a small type intersection
+  operation instead of overwriting same-variable facts, so
+  =(and (pair? x) (number? (car x)) (number? (cdr x)))= refines =x= to
+  a pair with both fields known and contradictory paths stop
+  contributing result types.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
