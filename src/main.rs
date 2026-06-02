@@ -33,7 +33,12 @@ fn main() -> Result<()> {
             Ok(Signal::Success(buffer)) => {
                 if let Some(query) = buffer.trim_start().strip_prefix('?') {
                     match infer_query_with_context(query, &surface, &type_env) {
-                        Ok(types) => print_query_types(query, &types),
+                        Ok(types) => match eval_query_values(query, &env, &surface) {
+                            Ok(values) => print_query_types(query, &types, &values),
+                            Err(ReplError::Datum(error)) => report_datum_error(query, &error),
+                            Err(ReplError::Surface(error)) => report_surface_error(query, &error),
+                            Err(ReplError::Eval(error)) => report_eval_error(query, &error),
+                        },
                         Err(error) => report_query_error(query, &error),
                     }
                     continue;
@@ -68,26 +73,22 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Print each inferred query type as `value : type-info`, echoing the source
-/// of the form (syntax highlighted) beside its colored type when stdout is a
-/// terminal. Procedure types expand into a multi-line parameter block, using
-/// the queried lambda's formal names when available. Falls back to plain text
-/// when piped, and to the bare type when the parse does not line up
-/// one-to-one with the inferred forms.
-fn print_query_types(query: &str, types: &[Type]) {
+/// Print each inferred query type as `value : type-info`, using evaluated
+/// Scheme values beside colored types when stdout is a terminal. Procedure
+/// types expand into a multi-line parameter block, using the queried lambda's
+/// formal names when available. Falls back to plain text when piped, and to
+/// the bare type when the query values do not line up one-to-one with the
+/// inferred forms.
+fn print_query_types(query: &str, types: &[Type], values: &[Value]) {
     let colored = std::io::stdout().is_terminal();
-    let sources = parse(query)
-        .ok()
-        .filter(|datums| datums.len() == types.len());
+    let displays = query_displays(query, types.len(), values);
 
     for (index, ty) in types.iter().enumerate() {
-        match (sources.as_ref().map(|datums| &datums[index]), colored) {
-            (Some(datum), true) => {
-                let source = query[datum.span.clone()].trim();
-                let names = lambda_param_names(&datum.node);
-                println!("{}", paint_query(source, ty, &names));
+        match (displays.as_ref().map(|displays| &displays[index]), colored) {
+            (Some(display), true) => {
+                println!("{}", paint_query(&display.value, ty, &display.names))
             }
-            (Some(datum), false) => println!("{} : {ty}", query[datum.span.clone()].trim()),
+            (Some(display), false) => println!("{} : {ty}", display.value),
             (None, true) => println!("{}", paint_type(ty)),
             (None, false) => println!("{ty}"),
         }
@@ -96,6 +97,49 @@ fn print_query_types(query: &str, types: &[Type]) {
     if !types.is_empty() {
         println!();
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueryDisplay {
+    value: String,
+    names: Vec<String>,
+}
+
+fn query_displays(query: &str, type_count: usize, values: &[Value]) -> Option<Vec<QueryDisplay>> {
+    if values.len() != type_count {
+        return None;
+    }
+
+    let datums = parse(query)
+        .ok()
+        .filter(|datums| datums.len() == type_count);
+
+    Some(
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| QueryDisplay {
+                value: value.to_string(),
+                names: datums
+                    .as_ref()
+                    .map(|datums| lambda_param_names(&datums[index].node))
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+fn plain_query_lines(query: &str, types: &[Type], values: &[Value]) -> Vec<String> {
+    query_displays(query, types.len(), values)
+        .map(|displays| {
+            displays
+                .into_iter()
+                .zip(types)
+                .map(|(display, ty)| format!("{} : {ty}", display.value))
+                .collect()
+        })
+        .unwrap_or_else(|| types.iter().map(ToString::to_string).collect())
 }
 
 /// The formal parameter names of a queried `(lambda <formals> ...)`, in order
@@ -183,6 +227,23 @@ fn eval_input(
     })
 }
 
+fn eval_query_values(
+    input: &str,
+    env: &Env,
+    surface: &SurfaceContext,
+) -> std::result::Result<Vec<Value>, ReplError> {
+    let datums = parse(input)?;
+    let mut surface = surface.clone();
+    let program = surface.classify_program(&datums)?;
+    let env = env.snapshot();
+
+    program
+        .forms
+        .iter()
+        .map(|form| eval_top_level(form, &env).map_err(ReplError::Eval))
+        .collect()
+}
+
 impl From<DatumParseError> for ReplError {
     fn from(error: DatumParseError) -> Self {
         Self::Datum(error)
@@ -197,7 +258,7 @@ impl From<SurfaceError> for ReplError {
 
 #[cfg(test)]
 mod tests {
-    use super::eval_input;
+    use super::{eval_input, eval_query_values, plain_query_lines};
     use lavu::infer::TypeEnv;
     use lavu::query::{QueryError, infer_query_with_context};
     use lavu::runtime::{Env, Value};
@@ -309,5 +370,36 @@ mod tests {
             panic!("expected id macro not to be installed");
         };
         assert_eq!(error.to_string(), "unbound variable: id");
+    }
+
+    #[test]
+    fn query_display_uses_evaluated_values_without_mutating_repl_state() {
+        let env = Env::new();
+        let mut surface = SurfaceContext::new();
+        let mut type_env = TypeEnv::new();
+
+        eval_input(
+            "(define x 1) (define p (cons 1 2))",
+            &env,
+            &mut surface,
+            &mut type_env,
+        )
+        .unwrap();
+
+        let query = "(+ x 2)";
+        let types = infer_query_with_context(query, &surface, &type_env).unwrap();
+        let values = eval_query_values(query, &env, &surface).unwrap();
+        assert_eq!(
+            plain_query_lines(query, &types, &values),
+            vec!["3 : number?"]
+        );
+
+        eval_query_values("(set! x 9)", &env, &surface).unwrap();
+        let values = eval_query_values("x", &env, &surface).unwrap();
+        assert_eq!(values[0].to_string(), "1");
+
+        eval_query_values("(set-car! p 9)", &env, &surface).unwrap();
+        let values = eval_query_values("(car p)", &env, &surface).unwrap();
+        assert_eq!(values[0].to_string(), "1");
     }
 }

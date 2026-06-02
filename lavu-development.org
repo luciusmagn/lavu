@@ -877,9 +877,12 @@ and output procedures. =any?= means any Scheme value is valid.
 - Share one Scheme highlighting palette across the Reedline editor, the
   =?= query echo, and Ariadne source by centralizing token categorization
   in a single =highlight= module instead of an inline editor-only matcher.
-- Display =? expr...= results as =value : type-info=, echoing each queried
-  form's syntax-highlighted source beside its inferred type, and pairing
-  every form with its own type for multi-form queries.
+- Display =? expr...= results as =value : type-info=, using an evaluated
+  value such as =3 : number?= for ordinary expressions while still keeping
+  source metadata for lambda parameter labels.
+- Evaluate =?= display values against an isolated environment snapshot so
+  query-time =set!=, pair, vector, or string mutation does not alter the
+  live REPL state.
 - Render inferred types with color and a distinct palette for predicate
   atoms, the procedure arrow, collection constructors, unions, variadic
   markers, and polymorphic type variables, while leaving the plain

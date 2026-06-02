@@ -253,6 +253,11 @@ struct Frame {
     parent: Option<Env>,
 }
 
+type FramePointer = *const RefCell<Frame>;
+type StringPointer = *const RefCell<String>;
+type ProcedurePointer = *const Procedure;
+type PromisePointer = *const Promise;
+
 impl Env {
     pub fn empty() -> Self {
         Self(Rc::new(RefCell::new(Frame {
@@ -300,11 +305,178 @@ impl Env {
         }
     }
 
+    pub fn snapshot(&self) -> Self {
+        self.snapshot_with(&mut SnapshotState::default())
+    }
+
+    fn snapshot_with(&self, state: &mut SnapshotState) -> Self {
+        let pointer = Rc::as_ptr(&self.0);
+        if let Some(snapshot) = state.frames.get(&pointer) {
+            return snapshot.clone();
+        }
+
+        let snapshot = Self::empty();
+        state.frames.insert(pointer, snapshot.clone());
+
+        let frame = self.0.borrow();
+        let parent = frame
+            .parent
+            .as_ref()
+            .map(|parent| parent.snapshot_with(state));
+        let bindings = frame
+            .bindings
+            .iter()
+            .map(|(name, value)| (name.clone(), value.snapshot_with(state)))
+            .collect();
+
+        *snapshot.0.borrow_mut() = Frame { bindings, parent };
+        snapshot
+    }
+
     fn install_primitives(&self) {
         for primitive in r5rs_primitives() {
             self.define(primitive.name, Value::Primitive(primitive.name));
         }
     }
+}
+
+#[derive(Default)]
+struct SnapshotState {
+    frames: HashMap<FramePointer, Env>,
+    strings: HashMap<StringPointer, Rc<RefCell<String>>>,
+    pairs: HashMap<PairPointer, Rc<RefCell<PairValue>>>,
+    vectors: HashMap<VectorPointer, Rc<RefCell<Vec<Value>>>>,
+    procedures: HashMap<ProcedurePointer, Rc<Procedure>>,
+    promises: HashMap<PromisePointer, Rc<Promise>>,
+}
+
+impl Value {
+    fn snapshot_with(&self, state: &mut SnapshotState) -> Self {
+        match self {
+            Value::String(text) => Value::String(snapshot_string(text, state)),
+            Value::List(items) => {
+                Value::List(items.iter().map(|item| item.snapshot_with(state)).collect())
+            }
+            Value::Pair(pair) => Value::Pair(snapshot_pair(pair, state)),
+            Value::Vector(items) => Value::Vector(snapshot_vector(items, state)),
+            Value::Procedure(procedure) => Value::Procedure(snapshot_procedure(procedure, state)),
+            Value::Promise(promise) => Value::Promise(snapshot_promise(promise, state)),
+            Value::Environment(env) => Value::Environment(env.snapshot_with(state)),
+            Value::Values(values) => Value::Values(
+                values
+                    .iter()
+                    .map(|value| value.snapshot_with(state))
+                    .collect(),
+            ),
+            Value::Integer(_)
+            | Value::Rational(_)
+            | Value::ExactComplex(_)
+            | Value::Decimal(_)
+            | Value::Complex(_)
+            | Value::Boolean(_)
+            | Value::Character(_)
+            | Value::Symbol(_)
+            | Value::InputPort(_)
+            | Value::OutputPort(_)
+            | Value::Primitive(_)
+            | Value::Continuation(_)
+            | Value::EofObject
+            | Value::Unspecified
+            | Value::Uninitialized => self.clone(),
+        }
+    }
+}
+
+fn snapshot_string(text: &Rc<RefCell<String>>, state: &mut SnapshotState) -> Rc<RefCell<String>> {
+    let pointer = Rc::as_ptr(text);
+    if let Some(snapshot) = state.strings.get(&pointer) {
+        return snapshot.clone();
+    }
+
+    let snapshot = Rc::new(RefCell::new(text.borrow().clone()));
+    state.strings.insert(pointer, snapshot.clone());
+    snapshot
+}
+
+fn snapshot_pair(
+    pair: &Rc<RefCell<PairValue>>,
+    state: &mut SnapshotState,
+) -> Rc<RefCell<PairValue>> {
+    let pointer = Rc::as_ptr(pair);
+    if let Some(snapshot) = state.pairs.get(&pointer) {
+        return snapshot.clone();
+    }
+
+    let snapshot = Rc::new(RefCell::new(PairValue {
+        car: Value::Uninitialized,
+        cdr: Value::Uninitialized,
+    }));
+    state.pairs.insert(pointer, snapshot.clone());
+
+    let pair = pair.borrow();
+    *snapshot.borrow_mut() = PairValue {
+        car: pair.car.snapshot_with(state),
+        cdr: pair.cdr.snapshot_with(state),
+    };
+    snapshot
+}
+
+fn snapshot_vector(
+    vector: &Rc<RefCell<Vec<Value>>>,
+    state: &mut SnapshotState,
+) -> Rc<RefCell<Vec<Value>>> {
+    let pointer = Rc::as_ptr(vector);
+    if let Some(snapshot) = state.vectors.get(&pointer) {
+        return snapshot.clone();
+    }
+
+    let snapshot = Rc::new(RefCell::new(Vec::new()));
+    state.vectors.insert(pointer, snapshot.clone());
+
+    let items = vector
+        .borrow()
+        .iter()
+        .map(|item| item.snapshot_with(state))
+        .collect();
+    *snapshot.borrow_mut() = items;
+    snapshot
+}
+
+fn snapshot_procedure(procedure: &Rc<Procedure>, state: &mut SnapshotState) -> Rc<Procedure> {
+    let pointer = Rc::as_ptr(procedure);
+    if let Some(snapshot) = state.procedures.get(&pointer) {
+        return snapshot.clone();
+    }
+
+    let snapshot = Rc::new(Procedure {
+        params: procedure.params.clone(),
+        rest: procedure.rest.clone(),
+        body: procedure.body.clone(),
+        env: procedure.env.snapshot_with(state),
+    });
+    state.procedures.insert(pointer, snapshot.clone());
+    snapshot
+}
+
+fn snapshot_promise(promise: &Rc<Promise>, state: &mut SnapshotState) -> Rc<Promise> {
+    let pointer = Rc::as_ptr(promise);
+    if let Some(snapshot) = state.promises.get(&pointer) {
+        return snapshot.clone();
+    }
+
+    let snapshot = Rc::new(Promise {
+        expr: promise.expr.clone(),
+        env: promise.env.snapshot_with(state),
+        value: RefCell::new(None),
+    });
+    state.promises.insert(pointer, snapshot.clone());
+
+    *snapshot.value.borrow_mut() = promise
+        .value
+        .borrow()
+        .as_ref()
+        .map(|value| value.snapshot_with(state));
+    snapshot
 }
 
 impl Default for Env {
