@@ -420,6 +420,8 @@ and output procedures. =any?= means any Scheme value is valid.
 - Preserve predicate refinements through the generated single-value
   conditional shape used by =cond =>= clauses, so arrow receivers can use
   guarded facts without constraining the whole caller.
+- Narrow =cond =>= receiver arguments for false-or-success primitives
+  like =member= and =assoc= to the success arm in the true branch.
 - Carry multiple simple predicate refinements from an =and= condition,
   so independent facts such as =(string? x)= and =(number? y)= can both
   refine the true branch without adding full proposition logic.

@@ -311,6 +311,41 @@ fn primitive_unary_operand<'a>(
     Some(operand)
 }
 
+fn truthy_condition_value_type(
+    condition: &Spanned<Expr>,
+    condition_ty: Type,
+    env: &TypeEnv,
+) -> Type {
+    if false_or_success_condition(condition, env) {
+        false_or_success_type(condition_ty)
+    } else {
+        condition_ty
+    }
+}
+
+fn false_or_success_condition(condition: &Spanned<Expr>, env: &TypeEnv) -> bool {
+    let Expr::Apply { operator, .. } = &condition.node else {
+        return false;
+    };
+    matches!(
+        primitive_operator_name(operator, env),
+        Some("memq" | "memv" | "member" | "assq" | "assv" | "assoc")
+    )
+}
+
+fn false_or_success_type(ty: Type) -> Type {
+    match ty {
+        Type::Boolean => Type::Never,
+        Type::Union(types) => Type::union(
+            types
+                .into_iter()
+                .filter(|ty| ty != &Type::Boolean)
+                .collect::<Vec<_>>(),
+        ),
+        ty => ty,
+    }
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -807,11 +842,13 @@ impl Inferencer {
     ) -> Result<Type, TypeError> {
         let refinements = self.predicate_refinements(condition, env);
         let condition_ty = self.infer_expr(condition, env)?;
+        let truthy_condition_ty =
+            truthy_condition_value_type(condition, self.resolve(condition_ty.clone()), env);
         let base = self.clone();
 
         let (mut then_env, then_dead) =
             refined_branch_env(env, &refinements, RefinedBranch::Then);
-        then_env.define(param.node.clone(), condition_ty.clone());
+        then_env.define(param.node.clone(), truthy_condition_ty);
         let mut then_inferencer = base.clone();
         let consequent_ty = if then_dead {
             Type::Never
@@ -4334,6 +4371,18 @@ mod tests {
                    ((lambda (ok) (if ok (string-length x) 0))
                     (string? x)))"
             ),
+            "(-> x number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x xs) (cond ((member x xs) => car) (else #f)))"),
+            "(-> x (listof t0) (U boolean? t0))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x xs) (cond ((assoc x xs) => cdr) (else #f)))"),
+            "(-> x (listof (pair? t1 t2)) (U boolean? t2))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (cond ((member x (quote ())) => car) (else 0)))"),
             "(-> x number?)"
         );
     }
