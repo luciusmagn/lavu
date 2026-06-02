@@ -5,7 +5,7 @@ use lavu::diagnostics::{
     report_datum_error, report_eval_error, report_query_error, report_surface_error,
     report_type_error,
 };
-use lavu::highlight::{paint_query, paint_type};
+use lavu::highlight::{format_query, paint_query, paint_type};
 use lavu::infer::{Inferencer, TypeEnv, TypeError};
 use lavu::query::infer_query_with_context;
 use lavu::repl::{line_editor, print_logo};
@@ -91,9 +91,9 @@ fn handle_buffer(buffer: &str, env: &Env, surface: &mut SurfaceContext, type_env
 /// Print each inferred query type as `value : type-info`, using evaluated
 /// Scheme values beside colored types when stdout is a terminal. Procedure
 /// types expand into a multi-line parameter block, using the queried lambda's
-/// formal names when available. Falls back to plain text when piped, and to
-/// the bare type when the query values do not line up one-to-one with the
-/// inferred forms.
+/// formal names when available. Falls back to the same shape without color
+/// when piped, and to the bare type when the query values do not line up
+/// one-to-one with the inferred forms.
 fn print_query_types(query: &str, types: &[Type], values: &[Value]) {
     let colored = std::io::stdout().is_terminal();
     let displays = query_displays(query, types.len(), values);
@@ -103,7 +103,9 @@ fn print_query_types(query: &str, types: &[Type], values: &[Value]) {
             (Some(display), true) => {
                 println!("{}", paint_query(&display.value, ty, &display.names))
             }
-            (Some(display), false) => println!("{} : {ty}", display.value),
+            (Some(display), false) => {
+                println!("{}", format_query(&display.value, ty, &display.names))
+            }
             (None, true) => println!("{}", paint_type(ty)),
             (None, false) => println!("{ty}"),
         }
@@ -151,7 +153,7 @@ fn plain_query_lines(query: &str, types: &[Type], values: &[Value]) -> Vec<Strin
             displays
                 .into_iter()
                 .zip(types)
-                .map(|(display, ty)| format!("{} : {ty}", display.value))
+                .map(|(display, ty)| format_query(&display.value, ty, &display.names))
                 .collect()
         })
         .unwrap_or_else(|| types.iter().map(ToString::to_string).collect())
@@ -407,6 +409,14 @@ mod tests {
         assert_eq!(
             plain_query_lines(query, &types, &values),
             vec!["3 : number?"]
+        );
+
+        let query = "(lambda (n) (+ n 1))";
+        let types = infer_query_with_context(query, &surface, &type_env).unwrap();
+        let values = eval_query_values(query, &env, &surface).unwrap();
+        assert_eq!(
+            plain_query_lines(query, &types, &values),
+            vec!["#<procedure> :\n    n : number?\n-> number?"]
         );
 
         eval_query_values("(set! x 9)", &env, &surface).unwrap();

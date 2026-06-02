@@ -256,6 +256,15 @@ pub fn paint_query(source: &str, ty: &Type, names: &[String]) -> String {
     }
 }
 
+/// Render a `? expr` result without ANSI styling, preserving the same
+/// procedure block shape used by [`paint_query`] for terminal output.
+pub fn format_query(value: &str, ty: &Type, names: &[String]) -> String {
+    match ty {
+        Type::Procedure(procedure) => format_procedure_block(value, procedure, names),
+        _ => format!("{value} : {ty}"),
+    }
+}
+
 /// One argument position of a procedure type, tagged with how it is supplied.
 enum Slot<'a> {
     Param(&'a Type),
@@ -318,22 +327,8 @@ fn paint_procedure_block(value: &str, procedure: &ProcedureType, names: &[String
     let (slots, result) = procedure_slots(procedure);
 
     // Resolve each slot's label first so the `:` columns align on visible text.
-    let labels: Vec<(String, &str)> = slots
-        .iter()
-        .enumerate()
-        .map(|(index, slot)| {
-            let name = names
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| format!("arg {}", index + 1));
-            (name, slot.suffix())
-        })
-        .collect();
-    let width = labels
-        .iter()
-        .map(|(name, suffix)| label_width(name, suffix))
-        .max()
-        .unwrap_or(0);
+    let labels = procedure_labels(&slots, names);
+    let width = max_label_width(&labels);
 
     let mut out = format!("{value} {}\n", sep());
     for (slot, (name, suffix)) in slots.iter().zip(&labels) {
@@ -349,6 +344,46 @@ fn paint_procedure_block(value: &str, procedure: &ProcedureType, names: &[String
     out
 }
 
+fn format_procedure_block(value: &str, procedure: &ProcedureType, names: &[String]) -> String {
+    let (slots, result) = procedure_slots(procedure);
+    let labels = procedure_labels(&slots, names);
+    let width = max_label_width(&labels);
+
+    let mut out = format!("{value} :\n");
+    for (slot, (name, suffix)) in slots.iter().zip(&labels) {
+        let pad = " ".repeat(width - label_width(name, suffix));
+        out.push_str(&format!(
+            "    {}{pad} : {}\n",
+            format_label(name, suffix),
+            slot.ty(),
+        ));
+    }
+    out.push_str(&format!("-> {result}"));
+    out
+}
+
+fn procedure_labels(slots: &[Slot<'_>], names: &[String]) -> Vec<(String, &'static str)> {
+    slots
+        .iter()
+        .enumerate()
+        .map(|(index, slot)| {
+            let name = names
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| format!("arg {}", index + 1));
+            (name, slot.suffix())
+        })
+        .collect()
+}
+
+fn max_label_width(labels: &[(String, &'static str)]) -> usize {
+    labels
+        .iter()
+        .map(|(name, suffix)| label_width(name, suffix))
+        .max()
+        .unwrap_or(0)
+}
+
 /// Visible width of a parameter label, counting the ` ?`/` …` marker.
 fn label_width(name: &str, suffix: &str) -> usize {
     name.chars().count() + if suffix.is_empty() { 0 } else { 2 }
@@ -360,6 +395,14 @@ fn paint_label(name: &str, suffix: &str) -> String {
         name
     } else {
         format!("{name} {}", marker(suffix))
+    }
+}
+
+fn format_label(name: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} {suffix}")
     }
 }
 
@@ -414,7 +457,7 @@ fn paren(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Category, paint_query, paint_type, segments};
+    use super::{Category, format_query, paint_query, paint_type, segments};
     use crate::types::{ProcedureType, Type};
 
     fn categories(line: &str) -> Vec<Category> {
@@ -496,6 +539,20 @@ mod tests {
         assert_eq!(
             strip(&paint_query("f", &procedure, &names)),
             "f :\n    n   : number?\n    acc : string?\n-> boolean?"
+        );
+    }
+
+    #[test]
+    fn formats_a_plain_procedure_query_as_a_param_block() {
+        let procedure = Type::Procedure(ProcedureType::Fixed {
+            params: vec![Type::Number],
+            result: Box::new(Type::Number),
+        });
+        let names = ["n".to_string()];
+
+        assert_eq!(
+            format_query("#<procedure>", &procedure, &names),
+            "#<procedure> :\n    n : number?\n-> number?"
         );
     }
 

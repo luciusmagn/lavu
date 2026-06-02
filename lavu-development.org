@@ -938,9 +938,9 @@ and output procedures. =any?= means any Scheme value is valid.
   each parameter with its inferred type and the result on its own line,
   labelling parameters with the queried lambda's formal names when known
   and positional =arg N= labels otherwise.
-- Fall back to plain =value : type= text when stdout is not a terminal, and
-  to the bare type when a parse does not line up one-to-one with the
-  inferred forms.
+- Fall back to the same =value : type= and procedure-block display shape
+  without color when stdout is not a terminal, and to the bare type when a
+  parse does not line up one-to-one with the inferred forms.
 - Syntax-highlight the Scheme source shown inside Ariadne diagnostics by
   coloring each token's span, disabling span underlines so the per-token
   labels tint cleanly while the prioritized error label still points at
