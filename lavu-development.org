@@ -491,6 +491,8 @@ and output procedures. =any?= means any Scheme value is valid.
   as =(if (string? x) #t #f)= and derived =and= predicate chains.
 - Combine same-variable =or= predicate alternatives as union
   propositions, while leaving different-variable disjunctions unrefined.
+- Treat boolean wrapper shapes such as =(if (string? x) #t (number? x))=
+  and equivalent multi-clause =cond= predicates as union propositions.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

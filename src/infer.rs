@@ -870,6 +870,12 @@ impl Inferencer {
             return Vec::new();
         };
         if !is_false_literal(alternate) {
+            if is_true_literal(consequent) {
+                return disjoin_refinements(
+                    self.truthy_predicate_refinements(condition, env),
+                    self.truthy_predicate_refinements(alternate, env),
+                );
+            }
             return Vec::new();
         }
 
@@ -3335,6 +3341,10 @@ fn is_false_literal(expr: &Spanned<Expr>) -> bool {
     matches!(expr.node, Expr::Literal(Atom::Boolean(false)))
 }
 
+fn is_true_literal(expr: &Spanned<Expr>) -> bool {
+    matches!(expr.node, Expr::Literal(Atom::Boolean(true)))
+}
+
 fn predicate_operand_refinement(
     operand: &Spanned<Expr>,
     positive: Type,
@@ -3655,6 +3665,14 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (or (string? x) (number? x)))"),
+            "(-> any? boolean? : (U number? string?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (string? x) #t (number? x)))"),
+            "(-> any? boolean? : (U number? string?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (cond ((string? x) #t) ((number? x) #t) (else #f)))"),
             "(-> any? boolean? : (U number? string?))"
         );
         assert_eq!(
