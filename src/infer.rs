@@ -316,7 +316,9 @@ fn truthy_condition_value_type(
     condition_ty: Type,
     env: &TypeEnv,
 ) -> Type {
-    if false_or_success_condition(condition, env) {
+    if let Some(truthy) = subtract_false_type(condition_ty.clone()) {
+        truthy
+    } else if false_or_success_condition(condition, env) {
         false_or_success_type(condition_ty)
     } else {
         condition_ty
@@ -4391,6 +4393,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
             "(-> (U number? string?) (U boolean? number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (flag) (let ((n (if flag #f 1))) (if n (+ n 1) #f)))"),
+            "(-> flag (U #f number?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (flag) (let ((n (if flag #f 1))) (and n (+ n 1))))"),
+            "(-> flag (U #f number?))"
         );
     }
 
