@@ -749,6 +749,9 @@ and output procedures. =any?= means any Scheme value is valid.
   forcing heterogeneous elements through uniform variadic metadata.
 - Bind unknown procedure variables through quoted final =apply= lists so
   shadowed procedure names still receive visible argument constraints.
+- Bind unknown procedure variables through non-visible final =apply=
+  lists as fixed, rest, or uniform variadic procedures, and constrain the
+  final argument to a matching proper list element type.
 ** Vector Primitives
 - Represent vectors as mutable reference-backed values and add native
   R5RS vector construction, access, mutation, conversion, and fill

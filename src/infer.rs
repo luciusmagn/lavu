@@ -142,6 +142,12 @@ enum AppendTail {
     Improper,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ApplyFinalList {
+    Empty,
+    Rest(Type),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConstructorKind {
     List,
@@ -1863,7 +1869,19 @@ impl Inferencer {
         match self.resolve(procedure_ty) {
             Type::Var(name) => {
                 let Some(final_arguments) = visible_final_arguments else {
-                    return Ok(Type::Any);
+                    let rest = self.infer_apply_final_list(final_list, final_operand)?;
+                    let result = self.fresh_type_var();
+                    let procedure = match rest {
+                        ApplyFinalList::Empty => Type::procedure(arguments, result.clone()),
+                        ApplyFinalList::Rest(element) if arguments.is_empty() => {
+                            Type::uniform_variadic(element, result.clone())
+                        }
+                        ApplyFinalList::Rest(element) => {
+                            Type::rest_procedure(arguments, element, result.clone())
+                        }
+                    };
+                    self.substitutions.insert(name, procedure);
+                    return Ok(self.resolve(result));
                 };
                 self.unify(final_list, Type::List, final_operand.span.clone())?;
 
@@ -1928,6 +1946,28 @@ impl Inferencer {
                 Ok(self.resolve(*result))
             }
             _ => Ok(Type::Any),
+        }
+    }
+
+    fn infer_apply_final_list(
+        &mut self,
+        actual: Type,
+        operand: &Spanned<Expr>,
+    ) -> Result<ApplyFinalList, TypeError> {
+        match self.resolve(actual) {
+            Type::Null => Ok(ApplyFinalList::Empty),
+            Type::ListOf(element) => Ok(ApplyFinalList::Rest(self.resolve(*element))),
+            Type::List | Type::Any | Type::Unknown => Ok(ApplyFinalList::Rest(Type::Any)),
+            Type::Var(name) => {
+                let element = self.fresh_type_var();
+                self.substitutions
+                    .insert(name, Type::ListOf(Box::new(element.clone())));
+                Ok(ApplyFinalList::Rest(element))
+            }
+            actual => {
+                self.unify(actual, Type::List, operand.span.clone())?;
+                Ok(ApplyFinalList::Rest(Type::Any))
+            }
         }
     }
 
@@ -3387,6 +3427,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x y) (apply (lambda (a b) (+ a b)) (list x y)))"),
             "(-> number? number? number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (f xs) (apply f xs))"),
+            "(-> (->* t0 t1) (listof t0) t1)"
+        );
+        assert_eq!(
+            infer_one("(lambda (f x xs) (apply f x xs))"),
+            "(-> (-> x t0 * t1) x (listof t0) t1)"
         );
         assert_eq!(
             infer_error("(apply (lambda (x y) (+ x y)) '(1 2 3))").to_string(),
