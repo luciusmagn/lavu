@@ -335,11 +335,12 @@ fn false_or_success_condition(condition: &Spanned<Expr>, env: &TypeEnv) -> bool 
 
 fn false_or_success_type(ty: Type) -> Type {
     match ty {
+        Type::False => Type::Never,
         Type::Boolean => Type::Never,
         Type::Union(types) => Type::union(
             types
                 .into_iter()
-                .filter(|ty| ty != &Type::Boolean)
+                .filter(|ty| !matches!(ty, Type::False | Type::Boolean))
                 .collect::<Vec<_>>(),
         ),
         ty => ty,
@@ -991,6 +992,10 @@ impl Inferencer {
             return refinements;
         }
 
+        if let Some(refinements) = self.truthiness_refinements(condition, env) {
+            return refinements;
+        }
+
         let Expr::Apply { operator, operands } = &condition.node else {
             return Vec::new();
         };
@@ -1008,6 +1013,63 @@ impl Inferencer {
             .collect::<Vec<_>>();
         refinements.extend(self.negative_refinements(&truthy, env, RefinedBranch::Then));
         refinements
+    }
+
+    fn truthiness_refinements(
+        &self,
+        condition: &Spanned<Expr>,
+        env: &TypeEnv,
+    ) -> Option<Vec<BranchRefinement>> {
+        if let Some(name) = variable_name(condition) {
+            return self.variable_truthiness_refinements(
+                name,
+                env,
+                RefinedBranch::Then,
+                RefinedBranch::Else,
+            );
+        }
+
+        let Expr::Apply { operator, operands } = &condition.node else {
+            return None;
+        };
+        if primitive_operator_name(operator, env) != Some("not") {
+            return None;
+        }
+        let [operand] = operands.as_slice() else {
+            return None;
+        };
+        let name = variable_name(operand)?;
+
+        self.variable_truthiness_refinements(name, env, RefinedBranch::Else, RefinedBranch::Then)
+    }
+
+    fn variable_truthiness_refinements(
+        &self,
+        name: &str,
+        env: &TypeEnv,
+        truthy_branch: RefinedBranch,
+        false_branch: RefinedBranch,
+    ) -> Option<Vec<BranchRefinement>> {
+        let source = self.refinement_source_type(name, env)?;
+        let mut refinements = Vec::new();
+
+        if let Some(truthy) = subtract_false_type(source.clone()) {
+            refinements.push(BranchRefinement {
+                branch: truthy_branch,
+                name: name.to_string(),
+                positive: truthy,
+            });
+        }
+
+        if type_can_be_false(&source) {
+            refinements.push(BranchRefinement {
+                branch: false_branch,
+                name: name.to_string(),
+                positive: Type::False,
+            });
+        }
+
+        (!refinements.is_empty()).then_some(refinements)
     }
 
     fn negative_refinements(
@@ -2345,9 +2407,9 @@ impl Inferencer {
 
         let success = self.infer_membership_success(list_ty, &operands[1], result)?;
         Ok(match success {
-            Type::Null | Type::Never => Type::Boolean,
+            Type::Null | Type::Never => Type::False,
             Type::Any | Type::Unknown => Type::Any,
-            success => Type::union(vec![Type::Boolean, self.resolve(success)]),
+            success => Type::union(vec![Type::False, self.resolve(success)]),
         })
     }
 
@@ -2711,6 +2773,7 @@ impl Inferencer {
 
         match (actual, expected) {
             (Type::Unknown, ty) | (ty, Type::Unknown) | (Type::Any, ty) | (ty, Type::Any) => Ok(ty),
+            (Type::False, Type::Boolean) | (Type::Boolean, Type::False) => Ok(Type::Boolean),
             (Type::Var(actual), Type::Var(expected)) => self.bind_var(expected, Type::Var(actual)),
             (Type::Var(name), ty) | (ty, Type::Var(name)) => self.bind_var(name, ty),
             (Type::Never, _) | (_, Type::Never) => Ok(Type::Never),
@@ -3177,7 +3240,8 @@ fn type_of_atom(atom: &Atom) -> Type {
         | Atom::ExactComplex(_)
         | Atom::Complex(_) => Type::Number,
         Atom::String(_) => Type::String,
-        Atom::Boolean(_) => Type::Boolean,
+        Atom::Boolean(false) => Type::False,
+        Atom::Boolean(true) => Type::Boolean,
         Atom::Character(_) => Type::Char,
     }
 }
@@ -3711,6 +3775,25 @@ fn subtract_refinement_type(existing: Type, positive: Type) -> Option<Type> {
     (narrowed != existing).then_some(narrowed)
 }
 
+fn subtract_false_type(existing: Type) -> Option<Type> {
+    let narrowed = match existing.clone() {
+        Type::False => Type::Never,
+        Type::Union(types) => Type::union(
+            types
+                .into_iter()
+                .filter(|ty| !matches!(ty, Type::False))
+                .collect::<Vec<_>>(),
+        ),
+        _ => return None,
+    };
+
+    (narrowed != existing).then_some(narrowed)
+}
+
+fn type_can_be_false(ty: &Type) -> bool {
+    intersect_types(ty.clone(), Type::False) == Type::False
+}
+
 fn can_subtract_refinement(positive: &Type) -> bool {
     !has_type_var(positive)
         && !matches!(
@@ -3781,6 +3864,7 @@ fn intersect_types(left: Type, right: Type) -> Type {
                 Type::Values(values)
             }
         }
+        (Type::Boolean, Type::False) | (Type::False, Type::Boolean) => Type::False,
         (Type::Port, Type::InputPort) | (Type::InputPort, Type::Port) => Type::InputPort,
         (Type::Port, Type::OutputPort) | (Type::OutputPort, Type::Port) => Type::OutputPort,
         (left, right) if left == right => left,
@@ -4227,7 +4311,7 @@ mod tests {
             ),
             vec![
                 "(-> any? boolean? : string?)".to_string(),
-                "(-> (-> string? t1) any? (U boolean? t1))".to_string(),
+                "(-> (-> string? t1) any? (U #f t1))".to_string(),
             ]
         );
         assert_eq!(
@@ -4237,7 +4321,7 @@ mod tests {
             ),
             vec![
                 "(-> any? boolean? : symbol?)".to_string(),
-                "(-> any? (U boolean? symbol?))".to_string(),
+                "(-> any? (U #f symbol?))".to_string(),
             ]
         );
     }
@@ -4282,7 +4366,7 @@ mod tests {
     fn propagates_refinements_through_derived_conditionals() {
         assert_eq!(
             infer_one("(lambda (x) (if (string? x) (string-length x) #f))"),
-            "(-> x (U boolean? number?))"
+            "(-> x (U #f number?))"
         );
         assert_eq!(
             infer_one("(lambda (x flag) (if (and (string? x) flag) (string-length x) 0))"),
@@ -4302,7 +4386,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (and (string? x) (string-length x)))"),
-            "(-> x (U boolean? number?))"
+            "(-> x (U #f number?))"
         );
         assert_eq!(
             infer_one("(lambda (x) (cond ((string? x) #t) (else (+ x 1))))"),
@@ -4327,7 +4411,7 @@ mod tests {
                        (cons (car x) (cdr x))
                        #f))"
             ),
-            "(-> x (U boolean? (pair? number? number?)))"
+            "(-> x (U #f (pair? number? number?)))"
         );
     }
 
@@ -4397,7 +4481,7 @@ mod tests {
                        (proc x)
                        #f))"
             ),
-            "(-> (-> any? boolean? : t0) (-> t0 t2) x (U boolean? t2))"
+            "(-> (-> any? boolean? : t0) (-> t0 t2) x (U #f t2))"
         );
     }
 
@@ -4431,7 +4515,7 @@ mod tests {
                        (cons (cadr x) (cddr x))
                        #f))"
             ),
-            "(-> x (U boolean? (pair? number? t1)))"
+            "(-> x (U #f (pair? number? t1)))"
         );
     }
 
@@ -4505,15 +4589,15 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x flag) (or (and (string? x) flag) #f))"),
-            "(-> x flag (U boolean? flag))"
+            "(-> x flag (U #f flag))"
         );
         assert_eq!(
             infer_one("(lambda (x) (if (or (string? x) (number? x)) x #f))"),
-            "(-> x (U boolean? number? string?))"
+            "(-> x (U #f number? string?))"
         );
         assert_eq!(
             infer_one("(lambda (x y) (if (or (string? x) (number? y)) x #f))"),
-            "(-> x y (U boolean? x))"
+            "(-> x y (U #f x))"
         );
     }
 
@@ -4551,15 +4635,15 @@ mod tests {
     fn infers_latent_predicate_refinements() {
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (pred x) (proc x) #f))"),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (apply pred (list x)) (proc x) #f))"),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (apply pred x (quote ())) (proc x) #f))"),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
         assert_eq!(
             infer_one("(lambda (x) (if (apply string? (list x)) (string-length x) 0))"),
@@ -4567,7 +4651,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (pred x) (if (pred x) x #f))"),
-            "(-> (-> any? boolean? : t0) any? (U boolean? t0))"
+            "(-> (-> any? boolean? : t0) any? (U #f t0))"
         );
         assert_eq!(
             infer_one(
@@ -4583,7 +4667,7 @@ mod tests {
                        (proc (car x))
                        #f))"
             ),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) x (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) x (U #f t1))"
         );
         assert_eq!(
             infer_one(
@@ -4601,7 +4685,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))"),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
     }
 
@@ -4642,7 +4726,7 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (pred x) (proc x) #f))"),
-            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U #f t1))"
         );
     }
 
@@ -4712,7 +4796,7 @@ mod tests {
         assert_eq!(infer_one("(case 'b ((a c) 10) (else 30))"), "number?");
         assert_eq!(
             infer_one("(lambda (x) (case x ((a b) x) (else #f)))"),
-            "(-> x (U boolean? symbol?))"
+            "(-> x (U #f symbol?))"
         );
         assert_eq!(
             infer_one("(lambda (x) (case x ((#\\a #\\b) (char->integer x)) (else 0)))"),
@@ -4757,11 +4841,11 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x xs) (cond ((member x xs) => car) (else #f)))"),
-            "(-> x (listof t0) (U boolean? t0))"
+            "(-> x (listof t0) (U #f t0))"
         );
         assert_eq!(
             infer_one("(lambda (x xs) (cond ((assoc x xs) => cdr) (else #f)))"),
-            "(-> x (listof (pair? any? t0)) (U boolean? t0))"
+            "(-> x (listof (pair? any? t0)) (U #f t0))"
         );
         assert_eq!(
             infer_one("(lambda (x) (cond ((member x (quote ())) => car) (else 0)))"),
@@ -5026,7 +5110,7 @@ mod tests {
                 "(let ((car (lambda (x) x)))
                    (lambda (x) (if (number? (car x)) x #f)))"
             ),
-            "(-> x (U boolean? x))"
+            "(-> x (U #f x))"
         );
     }
 
@@ -5047,11 +5131,11 @@ mod tests {
         assert_eq!(infer_one("(equal? '(1) '(1))"), "boolean?");
         assert_eq!(
             infer_one("(lambda (x) (if (eq? x (quote done)) x #f))"),
-            "(-> x (U boolean? symbol?))"
+            "(-> x (U #f symbol?))"
         );
         assert_eq!(
             infer_one("(lambda (x) (if (eqv? #\\a x) x #f))"),
-            "(-> x (U boolean? char?))"
+            "(-> x (U #f char?))"
         );
         assert_eq!(
             infer_error(
@@ -5066,11 +5150,11 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (x) (if (equal? x (quote (1 2))) x #f))"),
-            "(-> x (U boolean? (listof number?)))"
+            "(-> x (U #f (listof number?)))"
         );
         assert_eq!(
             infer_one("(lambda (eq? x) (if (eq? x (quote done)) x #f))"),
-            "(-> (-> x symbol? t0) x (U boolean? x))"
+            "(-> (-> x symbol? t0) x (U #f x))"
         );
     }
 
@@ -5127,19 +5211,16 @@ mod tests {
     fn infers_membership_primitives() {
         assert_eq!(
             infer_one("member"),
-            "(-> any? (listof t0) (U boolean? (listof t0)))"
+            "(-> any? (listof t0) (U #f (listof t0)))"
         );
         assert_eq!(
             infer_one("assoc"),
-            "(-> any? (listof (pair? any? t0)) (U boolean? (pair? any? t0)))"
+            "(-> any? (listof (pair? any? t0)) (U #f (pair? any? t0)))"
         );
-        assert_eq!(
-            infer_one("(member 'b '(a b c))"),
-            "(U boolean? (listof symbol?))"
-        );
+        assert_eq!(infer_one("(member 'b '(a b c))"), "(U #f (listof symbol?))");
         assert_eq!(
             infer_one("(assoc 'b '((a 1) (b 2)))"),
-            "(U boolean? (pair? (U number? symbol?) (listof (U number? symbol?))))"
+            "(U #f (pair? (U number? symbol?) (listof (U number? symbol?))))"
         );
         assert_eq!(
             infer_one(
@@ -5151,11 +5232,27 @@ mod tests {
         );
         assert_eq!(
             infer_one("(lambda (xs) (member 'b xs))"),
-            "(-> (listof t0) (U boolean? (listof t0)))"
+            "(-> (listof t0) (U #f (listof t0)))"
         );
         assert_eq!(
             infer_one("(lambda (xs) (assoc 'b xs))"),
-            "(-> (listof (pair? any? t0)) (U boolean? (pair? any? t0)))"
+            "(-> (listof (pair? any? t0)) (U #f (pair? any? t0)))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (xs)
+                   (let ((tail (member (quote a) xs)))
+                     (if (not tail) #f (car tail))))"
+            ),
+            "(-> (listof t0) (U #f t0))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (xs)
+                   (let ((entry (assoc (quote a) xs)))
+                     (if (not entry) #f (cdr entry))))"
+            ),
+            "(-> (listof (pair? any? t0)) (U #f t0))"
         );
     }
 
@@ -5196,10 +5293,24 @@ mod tests {
     #[test]
     fn infers_conversion_primitives() {
         assert_eq!(infer_one("(symbol->string 'hello)"), "string?");
-        assert_eq!(infer_one("(string->number \"1\")"), "(U boolean? number?)");
+        assert_eq!(infer_one("(string->number \"1\")"), "(U #f number?)");
+        assert_eq!(infer_one("(string->number \"10\" 16)"), "(U #f number?)");
         assert_eq!(
-            infer_one("(string->number \"10\" 16)"),
-            "(U boolean? number?)"
+            infer_one(
+                "(lambda (s)
+                   (let ((n (string->number s)))
+                     (if (not n) 0 (+ n 1))))"
+            ),
+            "(-> string? number?)"
+        );
+        assert_eq!(
+            infer_error(
+                "(lambda (flag)
+                   (let ((n (if flag #t 1)))
+                     (if (not n) 0 (+ n 1))))"
+            )
+            .to_string(),
+            "type constraint conflict: expected number?, got (U boolean? number?)"
         );
     }
 

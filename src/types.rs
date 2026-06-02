@@ -5,6 +5,7 @@ pub enum Type {
     Any,
     Unknown,
     Never,
+    False,
     Boolean,
     Number,
     Char,
@@ -125,7 +126,17 @@ fn flatten_union_elements(types: Vec<Type>) -> Vec<Type> {
 }
 
 fn normalize_union_elements(types: Vec<Type>) -> Vec<Type> {
-    normalize_port_union(normalize_vector_union(normalize_list_union(types)))
+    normalize_port_union(normalize_vector_union(normalize_list_union(
+        normalize_boolean_union(types),
+    )))
+}
+
+fn normalize_boolean_union(mut types: Vec<Type>) -> Vec<Type> {
+    if types.iter().any(|ty| matches!(ty, Type::Boolean)) {
+        types.retain(|ty| !matches!(ty, Type::False));
+    }
+
+    types
 }
 
 fn normalize_list_union(mut types: Vec<Type>) -> Vec<Type> {
@@ -186,6 +197,7 @@ impl fmt::Display for Type {
             Type::Any => write!(f, "any?"),
             Type::Unknown => write!(f, "unknown?"),
             Type::Never => write!(f, "never?"),
+            Type::False => write!(f, "#f"),
             Type::Boolean => write!(f, "boolean?"),
             Type::Number => write!(f, "number?"),
             Type::Char => write!(f, "char?"),
@@ -268,6 +280,7 @@ mod tests {
         assert_eq!(Type::Any.to_string(), "any?");
         assert_eq!(Type::Unknown.to_string(), "unknown?");
         assert_eq!(Type::Never.to_string(), "never?");
+        assert_eq!(Type::False.to_string(), "#f");
         assert_eq!(Type::Boolean.to_string(), "boolean?");
         assert_eq!(Type::Number.to_string(), "number?");
         assert_eq!(Type::Char.to_string(), "char?");
@@ -325,6 +338,14 @@ mod tests {
         assert_eq!(Type::union(vec![Type::Any, Type::Char]).to_string(), "any?");
         assert_eq!(Type::union(Vec::new()).to_string(), "never?");
         assert_eq!(Type::union(vec![Type::Char]).to_string(), "char?");
+        assert_eq!(
+            Type::union(vec![Type::False, Type::Number]).to_string(),
+            "(U #f number?)"
+        );
+        assert_eq!(
+            Type::union(vec![Type::False, Type::Boolean]).to_string(),
+            "boolean?"
+        );
         assert_eq!(
             Type::union(vec![
                 Type::Boolean,

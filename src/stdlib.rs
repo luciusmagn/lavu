@@ -273,7 +273,7 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             Type::optional_procedure(
                 vec![Type::String],
                 vec![Type::Number],
-                Type::union(vec![Type::Number, Type::Boolean]),
+                Type::union(vec![Type::Number, Type::False]),
             ),
         ),
         Primitive::new("+", Type::uniform_variadic(Type::Number, Type::Number)),
@@ -625,42 +625,42 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "memq",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, Type::ListOf(Box::new(a.clone()))]),
+                Type::union(vec![Type::False, Type::ListOf(Box::new(a.clone()))]),
             ),
         ),
         Primitive::new(
             "memv",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, Type::ListOf(Box::new(a.clone()))]),
+                Type::union(vec![Type::False, Type::ListOf(Box::new(a.clone()))]),
             ),
         ),
         Primitive::new(
             "member",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(a.clone()))],
-                Type::union(vec![Type::Boolean, Type::ListOf(Box::new(a.clone()))]),
+                Type::union(vec![Type::False, Type::ListOf(Box::new(a.clone()))]),
             ),
         ),
         Primitive::new(
             "assq",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
-                Type::union(vec![Type::Boolean, association_entry.clone()]),
+                Type::union(vec![Type::False, association_entry.clone()]),
             ),
         ),
         Primitive::new(
             "assv",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
-                Type::union(vec![Type::Boolean, association_entry.clone()]),
+                Type::union(vec![Type::False, association_entry.clone()]),
             ),
         ),
         Primitive::new(
             "assoc",
             Type::procedure(
                 vec![Type::Any, Type::ListOf(Box::new(association_entry.clone()))],
-                Type::union(vec![Type::Boolean, association_entry.clone()]),
+                Type::union(vec![Type::False, association_entry.clone()]),
             ),
         ),
         Primitive::new("map", map_signature()),
@@ -970,11 +970,11 @@ mod tests {
     fn exposes_membership_primitives() {
         assert_eq!(
             primitive("member").unwrap().signature.to_string(),
-            "(-> any? (listof a) (U boolean? (listof a)))"
+            "(-> any? (listof a) (U #f (listof a)))"
         );
         assert_eq!(
             primitive("assoc").unwrap().signature.to_string(),
-            "(-> any? (listof (pair? any? a)) (U boolean? (pair? any? a)))"
+            "(-> any? (listof (pair? any? a)) (U #f (pair? any? a)))"
         );
     }
 
@@ -998,7 +998,7 @@ mod tests {
         );
         assert_eq!(
             primitive("string->number").unwrap().signature.to_string(),
-            "(-> string? number? ? (U boolean? number?))"
+            "(-> string? number? ? (U #f number?))"
         );
     }
 

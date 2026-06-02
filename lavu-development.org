@@ -123,6 +123,7 @@ Core displayed atoms:
 any?
 unknown?
 never?
+#f
 unspecified?
 boolean?
 number?
@@ -201,8 +202,9 @@ Example REPL output:
 #<procedure> : (-> (listof a) (listof a))
 #+end_src
 
-=unknown?= means Lavu could not infer a useful type yet.
-=unspecified?= is the known R5RS unspecified result produced by mutators
+=#f= is a singleton false type used for false-or-success procedures and
+explicit false branches. =unknown?= means Lavu could not infer a useful type
+yet. =unspecified?= is the known R5RS unspecified result produced by mutators
 and output procedures. =any?= means any Scheme value is valid.
 
 * Dynamic Features
@@ -478,7 +480,7 @@ and output procedures. =any?= means any Scheme value is valid.
 - Infer first-order latent predicate parameters from control flow. A
   function like =(lambda (pred proc x) (if (pred x) (proc x) #f))= now
   displays as =(-> (-> any? boolean? : t0) (-> t0 t1) any?
-  (U boolean? t1))=.
+  (U #f t1))=.
 - Give primitive predicate values latent signatures too, so higher-order
   calls such as =safe-apply= can reject mismatched companion procedures
   like =string?= with =+= before runtime.
@@ -534,6 +536,15 @@ and output procedures. =any?= means any Scheme value is valid.
   regressions, covering nested heterogeneous filters, sibling =car= and
   =cdr= refinements, contradictory dead paths, and higher-order latent
   predicate application.
+- Add an internal/displayed =#f= singleton type so explicit false branches
+  and false-or-success R5RS primitives do not widen to generic =boolean?=.
+- Tag =string->number=, =member=/=memq=/=memv=, and
+  =assoc=/=assq=/=assv= as returning =#f= on failure, preserving generic
+  =boolean?= for ordinary predicate results.
+- Refine truthiness over finite =#f= unions, so successful branches of
+  values from =string->number=, =member=, and =assoc= can use the success
+  type while unrelated =boolean?= values remain too broad to narrow
+  unsoundly.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

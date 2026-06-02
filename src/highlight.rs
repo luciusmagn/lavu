@@ -185,6 +185,7 @@ pub fn paint_type(ty: &Type) -> String {
         Type::Any => atom("any?"),
         Type::Unknown => atom("unknown?"),
         Type::Never => atom("never?"),
+        Type::False => Category::Boolean.style().paint("#f").to_string(),
         Type::Boolean => atom("boolean?"),
         Type::Number => atom("number?"),
         Type::Char => atom("char?"),
