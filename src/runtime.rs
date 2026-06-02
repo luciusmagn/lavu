@@ -4307,6 +4307,7 @@ fn procedure_type_accepts_arity(procedure: &ProcedureType, actual: usize) -> boo
         } => actual >= required.len() && actual <= required.len() + optional.len(),
         ProcedureType::UniformVariadic { .. } => true,
         ProcedureType::Rest { required, .. } => actual >= required.len(),
+        ProcedureType::Predicate { .. } => actual == 1,
     }
 }
 
@@ -4317,6 +4318,7 @@ fn minimum_procedure_type_arity(procedure: &ProcedureType) -> usize {
             required.len()
         }
         ProcedureType::UniformVariadic { .. } => 0,
+        ProcedureType::Predicate { .. } => 1,
     }
 }
 

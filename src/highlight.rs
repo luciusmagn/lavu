@@ -15,6 +15,8 @@ use crate::lexer::{
 };
 use crate::types::{ProcedureType, Type};
 
+static BOOLEAN_RESULT: Type = Type::Boolean;
+
 /// One syntactic role a source token can play, independent of how it is
 /// eventually colored for a given output sink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +242,15 @@ fn paint_procedure(procedure: &ProcedureType) -> String {
             ]);
             form(arrow("->"), parts)
         }
+        ProcedureType::Predicate { param, positive } => form(
+            arrow("->"),
+            [
+                paint_type(param),
+                paint_type(&Type::Boolean),
+                marker(":"),
+                paint_type(positive),
+            ],
+        ),
     }
 }
 
@@ -320,6 +331,7 @@ fn procedure_slots(procedure: &ProcedureType) -> (Vec<Slot<'_>>, &Type) {
                 .collect();
             (slots, result)
         }
+        ProcedureType::Predicate { param, .. } => (vec![Slot::Param(param)], &BOOLEAN_RESULT),
     }
 }
 
@@ -520,6 +532,9 @@ mod tests {
             result: Box::new(Type::Boolean),
         });
         assert_eq!(strip(&paint_type(&procedure)), procedure.to_string());
+
+        let predicate = Type::predicate_procedure(Type::Any, Type::String);
+        assert_eq!(strip(&paint_type(&predicate)), predicate.to_string());
 
         let polymorphic = Type::ListOf(Box::new(Type::Var("a".to_string())));
         assert_eq!(strip(&paint_type(&polymorphic)), polymorphic.to_string());

@@ -48,6 +48,10 @@ pub enum ProcedureType {
         rest: Box<Type>,
         result: Box<Type>,
     },
+    Predicate {
+        param: Box<Type>,
+        positive: Box<Type>,
+    },
 }
 
 impl Type {
@@ -82,6 +86,13 @@ impl Type {
             required: required.into(),
             rest: Box::new(rest),
             result: Box::new(result),
+        })
+    }
+
+    pub fn predicate_procedure(param: Type, positive: Type) -> Self {
+        Self::Procedure(ProcedureType::Predicate {
+            param: Box::new(param),
+            positive: Box::new(positive),
         })
     }
 
@@ -233,6 +244,9 @@ impl fmt::Display for ProcedureType {
                 write_joined(f, "(->", required)?;
                 write!(f, " {rest} * {result})")
             }
+            ProcedureType::Predicate { param, positive } => {
+                write!(f, "(-> {param} boolean? : {positive})")
+            }
         }
     }
 }
@@ -373,6 +387,10 @@ mod tests {
                 .to_string(),
             "(-> char? char? char? * boolean?)"
         );
+        assert_eq!(
+            Type::predicate_procedure(Type::Any, Type::String).to_string(),
+            "(-> any? boolean? : string?)"
+        );
     }
 
     #[test]
@@ -384,5 +402,9 @@ mod tests {
         });
 
         assert_eq!(reverse.to_string(), "(-> (listof a) (listof a))");
+        assert_eq!(
+            Type::predicate_procedure(Type::Any, Type::Var("a".to_string())).to_string(),
+            "(-> any? boolean? : a)"
+        );
     }
 }

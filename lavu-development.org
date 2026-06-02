@@ -454,6 +454,9 @@ and output procedures. =any?= means any Scheme value is valid.
   typing, but it is direct groundwork for future latent predicate
   propositions because predicate facts can now carry fresh result or
   structure variables instead of collapsing to =any?=.
+- Add a displayed latent predicate procedure shape
+  =(-> any? boolean? : string?)= as the type-level home for propositions
+  that say a true result refines the tested value.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

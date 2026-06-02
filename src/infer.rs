@@ -920,6 +920,12 @@ impl Inferencer {
                 self.instantiate_scheme_type(rest, vars),
                 self.instantiate_scheme_type(result, vars),
             ),
+            Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+                Type::predicate_procedure(
+                    self.instantiate_scheme_type(param, vars),
+                    self.instantiate_scheme_type(positive, vars),
+                )
+            }
             Type::Union(types) => Type::union(
                 types
                     .iter()
@@ -1015,6 +1021,9 @@ impl Inferencer {
             Type::Procedure(ProcedureType::Rest {
                 required, result, ..
             }) if required.is_empty() => Ok(*result),
+            Type::Procedure(procedure @ ProcedureType::Predicate { .. }) => {
+                self.infer_application(Type::Procedure(procedure), &[], Vec::new(), span)
+            }
             Type::Procedure(procedure) => {
                 self.infer_application(Type::Procedure(procedure), &[], Vec::new(), span)
             }
@@ -2171,6 +2180,23 @@ impl Inferencer {
 
                 Ok(self.resolve(*result))
             }
+            ProcedureType::Predicate { param, .. } => {
+                if operand_tys.len() != 1 {
+                    return Err(TypeError::ArityMismatch {
+                        expected: "1".to_string(),
+                        actual: operand_tys.len(),
+                        span: span_for_operands(operands),
+                    });
+                }
+
+                let actual = operand_tys
+                    .into_iter()
+                    .next()
+                    .expect("arity check ensures one operand");
+                let operand = operands.first().expect("arity check ensures one operand");
+                self.unify(actual, *param, operand.span.clone())?;
+                Ok(Type::Boolean)
+            }
         }
     }
 
@@ -2394,6 +2420,42 @@ impl Inferencer {
 
                 Ok(Type::rest_procedure(required, rest, result))
             }
+            (
+                ProcedureType::Predicate {
+                    param: actual_param,
+                    positive: actual_positive,
+                },
+                ProcedureType::Predicate {
+                    param: expected_param,
+                    positive: expected_positive,
+                },
+            ) => {
+                let param = self.unify(*actual_param, *expected_param, span.clone())?;
+                let positive = self.unify(*actual_positive, *expected_positive, span)?;
+                Ok(Type::predicate_procedure(param, positive))
+            }
+            (
+                ProcedureType::Predicate { param, .. },
+                ProcedureType::Fixed {
+                    params,
+                    result: expected_result,
+                },
+            ) if params.len() == 1 => {
+                let param = self.unify(*param, params[0].clone(), span.clone())?;
+                let result = self.unify(Type::Boolean, *expected_result, span)?;
+                Ok(Type::procedure(vec![param], result))
+            }
+            (
+                ProcedureType::Fixed {
+                    params,
+                    result: actual_result,
+                },
+                ProcedureType::Predicate { param, .. },
+            ) if params.len() == 1 => {
+                let param = self.unify(params[0].clone(), *param, span.clone())?;
+                let result = self.unify(*actual_result, Type::Boolean, span)?;
+                Ok(Type::procedure(vec![param], result))
+            }
             (actual, expected) => Err(TypeError::Mismatch {
                 expected: Box::new(Type::Procedure(expected)),
                 actual: Box::new(Type::Procedure(actual)),
@@ -2475,6 +2537,9 @@ impl Inferencer {
                 self.resolve(*rest),
                 self.resolve(*result),
             ),
+            Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+                Type::predicate_procedure(self.resolve(*param), self.resolve(*positive))
+            }
             Type::Union(types) => Type::union(
                 types
                     .into_iter()
@@ -2536,6 +2601,9 @@ fn contains_var(ty: &Type, name: &str) -> bool {
                 || contains_var(rest, name)
                 || contains_var(result, name)
         }
+        Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+            contains_var(param, name) || contains_var(positive, name)
+        }
         Type::Union(types) => types.iter().any(|ty| contains_var(ty, name)),
         _ => false,
     }
@@ -2569,6 +2637,9 @@ fn has_type_var(ty: &Type) -> bool {
             rest,
             result,
         }) => required.iter().any(has_type_var) || has_type_var(rest) || has_type_var(result),
+        Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+            has_type_var(param) || has_type_var(positive)
+        }
         _ => false,
     }
 }
