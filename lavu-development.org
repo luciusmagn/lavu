@@ -922,7 +922,8 @@ and output procedures. =any?= means any Scheme value is valid.
   as =do= tests with no result expressions as =unspecified?=.
 - Normalize collection and port unions in displayed inference results,
   so branch merges prefer shapes like =(listof (U number? string?))=
-  over redundant unions with =null?= or multiple =listof= arms.
+  over redundant unions with =null?=, multiple =listof= arms, or nested
+  =U= forms.
 ** REPL Type Display And Highlighting
 - Share one Scheme highlighting palette across the Reedline editor, the
   =?= query echo, and Ariadne source by centralizing token categorization

@@ -86,7 +86,7 @@ impl Type {
     }
 
     pub fn union(types: impl Into<Vec<Type>>) -> Self {
-        let mut types = types.into();
+        let mut types = flatten_union_elements(types.into());
         if types.iter().any(|ty| matches!(ty, Self::Any)) {
             return Self::Any;
         }
@@ -101,6 +101,16 @@ impl Type {
             _ => Self::Union(types),
         }
     }
+}
+
+fn flatten_union_elements(types: Vec<Type>) -> Vec<Type> {
+    types
+        .into_iter()
+        .flat_map(|ty| match ty {
+            Type::Union(types) => flatten_union_elements(types),
+            ty => vec![ty],
+        })
+        .collect()
 }
 
 fn normalize_union_elements(types: Vec<Type>) -> Vec<Type> {
@@ -301,6 +311,14 @@ mod tests {
         assert_eq!(Type::union(vec![Type::Any, Type::Char]).to_string(), "any?");
         assert_eq!(Type::union(Vec::new()).to_string(), "never?");
         assert_eq!(Type::union(vec![Type::Char]).to_string(), "char?");
+        assert_eq!(
+            Type::union(vec![
+                Type::Boolean,
+                Type::union(vec![Type::String, Type::Number, Type::Boolean])
+            ])
+            .to_string(),
+            "(U boolean? number? string?)"
+        );
         assert_eq!(
             Type::union(vec![Type::Null, Type::ListOf(Box::new(Type::Number))]).to_string(),
             "(listof number?)"
