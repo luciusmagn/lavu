@@ -468,6 +468,8 @@ and output procedures. =any?= means any Scheme value is valid.
   the result line, for example =-> boolean? : string?=.
 - Recognize latent predicate tests in desugared =or= forms, avoiding
   generated temporary names in public inferred types.
+- Preserve the first value's inferred type in predicate-aware =or=
+  handling, while applying false-branch refinements for =not= conditions.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

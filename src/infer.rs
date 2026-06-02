@@ -402,8 +402,32 @@ impl Inferencer {
         alternate: &Spanned<Expr>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let truth = condition.with_node(Expr::Literal(Atom::Boolean(true)));
-        self.infer_if(condition, &truth, Some(alternate), env)
+        let refinements = self.predicate_refinements(condition, env);
+        let condition_ty = self.infer_expr(condition, env)?;
+        let base = self.clone();
+
+        let (_, then_dead) = refined_branch_env(env, &refinements, RefinedBranch::Then);
+        let then_inferencer = base.clone();
+        let consequent_ty = if then_dead { Type::Never } else { condition_ty };
+
+        let (else_env, else_dead) = refined_branch_env(env, &refinements, RefinedBranch::Else);
+        let mut else_inferencer = base;
+        let alternate_ty = if else_dead {
+            Type::Never
+        } else {
+            else_inferencer.infer_expr(alternate, &else_env)?
+        };
+
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
+        self.next_var = self
+            .next_var
+            .max(then_inferencer.next_var)
+            .max(else_inferencer.next_var);
+
+        Ok(Type::union(vec![
+            then_inferencer.resolve(consequent_ty),
+            else_inferencer.resolve(alternate_ty),
+        ]))
     }
 
     fn desugared_or_operands<'a>(
@@ -415,7 +439,7 @@ impl Inferencer {
         let [condition] = operands else {
             return None;
         };
-        if !self.has_truthy_predicate_refinements(condition, env) {
+        if !self.has_predicate_refinements(condition, env) {
             return None;
         }
 
@@ -446,11 +470,9 @@ impl Inferencer {
         Some((condition, alternate))
     }
 
-    fn has_truthy_predicate_refinements(&self, condition: &Spanned<Expr>, env: &TypeEnv) -> bool {
+    fn has_predicate_refinements(&self, condition: &Spanned<Expr>, env: &TypeEnv) -> bool {
         let mut probe = self.clone();
-        !probe
-            .truthy_predicate_refinements(condition, env)
-            .is_empty()
+        !probe.predicate_refinements(condition, env).is_empty()
     }
 
     fn infer_primitive_application(
@@ -3289,6 +3311,10 @@ mod tests {
             infer_error("(lambda (x) (if (not (number? x)) 0 (+ x \"hello\")))").to_string(),
             "type constraint conflict: expected number?, got string?"
         );
+        assert_eq!(
+            infer_error("(lambda (x) (or (not (string? x)) (+ x 1)))").to_string(),
+            "type constraint conflict: expected number?, got string?"
+        );
     }
 
     #[test]
@@ -3552,6 +3578,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (pred proc x) (or (pred x) (proc x)))"),
             "(-> (-> any? boolean? : t0) (-> any? t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (or (not (pred x)) (proc x)))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x flag) (or (and (string? x) flag) #f))"),
+            "(-> x flag (U boolean? flag))"
         );
     }
 
