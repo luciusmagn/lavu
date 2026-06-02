@@ -346,6 +346,29 @@ fn false_or_success_type(ty: Type) -> Type {
     }
 }
 
+fn equality_refinement(
+    operator: &Spanned<Expr>,
+    operands: &[Spanned<Expr>],
+    env: &TypeEnv,
+) -> Option<(String, Type)> {
+    if !matches!(
+        primitive_operator_name(operator, env),
+        Some("eq?" | "eqv?" | "equal?")
+    ) {
+        return None;
+    }
+    let [left, right] = operands else {
+        return None;
+    };
+
+    variable_name(left)
+        .and_then(|name| static_expr_type(right).map(|ty| (name.clone(), ty)))
+        .or_else(|| {
+            variable_name(right)
+                .and_then(|name| static_expr_type(left).map(|ty| (name.clone(), ty)))
+        })
+}
+
 impl Inferencer {
     pub fn new() -> Self {
         Self::default()
@@ -846,8 +869,7 @@ impl Inferencer {
             truthy_condition_value_type(condition, self.resolve(condition_ty.clone()), env);
         let base = self.clone();
 
-        let (mut then_env, then_dead) =
-            refined_branch_env(env, &refinements, RefinedBranch::Then);
+        let (mut then_env, then_dead) = refined_branch_env(env, &refinements, RefinedBranch::Then);
         then_env.define(param.node.clone(), truthy_condition_ty);
         let mut then_inferencer = base.clone();
         let consequent_ty = if then_dead {
@@ -856,8 +878,7 @@ impl Inferencer {
             then_inferencer.infer_expr(consequent, &then_env)?
         };
 
-        let (mut else_env, else_dead) =
-            refined_branch_env(env, &refinements, RefinedBranch::Else);
+        let (mut else_env, else_dead) = refined_branch_env(env, &refinements, RefinedBranch::Else);
         else_env.define(param.node.clone(), condition_ty);
         let mut else_inferencer = base;
         let alternate_ty = match alternate {
@@ -1047,6 +1068,9 @@ impl Inferencer {
         };
         if primitive_operator_name(operator, env) == Some("apply") {
             return self.apply_predicate_refinement(operands, env);
+        }
+        if let Some(refinement) = equality_refinement(operator, operands, env) {
+            return Some(refinement);
         }
         if operands.len() != 1 {
             return None;
@@ -2318,8 +2342,7 @@ impl Inferencer {
                 Ok(self.resolve(result))
             }
             Type::Procedure(
-                procedure
-                @ (ProcedureType::Fixed { .. }
+                procedure @ (ProcedureType::Fixed { .. }
                 | ProcedureType::Optional { .. }
                 | ProcedureType::Predicate { .. }),
             ) => {
@@ -3605,13 +3628,10 @@ fn accessor_refinement_steps(
 }
 
 fn accessor_refinement_type(steps: &[ListAccessResult], positive: Type) -> Type {
-    steps
-        .iter()
-        .rev()
-        .fold(positive, |inner, step| match step {
-            ListAccessResult::Element => Type::Pair(Box::new(inner), Box::new(Type::Any)),
-            ListAccessResult::Tail => Type::Pair(Box::new(Type::Any), Box::new(inner)),
-        })
+    steps.iter().rev().fold(positive, |inner, step| match step {
+        ListAccessResult::Element => Type::Pair(Box::new(inner), Box::new(Type::Any)),
+        ListAccessResult::Tail => Type::Pair(Box::new(Type::Any), Box::new(inner)),
+    })
 }
 
 fn variable_name(expr: &Spanned<Expr>) -> Option<&String> {
@@ -4647,6 +4667,22 @@ mod tests {
     #[test]
     fn infers_equality_predicates() {
         assert_eq!(infer_one("(equal? '(1) '(1))"), "boolean?");
+        assert_eq!(
+            infer_one("(lambda (x) (if (eq? x (quote done)) x #f))"),
+            "(-> x (U boolean? symbol?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (eqv? #\\a x) x #f))"),
+            "(-> x (U boolean? char?))"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (if (equal? x (quote (1 2))) x #f))"),
+            "(-> x (U boolean? (listof number?)))"
+        );
+        assert_eq!(
+            infer_one("(lambda (eq? x) (if (eq? x (quote done)) x #f))"),
+            "(-> (-> x symbol? t0) x (U boolean? x))"
+        );
     }
 
     #[test]
