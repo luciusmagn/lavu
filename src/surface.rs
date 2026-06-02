@@ -717,14 +717,14 @@ fn parse_syntax_rules(datum: &Spanned<Datum>) -> Result<SyntaxRules, SurfaceErro
     let Some((head, rest)) = items.split_first() else {
         return Err(SurfaceError::BadArity {
             form: "syntax-rules",
-            expected: "literal identifiers and at least one rule",
+            expected: "literal identifiers and optional rules",
             span: datum.span.clone(),
         });
     };
-    if identifier_name(head).as_deref() != Some("syntax-rules") || rest.len() < 2 {
+    if identifier_name(head).as_deref() != Some("syntax-rules") || rest.is_empty() {
         return Err(SurfaceError::BadArity {
             form: "syntax-rules",
-            expected: "literal identifiers and at least one rule",
+            expected: "literal identifiers and optional rules",
             span: datum.span.clone(),
         });
     }
@@ -3121,6 +3121,24 @@ mod tests {
                 Err(SurfaceError::DuplicateIdentifier { .. })
             ));
         }
+    }
+
+    #[test]
+    fn accepts_unused_zero_rule_syntax_bindings() {
+        let datums = parse("(let-syntax ((x (syntax-rules ()))) 1)").unwrap();
+        let program = classify_program(&datums).unwrap();
+
+        assert!(matches!(program.forms[0].node, TopLevel::Expr(_)));
+    }
+
+    #[test]
+    fn rejects_used_zero_rule_syntax_bindings() {
+        let datums = parse("(let-syntax ((x (syntax-rules ()))) (x))").unwrap();
+
+        assert!(matches!(
+            classify_program(&datums),
+            Err(SurfaceError::NoMatchingMacroRule { name, .. }) if name == "x"
+        ));
     }
 
     #[test]

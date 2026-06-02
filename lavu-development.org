@@ -799,6 +799,10 @@ and output procedures. =any?= means any Scheme value is valid.
   the recursive binding, matching R5RS and allowing loop names such as
   =-= to shadow primitives only in the loop body. Current pitfall
   baseline: 10 of 22 extracted cases pass, with 8.1 now passing.
+- Accept zero-rule =syntax-rules= transformers so unused local syntax
+  bindings such as =(let-syntax ((x (syntax-rules ()))) ...)= are valid;
+  use-sites still report no matching macro rule. Current pitfall
+  baseline: 11 of 22 extracted cases pass, with 3.4 now passing.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.
