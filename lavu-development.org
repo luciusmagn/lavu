@@ -579,6 +579,10 @@ and output procedures. =any?= means any Scheme value is valid.
 - Represent integer, rational, decimal, and complex literals as native
   numeric values and add exact rational arithmetic for core numeric
   primitives while inference continues to display them as =number?=.
+- Accept exact integer-valued rationals and exact complex numbers with
+  zero imaginary part for non-negative length/index arguments, so string,
+  list, and vector access agree with the runtime's =integer?=
+  classification.
 ** Numeric Promotion
 - Promote mixed numeric primitive calls across exact rationals, decimals,
   and complex values while keeping comparisons on real numbers only.

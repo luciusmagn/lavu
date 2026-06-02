@@ -4428,13 +4428,15 @@ fn vector_fill(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
 }
 
 fn exact_nonnegative_integer(value: &Value, span: SourceSpan) -> Result<usize, EvalError> {
-    let Value::Integer(index) = value else {
-        return Err(EvalError::TypeError {
+    let index = exact_integer(value, span.clone()).map_err(|error| match error {
+        EvalError::TypeError { .. } => EvalError::TypeError {
             expected: "non-negative integer?",
-            span,
-        });
-    };
-    if index < &BigInt::from(0) {
+            span: span.clone(),
+        },
+        error => error,
+    })?;
+
+    if index < BigInt::from(0) {
         return Err(EvalError::TypeError {
             expected: "non-negative integer?",
             span,
@@ -5727,12 +5729,19 @@ mod tests {
     #[test]
     fn evaluates_string_construction_access_conversion_and_mutation() {
         assert_eq!(eval_one("(make-string 3 #\\x)"), "\"xxx\"");
+        assert_eq!(eval_one("(make-string 3/1 #\\x)"), "\"xxx\"");
         assert_eq!(eval_one("(string #\\a #\\b)"), "\"ab\"");
         assert_eq!(eval_one("(string-ref \"abc\" 1)"), "#\\b");
+        assert_eq!(eval_one("(string-ref \"abc\" 1+0i)"), "#\\b");
         assert_eq!(eval_one("(substring \"abcdef\" 1 4)"), "\"bcd\"");
+        assert_eq!(eval_one("(substring \"abcdef\" 1/1 4+0i)"), "\"bcd\"");
         assert_eq!(eval_one("(string-append \"a\" \"b\" \"c\")"), "\"abc\"");
         assert_eq!(eval_one("(string->list \"ab\")"), "(#\\a #\\b)");
         assert_eq!(eval_one("(list->string '(#\\a #\\b))"), "\"ab\"");
+        assert_eq!(
+            eval_one("(define s (string #\\a #\\b)) (string-set! s 1/1 #\\z) s"),
+            "\"az\""
+        );
         assert_eq!(
             eval_one("(define s (string #\\a #\\b)) (define t s) (string-set! t 0 #\\z) s"),
             "\"zb\""
@@ -6079,7 +6088,9 @@ mod tests {
         assert_eq!(eval_one("(vector 1 2 3)"), "#(1 2 3)");
         assert_eq!(eval_one("(vector-length (vector 1 2 3))"), "3");
         assert_eq!(eval_one("(vector-ref (vector 1 2 3) 1)"), "2");
+        assert_eq!(eval_one("(vector-ref (vector 1 2 3) 1+0i)"), "2");
         assert_eq!(eval_one("(make-vector 3 'x)"), "#(x x x)");
+        assert_eq!(eval_one("(make-vector 3/1 'x)"), "#(x x x)");
         assert_eq!(eval_one("(vector->list (vector 1 2))"), "(1 2)");
         assert_eq!(eval_one("(list->vector (list 1 2))"), "#(1 2)");
     }
@@ -6089,6 +6100,10 @@ mod tests {
         assert_eq!(
             eval_one("(define v (vector 1 2)) (vector-set! v 0 9) (vector->list v)"),
             "(9 2)"
+        );
+        assert_eq!(
+            eval_one("(define v (vector 1 2)) (vector-set! v 1/1 9) (vector->list v)"),
+            "(1 9)"
         );
         assert_eq!(
             eval_one("(define v (vector 1 2)) (vector-fill! v 'x) (vector->list v)"),
@@ -6147,7 +6162,9 @@ mod tests {
         assert_eq!(eval_one("(append '(a b) '(c . d))"), "(a b c . d)");
         assert_eq!(eval_one("(append '() 'a)"), "a");
         assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1)"), "b");
+        assert_eq!(eval_one("(list-ref (list 'a 'b 'c) 1+0i)"), "b");
         assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1)"), "(b c)");
+        assert_eq!(eval_one("(list-tail (list 'a 'b 'c) 1/1)"), "(b c)");
     }
 
     #[test]
