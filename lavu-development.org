@@ -494,6 +494,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Infer direct lambda applications by binding formals to known argument
   types, preventing lowered =let=, =or=, and =case= binders from leaking
   into public type displays.
+- Propagate branch predicate refinements through direct type-variable
+  aliases, so =(let ((y x)) (if (string? y) ...))= refines both =y= and
+  =x= inside the guarded branch without exporting the guard to callers.
 - Prefer caller-side type variable names when unifying two unknowns, so
   named =let=, =do=, and local helper parameters do not replace enclosing
   lambda parameter names in displayed types.

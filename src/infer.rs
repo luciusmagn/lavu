@@ -3473,16 +3473,34 @@ fn refined_branch_env(
         .iter()
         .filter(|refinement| refinement.branch == branch)
     {
-        let ty = refined
-            .get(&refinement.name)
-            .cloned()
-            .map(|existing| intersect_types(existing, refinement.positive.clone()))
-            .unwrap_or_else(|| refinement.positive.clone());
-        dead |= ty == Type::Never;
-        refined.define(refinement.name.clone(), ty);
+        for name in refinement_target_names(env, &refinement.name) {
+            let ty = refined
+                .get(&name)
+                .cloned()
+                .map(|existing| intersect_types(existing, refinement.positive.clone()))
+                .unwrap_or_else(|| refinement.positive.clone());
+            dead |= ty == Type::Never;
+            refined.define(name, ty);
+        }
     }
 
     (refined, dead)
+}
+
+fn refinement_target_names(env: &TypeEnv, name: &str) -> Vec<String> {
+    let mut names = vec![name.to_string()];
+    let mut seen = BTreeSet::from([name.to_string()]);
+    let mut current = name.to_string();
+
+    while let Some(Type::Var(alias)) = env.get(&current) {
+        if !seen.insert(alias.clone()) {
+            break;
+        }
+        names.push(alias.clone());
+        current = alias.clone();
+    }
+
+    names
 }
 
 fn intersect_types(left: Type, right: Type) -> Type {
@@ -4076,6 +4094,36 @@ mod tests {
                        #f))"
             ),
             "(-> x (U boolean? (pair? number? number?)))"
+        );
+    }
+
+    #[test]
+    fn propagates_aliased_predicate_refinements() {
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (let ((y x))
+                     (if (string? y) (string-length x) x)))"
+            ),
+            "(-> x (U number? x))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (let* ((y x) (z y))
+                     (if (string? z) (string-length x) x)))"
+            ),
+            "(-> x (U number? x))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (x)
+                   (let ((y x))
+                     (if (and (pair? y) (number? (car y)))
+                         (+ (car x) 1)
+                         0)))"
+            ),
+            "(-> x number?)"
         );
     }
 
