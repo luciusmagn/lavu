@@ -285,6 +285,8 @@ and output procedures. =any?= means any Scheme value is valid.
   exact zero-argument identities and all-exact results.
 - Accept inexact integer inputs for =odd?= and =even?= so those
   predicates agree with the runtime's =integer?= classification.
+- Accept inexact rational inputs for =numerator= and =denominator= so
+  those procedures agree with the runtime's =rational?= classification.
 - Extend =sqrt= to non-real complex inputs through decimal complex
   results, and preserve exactness for exact real perfect-square roots.
 - Add =expt= for exact integer exponents across exact rationals,

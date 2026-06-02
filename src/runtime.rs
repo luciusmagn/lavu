@@ -1663,14 +1663,59 @@ fn modulo_value(left: BigInt, right: BigInt) -> BigInt {
 
 fn numerator(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
-        exact_rational(&value, span).map(|n| Value::Integer(n.numer().clone()))
+        rational_argument(&value, span).map(|n| integer_result(n.value.numer().clone(), n.inexact))
     })
 }
 
 fn denominator(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     unary(args, span.clone(), |value| {
-        exact_rational(&value, span).map(|n| Value::Integer(n.denom().clone()))
+        rational_argument(&value, span).map(|n| integer_result(n.value.denom().clone(), n.inexact))
     })
+}
+
+struct RationalArgument {
+    value: BigRational,
+    inexact: bool,
+}
+
+fn rational_argument(value: &Value, span: SourceSpan) -> Result<RationalArgument, EvalError> {
+    match value {
+        Value::Integer(n) => Ok(exact_rational_argument(BigRational::from_integer(
+            n.clone(),
+        ))),
+        Value::Rational(n) => Ok(exact_rational_argument(n.clone())),
+        Value::ExactComplex(n) if n.im.is_zero() => Ok(exact_rational_argument(n.re.clone())),
+        Value::Decimal(n) => decimal_to_rational(n, span).map(inexact_rational_argument),
+        Value::Complex(n) if n.im.is_zero() => {
+            decimal_to_rational(&n.re, span).map(inexact_rational_argument)
+        }
+        _ => Err(EvalError::TypeError {
+            expected: "rational?",
+            span,
+        }),
+    }
+}
+
+fn exact_rational_argument(value: BigRational) -> RationalArgument {
+    RationalArgument {
+        value,
+        inexact: false,
+    }
+}
+
+fn inexact_rational_argument(value: BigRational) -> RationalArgument {
+    RationalArgument {
+        value,
+        inexact: true,
+    }
+}
+
+fn integer_result(value: BigInt, inexact: bool) -> Value {
+    if inexact {
+        Value::Decimal(BigDecimal::from(value))
+    } else {
+        Value::Integer(value)
+    }
 }
 
 fn numeric_round(
@@ -2281,18 +2326,6 @@ fn exact_integer(value: &Value, span: SourceSpan) -> Result<BigInt, EvalError> {
         Value::ExactComplex(n) if n.im.is_zero() && n.re.is_integer() => Ok(n.re.to_integer()),
         _ => Err(EvalError::TypeError {
             expected: "exact integer?",
-            span,
-        }),
-    }
-}
-
-fn exact_rational(value: &Value, span: SourceSpan) -> Result<BigRational, EvalError> {
-    match value {
-        Value::Integer(n) => Ok(BigRational::from_integer(n.clone())),
-        Value::Rational(n) => Ok(n.clone()),
-        Value::ExactComplex(n) if n.im.is_zero() => Ok(n.re.clone()),
-        _ => Err(EvalError::TypeError {
-            expected: "exact rational?",
             span,
         }),
     }
@@ -5253,6 +5286,10 @@ mod tests {
         assert_eq!(eval_one("(inexact? (lcm 4 6.0))"), "#t");
         assert_eq!(eval_one("(numerator 6/8)"), "3");
         assert_eq!(eval_one("(denominator 6/8)"), "4");
+        assert_eq!(eval_one("(numerator 1.5)"), "3");
+        assert_eq!(eval_one("(denominator 1.5+0i)"), "2");
+        assert_eq!(eval_one("(inexact? (numerator 1.5))"), "#t");
+        assert_eq!(eval_one("(inexact? (denominator 1.5+0i))"), "#t");
         assert_eq!(eval_one("(floor 3/2)"), "1");
         assert_eq!(eval_one("(ceiling 3/2)"), "2");
         assert_eq!(eval_one("(truncate -3/2)"), "-1");
