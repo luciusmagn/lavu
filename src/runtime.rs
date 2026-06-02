@@ -1443,11 +1443,11 @@ fn negative_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalEr
 }
 
 fn odd_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
-    exact_integer(value, span).map(|n| n.is_odd())
+    integer_argument(value, span).map(|n| n.value.is_odd())
 }
 
 fn even_number_value(value: &Value, span: SourceSpan) -> Result<bool, EvalError> {
-    exact_integer(value, span).map(|n| n.is_even())
+    integer_argument(value, span).map(|n| n.value.is_even())
 }
 
 fn real_ordering(value: &Value, span: SourceSpan) -> Result<Ordering, EvalError> {
@@ -5233,6 +5233,8 @@ mod tests {
         assert_eq!(eval_one("(negative? -1)"), "#t");
         assert_eq!(eval_one("(odd? 5)"), "#t");
         assert_eq!(eval_one("(even? 4)"), "#t");
+        assert_eq!(eval_one("(odd? 5.0)"), "#t");
+        assert_eq!(eval_one("(even? 4.0+0i)"), "#t");
         assert_eq!(eval_one("(max 1 5 3)"), "5");
         assert_eq!(eval_one("(min 3 1/2 2)"), "1/2");
         assert_eq!(eval_one("(abs -5/2)"), "5/2");
