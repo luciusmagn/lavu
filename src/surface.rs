@@ -283,11 +283,7 @@ impl MacroExpander {
                     .iter()
                     .map(|item| self.expand_with_depth(item, depth))
                     .collect::<Result<Vec<_>, _>>()
-                    .map(|items| Spanned {
-                        node: Datum::List(items),
-                        span: datum.span.clone(),
-                        origin: datum.origin,
-                    })
+                    .map(|items| datum.with_node(Datum::List(items)))
             }
             Datum::DottedList(items, tail) => {
                 if let Some(name) = items.first().and_then(identifier_name)
@@ -302,22 +298,14 @@ impl MacroExpander {
                     .map(|item| self.expand_with_depth(item, depth))
                     .collect::<Result<Vec<_>, _>>()?;
                 let tail = self.expand_with_depth(tail, depth)?;
-                Ok(Spanned {
-                    node: Datum::DottedList(items, Box::new(tail)),
-                    span: datum.span.clone(),
-                    origin: datum.origin,
-                })
+                Ok(datum.with_node(Datum::DottedList(items, Box::new(tail))))
             }
             Datum::Vector(items) => {
                 let items = items
                     .iter()
                     .map(|item| self.expand_with_depth(item, depth))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Spanned {
-                    node: Datum::Vector(items),
-                    span: datum.span.clone(),
-                    origin: datum.origin,
-                })
+                Ok(datum.with_node(Datum::Vector(items)))
             }
             Datum::Atom(_)
             | Datum::Quote(_)
@@ -348,19 +336,11 @@ impl MacroExpander {
         }
 
         let body = local.expand_body_items(&items[2..], depth + 1)?;
-        Ok(Spanned {
-            node: Datum::List(
-                std::iter::once(Spanned {
-                    node: Datum::identifier("begin"),
-                    span: datum.span.clone(),
-                    origin: datum.origin,
-                })
+        Ok(datum.with_node(Datum::List(
+            std::iter::once(datum.with_node(Datum::identifier("begin")))
                 .chain(body)
                 .collect(),
-            ),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        )))
     }
 
     fn expand_define_form(
@@ -413,11 +393,7 @@ impl MacroExpander {
         let prefix = items[..body_start].to_vec();
         let body = self.expand_body_items(&items[body_start..], depth + 1)?;
 
-        Ok(Spanned {
-            node: Datum::List(prefix.into_iter().chain(body).collect()),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(Datum::List(prefix.into_iter().chain(body).collect())))
     }
 
     fn expand_binding_body_form(
@@ -438,11 +414,7 @@ impl MacroExpander {
         expanded.push(self.expand_binding_list(&items[binding_index], depth)?);
         expanded.extend(body_expander.expand_body_items(&items[body_start..], depth + 1)?);
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(Datum::List(expanded)))
     }
 
     fn expand_binding_list(
@@ -458,11 +430,7 @@ impl MacroExpander {
             .iter()
             .map(|binding| self.expand_binding(binding, depth))
             .collect::<Result<Vec<_>, _>>()
-            .map(|bindings| Spanned {
-                node: Datum::List(bindings),
-                span: datum.span.clone(),
-                origin: datum.origin,
-            })
+            .map(|bindings| datum.with_node(Datum::List(bindings)))
     }
 
     fn expand_binding(
@@ -485,11 +453,7 @@ impl MacroExpander {
                 .collect::<Result<Vec<_>, _>>()?,
         );
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: binding.span.clone(),
-            origin: binding.origin,
-        })
+        Ok(binding.with_node(Datum::List(expanded)))
     }
 
     fn expand_cond_form(
@@ -506,11 +470,7 @@ impl MacroExpander {
                 .collect::<Result<Vec<_>, _>>()?,
         );
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(Datum::List(expanded)))
     }
 
     fn expand_cond_clause(
@@ -549,11 +509,7 @@ impl MacroExpander {
                 .collect::<Result<Vec<_>, _>>()?
         };
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: clause.span.clone(),
-            origin: clause.origin,
-        })
+        Ok(clause.with_node(Datum::List(expanded)))
     }
 
     fn expand_case_form(
@@ -574,11 +530,7 @@ impl MacroExpander {
                 .collect::<Result<Vec<_>, _>>()?,
         );
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(Datum::List(expanded)))
     }
 
     fn expand_case_clause(
@@ -601,11 +553,7 @@ impl MacroExpander {
             )
             .collect();
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: clause.span.clone(),
-            origin: clause.origin,
-        })
+        Ok(clause.with_node(Datum::List(expanded)))
     }
 
     fn expand_do_form(
@@ -627,11 +575,7 @@ impl MacroExpander {
         ];
         expanded.extend(body_expander.expand_body_items(&items[3..], depth + 1)?);
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: datum.span.clone(),
-            origin: datum.origin,
-        })
+        Ok(datum.with_node(Datum::List(expanded)))
     }
 
     fn expand_do_binding_list(
@@ -648,11 +592,7 @@ impl MacroExpander {
             .iter()
             .map(|binding| self.expand_do_binding(binding, body_expander, depth))
             .collect::<Result<Vec<_>, _>>()
-            .map(|bindings| Spanned {
-                node: Datum::List(bindings),
-                span: datum.span.clone(),
-                origin: datum.origin,
-            })
+            .map(|bindings| datum.with_node(Datum::List(bindings)))
     }
 
     fn expand_do_binding(
@@ -679,11 +619,7 @@ impl MacroExpander {
                 .collect::<Result<Vec<_>, _>>()?,
         );
 
-        Ok(Spanned {
-            node: Datum::List(expanded),
-            span: binding.span.clone(),
-            origin: binding.origin,
-        })
+        Ok(binding.with_node(Datum::List(expanded)))
     }
 
     fn expand_do_test_clause(
@@ -699,11 +635,7 @@ impl MacroExpander {
             .iter()
             .map(|item| self.expand_with_depth(item, depth))
             .collect::<Result<Vec<_>, _>>()
-            .map(|items| Spanned {
-                node: Datum::List(items),
-                span: clause.span.clone(),
-                origin: clause.origin,
-            })
+            .map(|items| clause.with_node(Datum::List(items)))
     }
 
     fn expand_body_items(
@@ -746,11 +678,7 @@ impl MacroExpander {
             .iter()
             .map(|item| self.expand_with_depth(item, depth))
             .collect::<Result<Vec<_>, _>>()
-            .map(|items| Spanned {
-                node: Datum::List(items),
-                span: datum.span.clone(),
-                origin: datum.origin,
-            })
+            .map(|items| datum.with_node(Datum::List(items)))
     }
 }
 

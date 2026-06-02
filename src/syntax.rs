@@ -36,6 +36,14 @@ impl<T> Spanned<T> {
             origin: self.origin,
         }
     }
+
+    pub fn with_node<U>(&self, node: U) -> Spanned<U> {
+        Spanned {
+            node,
+            span: self.span.clone(),
+            origin: self.origin,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +96,16 @@ mod tests {
         assert!(mapped.node);
         assert_eq!(mapped.span, 0..2);
         assert_eq!(mapped.origin, Some(NodeId(7)));
+    }
+
+    #[test]
+    fn spanned_nodes_can_reuse_source_metadata_with_new_nodes() {
+        let node = Spanned::new(Datum::boolean(true), 0..2).with_origin(NodeId(7));
+        let replaced = node.with_node("replacement");
+
+        assert_eq!(replaced.node, "replacement");
+        assert_eq!(replaced.span, 0..2);
+        assert_eq!(replaced.origin, Some(NodeId(7)));
     }
 
     #[test]
