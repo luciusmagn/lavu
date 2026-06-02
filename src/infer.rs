@@ -3671,6 +3671,10 @@ mod tests {
             ),
             "(U boolean? char?)"
         );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))"),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) any? (U boolean? t1))"
+        );
     }
 
     #[test]
@@ -3690,6 +3694,14 @@ mod tests {
             )
             .to_string(),
             "type constraint conflict: expected string?, got number?"
+        );
+        assert_eq!(
+            infer_error(
+                "((lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))
+                  string? + \"hi\")"
+            )
+            .to_string(),
+            "type constraint conflict: expected number?, got string?"
         );
     }
 

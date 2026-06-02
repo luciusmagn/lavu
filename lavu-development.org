@@ -482,6 +482,8 @@ and output procedures. =any?= means any Scheme value is valid.
 - Give constrained numeric and character predicates latent propositions
   too, for example =zero?= as =(-> number? boolean? : number?)= and
   =char-alphabetic?= as =(-> char? boolean? : char?)=.
+- Keep latent predicate refinements flowing through simple =apply= calls
+  with visible final argument lists, including mismatch diagnostics.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
