@@ -2293,11 +2293,7 @@ fn parse_case(
         span: rest[0].span.clone(),
         origin,
     };
-    let mut result = Spanned {
-        node: boolean_literal(false),
-        span: span.clone(),
-        origin,
-    };
+    let mut result = spanned_expr(boolean_literal(false), span.clone(), origin);
 
     for (index, clause) in rest[1..].iter().enumerate().rev() {
         let Datum::List(items) = &clause.node else {
@@ -2330,11 +2326,11 @@ fn parse_case(
                 });
             }
 
-            result = Spanned {
-                node: body_expr(body, clause.span.clone(), origin)?,
-                span: clause.span.clone(),
+            result = spanned_expr(
+                body_expr(body, clause.span.clone(), origin)?,
+                clause.span.clone(),
                 origin,
-            };
+            );
             continue;
         }
 
@@ -2346,32 +2342,32 @@ fn parse_case(
         };
 
         let condition = case_datum_tests(&temp, datums, clause.span.clone(), origin);
-        let consequent = Spanned {
-            node: body_expr(body, clause.span.clone(), origin)?,
-            span: clause.span.clone(),
+        let consequent = spanned_expr(
+            body_expr(body, clause.span.clone(), origin)?,
+            clause.span.clone(),
             origin,
-        };
-        result = Spanned {
-            node: Expr::If {
+        );
+        result = spanned_expr(
+            Expr::If {
                 condition: Box::new(condition),
                 consequent: Box::new(consequent),
                 alternate: Some(Box::new(result)),
             },
-            span: clause.span.clone(),
+            clause.span.clone(),
             origin,
-        };
+        );
     }
 
     Ok(Expr::Apply {
-        operator: Box::new(Spanned {
-            node: Expr::Lambda {
+        operator: Box::new(spanned_expr(
+            Expr::Lambda {
                 params: vec![temp],
                 rest: None,
                 body: vec![result],
             },
-            span: span.clone(),
+            span.clone(),
             origin,
-        }),
+        )),
         operands: vec![key],
     })
 }
@@ -2383,49 +2379,37 @@ fn case_datum_tests(
     origin: Option<crate::syntax::NodeId>,
 ) -> Spanned<Expr> {
     datums.iter().rev().fold(
-        Spanned {
-            node: boolean_literal(false),
-            span: span.clone(),
-            origin,
-        },
+        spanned_expr(boolean_literal(false), span.clone(), origin),
         |alternate, datum| {
-            let condition = Spanned {
-                node: Expr::Apply {
-                    operator: Box::new(Spanned {
-                        node: Expr::Variable("eqv?".to_string()),
-                        span: datum.span.clone(),
+            let condition = spanned_expr(
+                Expr::Apply {
+                    operator: Box::new(spanned_expr(
+                        Expr::Variable("eqv?".to_string()),
+                        datum.span.clone(),
                         origin,
-                    }),
+                    )),
                     operands: vec![
-                        Spanned {
-                            node: Expr::Variable(key_name.node.clone()),
-                            span: key_name.span.clone(),
-                            origin: key_name.origin,
-                        },
-                        Spanned {
-                            node: Expr::Quote(Box::new(datum.clone())),
-                            span: datum.span.clone(),
-                            origin: datum.origin,
-                        },
+                        variable_expr(key_name),
+                        datum.with_node(Expr::Quote(Box::new(datum.clone()))),
                     ],
                 },
-                span: datum.span.clone(),
+                datum.span.clone(),
                 origin,
-            };
+            );
 
-            Spanned {
-                node: Expr::If {
+            spanned_expr(
+                Expr::If {
                     condition: Box::new(condition),
-                    consequent: Box::new(Spanned {
-                        node: boolean_literal(true),
-                        span: datum.span.clone(),
+                    consequent: Box::new(spanned_expr(
+                        boolean_literal(true),
+                        datum.span.clone(),
                         origin,
-                    }),
+                    )),
                     alternate: Some(Box::new(alternate)),
                 },
-                span: span.clone(),
+                span.clone(),
                 origin,
-            }
+            )
         },
     )
 }
