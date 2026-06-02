@@ -500,14 +500,7 @@ pub fn eval_top_level(form: &Spanned<TopLevel>, env: &Env) -> Result<Value, Eval
             env.define(name.node.clone(), value);
             Ok(Value::Unspecified)
         }
-        TopLevel::Expr(expr) => eval_expr(
-            &Spanned {
-                node: expr.clone(),
-                span: form.span.clone(),
-                origin: form.origin,
-            },
-            env,
-        ),
+        TopLevel::Expr(expr) => eval_expr(&form.with_node(expr.clone()), env),
     }
 }
 

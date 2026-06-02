@@ -308,14 +308,7 @@ impl Inferencer {
                 env.define_inferred(name.node.clone(), ty.clone());
                 Ok(ty)
             }
-            TopLevel::Expr(expr) => self.infer_expr(
-                &Spanned {
-                    node: expr.clone(),
-                    span: form.span.clone(),
-                    origin: form.origin,
-                },
-                env,
-            ),
+            TopLevel::Expr(expr) => self.infer_expr(&form.with_node(expr.clone()), env),
         }
     }
 
@@ -402,11 +395,7 @@ impl Inferencer {
         alternate: &Spanned<Expr>,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let truth = Spanned {
-            node: Expr::Literal(Atom::Boolean(true)),
-            span: condition.span.clone(),
-            origin: condition.origin,
-        };
+        let truth = condition.with_node(Expr::Literal(Atom::Boolean(true)));
         self.infer_if(condition, &truth, Some(alternate), env)
     }
 

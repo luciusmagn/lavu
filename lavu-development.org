@@ -462,6 +462,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Add a borrowed =Spanned::with_node= helper so parser and macro
   traversal code can preserve source context without repeating
   span/origin reconstruction.
+- Reuse =Spanned::with_node= in top-level expression inference and
+  evaluation, plus the generated truth expression used for desugared
+  =or= inference.
 ** Warning Cleanup
 - Remove local lifetime-syntax warnings and update the clipboard
   dependency within existing constraints to clear Cargo's future
