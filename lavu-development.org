@@ -466,6 +466,8 @@ and output procedures. =any?= means any Scheme value is valid.
   like =string?= with =+= before runtime.
 - Render latent predicate procedure query blocks with the proposition on
   the result line, for example =-> boolean? : string?=.
+- Recognize latent predicate tests in desugared =or= forms, avoiding
+  generated temporary names in public inferred types.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

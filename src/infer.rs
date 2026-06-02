@@ -348,7 +348,8 @@ impl Inferencer {
             Expr::Delay(expr) => Ok(Type::PromiseOf(Box::new(self.infer_expr(expr, env)?))),
             Expr::LetRec { bindings, body } => self.infer_letrec(bindings, body, env),
             Expr::Apply { operator, operands } => {
-                if let Some((condition, alternate)) = desugared_or_operands(operator, operands, env)
+                if let Some((condition, alternate)) =
+                    self.desugared_or_operands(operator, operands, env)
                 {
                     return self.infer_desugared_or(condition, alternate, env);
                 }
@@ -403,6 +404,53 @@ impl Inferencer {
     ) -> Result<Type, TypeError> {
         let truth = condition.with_node(Expr::Literal(Atom::Boolean(true)));
         self.infer_if(condition, &truth, Some(alternate), env)
+    }
+
+    fn desugared_or_operands<'a>(
+        &self,
+        operator: &'a Spanned<Expr>,
+        operands: &'a [Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Option<(&'a Spanned<Expr>, &'a Spanned<Expr>)> {
+        let [condition] = operands else {
+            return None;
+        };
+        if !self.has_truthy_predicate_refinements(condition, env) {
+            return None;
+        }
+
+        let Expr::Lambda { params, rest, body } = &operator.node else {
+            return None;
+        };
+        let [param] = params.as_slice() else {
+            return None;
+        };
+        if rest.is_some() || body.len() != 1 || !param.node.starts_with("#%lavu_or_value_") {
+            return None;
+        }
+
+        let Expr::If {
+            condition: if_condition,
+            consequent,
+            alternate: Some(alternate),
+        } = &body[0].node
+        else {
+            return None;
+        };
+        if variable_name(if_condition).map(String::as_str) != Some(param.node.as_str())
+            || variable_name(consequent).map(String::as_str) != Some(param.node.as_str())
+        {
+            return None;
+        }
+
+        Some((condition, alternate))
+    }
+
+    fn has_truthy_predicate_refinements(&self, condition: &Spanned<Expr>, env: &TypeEnv) -> bool {
+        let mut probe = self.clone();
+        !probe
+            .truthy_predicate_refinements(condition, env)
+            .is_empty()
     }
 
     fn infer_primitive_application(
@@ -3117,30 +3165,6 @@ fn is_false_literal(expr: &Spanned<Expr>) -> bool {
     matches!(expr.node, Expr::Literal(Atom::Boolean(false)))
 }
 
-fn direct_predicate_refinement(condition: &Spanned<Expr>, env: &TypeEnv) -> Option<(String, Type)> {
-    let Expr::Apply { operator, operands } = &condition.node else {
-        return None;
-    };
-    if operands.len() != 1 {
-        return None;
-    }
-
-    let Expr::Variable(predicate_name) = &operator.node else {
-        return None;
-    };
-
-    if !env.is_primitive(predicate_name) {
-        return None;
-    }
-
-    let positive = primitive(predicate_name)?
-        .predicate
-        .filter(|predicate| predicate.argument == 0)?
-        .positive;
-
-    predicate_operand_refinement(&operands[0], positive, env)
-}
-
 fn predicate_operand_refinement(
     operand: &Spanned<Expr>,
     positive: Type,
@@ -3170,43 +3194,6 @@ fn predicate_operand_refinement(
         }
         _ => None,
     }
-}
-
-fn desugared_or_operands<'a>(
-    operator: &'a Spanned<Expr>,
-    operands: &'a [Spanned<Expr>],
-    env: &TypeEnv,
-) -> Option<(&'a Spanned<Expr>, &'a Spanned<Expr>)> {
-    let [condition] = operands else {
-        return None;
-    };
-    direct_predicate_refinement(condition, env)?;
-
-    let Expr::Lambda { params, rest, body } = &operator.node else {
-        return None;
-    };
-    let [param] = params.as_slice() else {
-        return None;
-    };
-    if rest.is_some() || body.len() != 1 || !param.node.starts_with("#%lavu_or_value_") {
-        return None;
-    }
-
-    let Expr::If {
-        condition: if_condition,
-        consequent,
-        alternate: Some(alternate),
-    } = &body[0].node
-    else {
-        return None;
-    };
-    if variable_name(if_condition).map(String::as_str) != Some(param.node.as_str())
-        || variable_name(consequent).map(String::as_str) != Some(param.node.as_str())
-    {
-        return None;
-    }
-
-    Some((condition, alternate))
 }
 
 fn variable_name(expr: &Spanned<Expr>) -> Option<&String> {
@@ -3557,6 +3544,14 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (or (string? x) #f))"),
             "(-> x boolean?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred x) (or (pred x) #f))"),
+            "(-> (-> any? boolean? : t0) any? boolean?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (pred proc x) (or (pred x) (proc x)))"),
+            "(-> (-> any? boolean? : t0) (-> any? t1) any? (U boolean? t1))"
         );
     }
 
