@@ -861,7 +861,7 @@ impl Inferencer {
         }
 
         let positive = self.latent_predicate_positive(predicate_name, env)?;
-        self.widen_latent_predicate_operand(&operands[0], env);
+        self.widen_latent_predicate_variable_operand(&operands[0], env);
         predicate_operand_refinement(&operands[0], positive, env)
     }
 
@@ -880,32 +880,12 @@ impl Inferencer {
         }
     }
 
-    fn widen_latent_predicate_operand(&mut self, operand: &Spanned<Expr>, env: &TypeEnv) {
-        match &operand.node {
-            Expr::Variable(name) => self.widen_env_var(name, Type::Any, env),
-            Expr::Apply { operator, operands } => {
-                let [target] = operands.as_slice() else {
-                    return;
-                };
-                let Expr::Variable(target_name) = &target.node else {
-                    return;
-                };
-                match primitive_operator_name(operator, env) {
-                    Some("car") | Some("cdr") => self.widen_env_var(
-                        target_name,
-                        Type::Pair(Box::new(Type::Any), Box::new(Type::Any)),
-                        env,
-                    ),
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn widen_env_var(&mut self, name: &str, ty: Type, env: &TypeEnv) {
+    fn widen_latent_predicate_variable_operand(&mut self, operand: &Spanned<Expr>, env: &TypeEnv) {
+        let Expr::Variable(name) = &operand.node else {
+            return;
+        };
         if let Some(Type::Var(var)) = env.get(name).cloned().map(|ty| self.resolve(ty)) {
-            self.substitutions.insert(var, ty);
+            self.substitutions.insert(var, Type::Any);
         }
     }
 
@@ -3635,6 +3615,15 @@ mod tests {
                   string? string-length \"hi\")"
             ),
             "(U boolean? number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (pred proc x)
+                   (if (and (pair? x) (pred (car x)))
+                       (proc (car x))
+                       #f))"
+            ),
+            "(-> (-> any? boolean? : t0) (-> t0 t1) x (U boolean? t1))"
         );
     }
 
