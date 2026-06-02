@@ -500,6 +500,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Recognize direct-lambda predicate wrapper conditions, including
   lowered =let= predicate aliases, so guarded facts survive educational
   rewrites without making the caller satisfy branch-only constraints.
+- Narrow finite union values in the opposite branch of concrete
+  predicates, so after =(eof-object? char)= fails a =(U char?
+  eof-object?)= value from =read-char= is available as =char?=.
 - Prefer caller-side type variable names when unifying two unknowns, so
   named =let=, =do=, and local helper parameters do not replace enclosing
   lambda parameter names in displayed types.
@@ -693,6 +696,10 @@ and output procedures. =any?= means any Scheme value is valid.
 ** Pair And List Primitives
 - Add native runtime support for =cons=, =car=, =cdr=, and =append= so
   the evaluator matches the existing standard-library type metadata.
+- Reconcile visibly proper non-empty pair shapes with =listof= where the
+  cdr is already list-shaped, so accumulators built with =cons= can flow
+  into =reverse= and =list->string= without weakening direct pair
+  checks.
 ** Dotted List Data
 - Extend the stable datum parser and runtime quote conversion to support
   dotted list data without classifying dotted data as expression syntax.

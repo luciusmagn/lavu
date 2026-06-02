@@ -983,14 +983,17 @@ impl Inferencer {
     ) -> Vec<BranchRefinement> {
         let truthy = self.truthy_predicate_refinements(condition, env);
         if !truthy.is_empty() {
-            return truthy
-                .into_iter()
+            let mut refinements = truthy
+                .iter()
+                .cloned()
                 .map(|(name, positive)| BranchRefinement {
                     branch: RefinedBranch::Then,
                     name,
                     positive,
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            refinements.extend(self.negative_refinements(&truthy, env, RefinedBranch::Else));
+            return refinements;
         }
 
         let Expr::Apply { operator, operands } = &condition.node else {
@@ -1003,14 +1006,44 @@ impl Inferencer {
             return Vec::new();
         }
 
-        self.truthy_predicate_refinements(&operands[0], env)
-            .into_iter()
+        let truthy = self.truthy_predicate_refinements(&operands[0], env);
+        let mut refinements = truthy
+            .iter()
+            .cloned()
             .map(|(name, positive)| BranchRefinement {
                 branch: RefinedBranch::Else,
                 name,
                 positive,
             })
+            .collect::<Vec<_>>();
+        refinements.extend(self.negative_refinements(&truthy, env, RefinedBranch::Then));
+        refinements
+    }
+
+    fn negative_refinements(
+        &self,
+        positives: &[(String, Type)],
+        env: &TypeEnv,
+        branch: RefinedBranch,
+    ) -> Vec<BranchRefinement> {
+        positives
+            .iter()
+            .filter_map(|(name, positive)| {
+                subtract_refinement_type(self.refinement_source_type(name, env)?, positive.clone())
+                    .map(|positive| BranchRefinement {
+                        branch,
+                        name: name.clone(),
+                        positive,
+                    })
+            })
             .collect()
+    }
+
+    fn refinement_source_type(&self, name: &str, env: &TypeEnv) -> Option<Type> {
+        refinement_target_names(env, name)
+            .into_iter()
+            .filter_map(|name| env.get(&name).cloned().map(|ty| self.resolve(ty)))
+            .find(|ty| !matches!(ty, Type::Var(_)))
     }
 
     fn truthy_predicate_refinements(
@@ -1132,10 +1165,7 @@ impl Inferencer {
     fn copy_predicate_substitutions(&mut self, probe: &Inferencer) {
         for (name, ty) in &probe.substitutions {
             let ty = probe.resolve(ty.clone());
-            if matches!(
-                ty,
-                Type::Procedure(ProcedureType::Predicate { .. })
-            ) {
+            if matches!(ty, Type::Procedure(ProcedureType::Predicate { .. })) {
                 self.substitutions.insert(name.clone(), ty);
             }
         }
@@ -2645,6 +2675,22 @@ impl Inferencer {
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::Null, Type::ListOf(_)) | (Type::ListOf(_), Type::Null) => Ok(Type::Null),
             (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
+            (Type::Pair(car, cdr), Type::ListOf(expected)) => {
+                let element = self.unify(*car, *expected, span.clone())?;
+                self.unify(*cdr, Type::ListOf(Box::new(element.clone())), span.clone())?;
+                Ok(Type::ListOf(Box::new(self.resolve(element))))
+            }
+            (Type::Pair(_, cdr), Type::List) => {
+                self.unify(*cdr, Type::List, span)?;
+                Ok(Type::List)
+            }
+            (Type::ListOf(actual), Type::Pair(car, cdr))
+                if let Some(expected) =
+                    proper_pair_element_type((*car).clone(), (*cdr).clone()) =>
+            {
+                let element = self.unify(*actual, expected, span)?;
+                Ok(Type::ListOf(Box::new(self.resolve(element))))
+            }
             (Type::VectorOf(_), Type::Vector) | (Type::Vector, Type::VectorOf(_)) => {
                 Ok(Type::Vector)
             }
@@ -3572,6 +3618,47 @@ fn refinement_target_names(env: &TypeEnv, name: &str) -> Vec<String> {
     names
 }
 
+fn subtract_refinement_type(existing: Type, positive: Type) -> Option<Type> {
+    if !can_subtract_refinement(&positive) {
+        return None;
+    }
+
+    let narrowed = match existing.clone() {
+        Type::Union(types) => Type::union(
+            types
+                .into_iter()
+                .filter(|ty| !type_covered_by(ty, &positive))
+                .collect::<Vec<_>>(),
+        ),
+        ty if type_covered_by(&ty, &positive) => Type::Never,
+        _ => return None,
+    };
+
+    (narrowed != existing).then_some(narrowed)
+}
+
+fn can_subtract_refinement(positive: &Type) -> bool {
+    !has_type_var(positive)
+        && !matches!(
+            positive,
+            Type::Any | Type::Unknown | Type::Never | Type::Var(_)
+        )
+}
+
+fn type_covered_by(candidate: &Type, positive: &Type) -> bool {
+    intersect_types(candidate.clone(), positive.clone()) == *candidate
+}
+
+fn proper_pair_element_type(car: Type, cdr: Type) -> Option<Type> {
+    match cdr {
+        Type::Null => Some(car),
+        Type::ListOf(element) => Some(Type::union(vec![car, *element])),
+        Type::Pair(next_car, next_cdr) => proper_pair_element_type(*next_car, *next_cdr)
+            .map(|element| Type::union(vec![car, element])),
+        _ => None,
+    }
+}
+
 fn intersect_types(left: Type, right: Type) -> Type {
     match (left, right) {
         (Type::Never, _) | (_, Type::Never) => Type::Never,
@@ -3962,6 +4049,10 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (reverse x))"),
             "(-> (listof t0) (listof t0))"
+        );
+        assert_eq!(
+            infer_one("(lambda (chars char) (list->string (reverse (cons char chars))))"),
+            "(-> (listof char?) char? string?)"
         );
     }
 
@@ -4409,7 +4500,7 @@ mod tests {
                 "((lambda (pred proc x) (if (pred x) (proc x) #f))
                   string? string-length \"hi\")"
             ),
-            "(U boolean? number?)"
+            "number?"
         );
         assert_eq!(
             infer_one(
@@ -4425,14 +4516,14 @@ mod tests {
                 "((lambda (pred proc x) (if (pred x) (proc x) #f))
                   zero? + 0)"
             ),
-            "(U boolean? number?)"
+            "number?"
         );
         assert_eq!(
             infer_one(
                 "((lambda (pred proc x) (if (pred x) (proc x) #f))
                   char-alphabetic? char-upcase #\\a)"
             ),
-            "(U boolean? char?)"
+            "char?"
         );
         assert_eq!(
             infer_one("(lambda (pred proc x) (if (pred x) (apply proc (list x)) #f))"),
@@ -5022,6 +5113,42 @@ mod tests {
         assert_eq!(infer_one("(input-port? (current-input-port))"), "boolean?");
         assert_eq!(infer_one("(read)"), "any?");
         assert_eq!(infer_one("(read-char)"), "(U char? eof-object?)");
+        assert_eq!(
+            infer_one(
+                "(lambda (port)
+                   (let ((char (read-char port)))
+                     (if (eof-object? char)
+                         char
+                         (char=? char #\\newline))))"
+            ),
+            "(-> input-port? (U boolean? eof-object?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (port)
+                   (let ((char (read-char port)))
+                     (cond ((eof-object? char) char)
+                           ((char=? char #\\newline) char)
+                           (else char))))"
+            ),
+            "(-> input-port? (U char? eof-object?))"
+        );
+        assert_eq!(
+            infer_one(
+                "(lambda (port)
+                   (let loop ((chars (quote ())))
+                     (let ((char (read-char port)))
+                       (cond ((eof-object? char)
+                              (if (null? chars)
+                                  char
+                                  (list->string (reverse chars))))
+                             ((char=? char #\\newline)
+                              (list->string (reverse chars)))
+                             (else
+                              (loop (cons char chars)))))))"
+            ),
+            "(-> input-port? (U string? eof-object?))"
+        );
         assert_eq!(infer_one("(current-output-port)"), "output-port?");
         assert_eq!(
             infer_one("(output-port? (current-output-port))"),
