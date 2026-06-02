@@ -479,6 +479,9 @@ and output procedures. =any?= means any Scheme value is valid.
 - Prefer caller-side type variable names when unifying two unknowns, so
   named =let=, =do=, and local helper parameters do not replace enclosing
   lambda parameter names in displayed types.
+- Give constrained numeric and character predicates latent propositions
+  too, for example =zero?= as =(-> number? boolean? : number?)= and
+  =char-alphabetic?= as =(-> char? boolean? : char?)=.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.

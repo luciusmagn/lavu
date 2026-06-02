@@ -23,9 +23,13 @@ impl Primitive {
     }
 
     fn predicate(name: &'static str, positive: Type) -> Self {
+        Self::constrained_predicate(name, Type::Any, positive)
+    }
+
+    fn constrained_predicate(name: &'static str, param: Type, positive: Type) -> Self {
         Self {
             name,
-            signature: Type::predicate_procedure(Type::Any, positive.clone()),
+            signature: Type::predicate_procedure(param, positive.clone()),
             predicate: Some(PredicateRefinement {
                 argument: 0,
                 positive,
@@ -50,13 +54,13 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
         Primitive::predicate("real?", Type::Number),
         Primitive::predicate("rational?", Type::Number),
         Primitive::predicate("integer?", Type::Number),
-        Primitive::new("exact?", number_predicate()),
-        Primitive::new("inexact?", number_predicate()),
-        Primitive::new("zero?", number_predicate()),
-        Primitive::new("positive?", number_predicate()),
-        Primitive::new("negative?", number_predicate()),
-        Primitive::new("odd?", number_predicate()),
-        Primitive::new("even?", number_predicate()),
+        Primitive::constrained_predicate("exact?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("inexact?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("zero?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("positive?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("negative?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("odd?", Type::Number, Type::Number),
+        Primitive::constrained_predicate("even?", Type::Number, Type::Number),
         Primitive::predicate("char?", Type::Char),
         Primitive::predicate("string?", Type::String),
         Primitive::predicate("symbol?", Type::Symbol),
@@ -117,11 +121,11 @@ pub fn r5rs_primitives() -> Vec<Primitive> {
             "integer->char",
             Type::procedure(vec![Type::Number], Type::Char),
         ),
-        Primitive::new("char-alphabetic?", char_predicate()),
-        Primitive::new("char-numeric?", char_predicate()),
-        Primitive::new("char-whitespace?", char_predicate()),
-        Primitive::new("char-upper-case?", char_predicate()),
-        Primitive::new("char-lower-case?", char_predicate()),
+        Primitive::constrained_predicate("char-alphabetic?", Type::Char, Type::Char),
+        Primitive::constrained_predicate("char-numeric?", Type::Char, Type::Char),
+        Primitive::constrained_predicate("char-whitespace?", Type::Char, Type::Char),
+        Primitive::constrained_predicate("char-upper-case?", Type::Char, Type::Char),
+        Primitive::constrained_predicate("char-lower-case?", Type::Char, Type::Char),
         Primitive::new("char-upcase", Type::procedure(vec![Type::Char], Type::Char)),
         Primitive::new(
             "char-downcase",
@@ -680,14 +684,6 @@ fn numeric_comparison() -> Type {
     )
 }
 
-fn number_predicate() -> Type {
-    Type::procedure(vec![Type::Number], Type::Boolean)
-}
-
-fn char_predicate() -> Type {
-    Type::procedure(vec![Type::Char], Type::Boolean)
-}
-
 fn map_signature() -> Type {
     let element = Type::Var("a".to_string());
     let result = Type::Var("b".to_string());
@@ -801,7 +797,7 @@ mod tests {
         );
         assert_eq!(
             primitive("zero?").unwrap().signature.to_string(),
-            "(-> number? boolean?)"
+            "(-> number? boolean? : number?)"
         );
         assert_eq!(
             primitive("max").unwrap().signature.to_string(),
@@ -889,7 +885,7 @@ mod tests {
         );
         assert_eq!(
             primitive("char-alphabetic?").unwrap().signature.to_string(),
-            "(-> char? boolean?)"
+            "(-> char? boolean? : char?)"
         );
         assert_eq!(
             primitive("char-upcase").unwrap().signature.to_string(),

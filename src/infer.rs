@@ -3657,6 +3657,20 @@ mod tests {
             ),
             "(-> (-> any? boolean? : t0) (-> t0 t1) x (U boolean? t1))"
         );
+        assert_eq!(
+            infer_one(
+                "((lambda (pred proc x) (if (pred x) (proc x) #f))
+                  zero? + 0)"
+            ),
+            "(U boolean? number?)"
+        );
+        assert_eq!(
+            infer_one(
+                "((lambda (pred proc x) (if (pred x) (proc x) #f))
+                  char-alphabetic? char-upcase #\\a)"
+            ),
+            "(U boolean? char?)"
+        );
     }
 
     #[test]
