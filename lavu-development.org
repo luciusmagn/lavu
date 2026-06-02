@@ -297,6 +297,9 @@ and output procedures. =any?= means any Scheme value is valid.
   inexact complex fallback for non-integer exponents.
 - Allow numeric === to compare complex values while keeping ordered
   comparisons restricted to real numbers.
+- Make =eqv?= compare numeric values through exactness-aware numeric
+  equality, so inexact zero-imaginary complex values agree with their
+  real counterparts while exact and inexact numbers remain distinct.
 - Treat decimal complex values with a zero imaginary component as real
   for real predicates, ordered comparisons, extrema, and real coercions.
 ** Character Library

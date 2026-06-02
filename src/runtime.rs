@@ -3844,28 +3844,12 @@ fn is_radix_prefix(prefix: &str) -> bool {
 }
 
 fn eqv_value(left: &Value, right: &Value) -> bool {
+    if let Some(equal) = numeric_eqv_value(left, right) {
+        return equal;
+    }
+
     match (left, right) {
         (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::Integer(left), Value::Integer(right)) => left == right,
-        (Value::Rational(left), Value::Rational(right)) => left == right,
-        (Value::Integer(left), Value::Rational(right))
-        | (Value::Rational(right), Value::Integer(left)) => {
-            &BigRational::from_integer(left.clone()) == right
-        }
-        (Value::ExactComplex(left), Value::ExactComplex(right)) => left == right,
-        (Value::ExactComplex(left), Value::Integer(right))
-        | (Value::Integer(right), Value::ExactComplex(left)) => {
-            left == &Complex::new(
-                BigRational::from_integer(right.clone()),
-                BigRational::zero(),
-            )
-        }
-        (Value::ExactComplex(left), Value::Rational(right))
-        | (Value::Rational(right), Value::ExactComplex(left)) => {
-            left == &Complex::new(right.clone(), BigRational::zero())
-        }
-        (Value::Decimal(left), Value::Decimal(right)) => left == right,
-        (Value::Complex(left), Value::Complex(right)) => left == right,
         (Value::Character(left), Value::Character(right)) => left == right,
         (Value::String(left), Value::String(right)) => Rc::ptr_eq(left, right),
         (Value::Symbol(left), Value::Symbol(right)) => left == right,
@@ -3881,6 +3865,27 @@ fn eqv_value(left: &Value, right: &Value) -> bool {
         (Value::EofObject, Value::EofObject) => true,
         (Value::List(left), Value::List(right)) if left.is_empty() && right.is_empty() => true,
         _ => false,
+    }
+}
+
+fn numeric_eqv_value(left: &Value, right: &Value) -> Option<bool> {
+    let left_exact = numeric_exactness(left)?;
+    let right_exact = numeric_exactness(right)?;
+    if left_exact != right_exact {
+        return Some(false);
+    }
+
+    match numeric_equal(vec![left.clone(), right.clone()], 0..0) {
+        Ok(Value::Boolean(equal)) => Some(equal),
+        _ => Some(false),
+    }
+}
+
+fn numeric_exactness(value: &Value) -> Option<bool> {
+    match value {
+        Value::Integer(_) | Value::Rational(_) | Value::ExactComplex(_) => Some(true),
+        Value::Decimal(_) | Value::Complex(_) => Some(false),
+        _ => None,
     }
 }
 
@@ -5634,6 +5639,11 @@ mod tests {
     #[test]
     fn evaluates_equality_predicates() {
         assert_eq!(eval_one("(eq? 'a 'a)"), "#t");
+        assert_eq!(eval_one("(eqv? 1 1.0)"), "#f");
+        assert_eq!(eval_one("(eqv? 1/2 2/4)"), "#t");
+        assert_eq!(eval_one("(eqv? 1/2 0.5)"), "#f");
+        assert_eq!(eval_one("(eqv? 1.0 1.0+0i)"), "#t");
+        assert_eq!(eval_one("(eqv? 1.0+2.0i 1.0+2.0i)"), "#t");
         assert_eq!(eval_one("(equal? '(1 (2)) '(1 (2)))"), "#t");
         assert_eq!(eval_one("(equal? (vector 1 2) (vector 1 2))"), "#t");
         assert_eq!(eval_one("(eq? (vector 1 2) (vector 1 2))"), "#f");
