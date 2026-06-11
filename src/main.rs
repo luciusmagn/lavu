@@ -267,10 +267,30 @@ fn eval_input(
 ) -> std::result::Result<EvalOutput, ReplError> {
     let datums = parse(input)?;
     let mut inferencer = Inferencer::new();
+
+    // R5RS treats the top level like letrec* over its definitions, so seed
+    // this input's procedure defines up front; earlier forms may reference
+    // later ones.
+    for name in forward_definition_names(&datums) {
+        inferencer.preseed_forward_definition(&name, type_env);
+    }
+    let result = eval_seeded_input(input, &datums, env, surface, type_env, &mut inferencer);
+    inferencer.clear_unsolved_preseeds(type_env);
+    result
+}
+
+fn eval_seeded_input(
+    input: &str,
+    datums: &[Spanned<Datum>],
+    env: &Env,
+    surface: &mut SurfaceContext,
+    type_env: &mut TypeEnv,
+    inferencer: &mut Inferencer,
+) -> std::result::Result<EvalOutput, ReplError> {
     let mut values = Vec::new();
     let mut definitions = Vec::new();
 
-    for datum in &datums {
+    for datum in datums {
         let mut next_surface = surface.clone();
         let program = next_surface.classify_program(std::slice::from_ref(datum))?;
 
@@ -301,6 +321,52 @@ fn eval_input(
         type_error: None,
         definitions,
     })
+}
+
+/// Best-effort scan for top-level `(define (name . formals) ...)` and
+/// `(define name (lambda ...))` shapes, including through top-level `begin`
+/// splices, so forward references can pre-seed before classification.
+fn forward_definition_names(datums: &[Spanned<Datum>]) -> Vec<String> {
+    let mut names = Vec::new();
+    for datum in datums {
+        collect_forward_definition_names(datum, &mut names);
+    }
+    names
+}
+
+fn collect_forward_definition_names(datum: &Spanned<Datum>, names: &mut Vec<String>) {
+    let Datum::List(items) = &datum.node else {
+        return;
+    };
+    let Some(head) = items.first().and_then(identifier_name) else {
+        return;
+    };
+
+    match head.as_str() {
+        "begin" => {
+            for item in &items[1..] {
+                collect_forward_definition_names(item, names);
+            }
+        }
+        "define" => match items.get(1).map(|target| &target.node) {
+            Some(Datum::List(formals) | Datum::DottedList(formals, _)) => {
+                if let Some(name) = formals.first().and_then(identifier_name) {
+                    names.push(name);
+                }
+            }
+            Some(Datum::Atom(Atom::Identifier(name))) => {
+                let lambda_value = items.get(2).is_some_and(|value| {
+                    matches!(&value.node, Datum::List(value)
+                        if value.first().and_then(identifier_name).as_deref() == Some("lambda"))
+                });
+                if lambda_value {
+                    names.push(name.clone());
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
 }
 
 fn eval_query_values(

@@ -117,6 +117,23 @@ impl TypeEnv {
     fn is_primitive(&self, name: &str) -> bool {
         self.binding(name).is_some_and(|binding| binding.primitive)
     }
+
+    fn remove(&mut self, name: &str) {
+        self.bindings.remove(name);
+    }
+
+    /// Source names whose binding is exactly the given type variable,
+    /// sorted so callers behave deterministically.
+    fn names_bound_to_var(&self, var: &str) -> Vec<String> {
+        let mut names = self
+            .bindings
+            .iter()
+            .filter(|(_, binding)| matches!(&binding.ty, Type::Var(name) if name == var))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
 }
 
 impl TypeBinding {
@@ -149,10 +166,18 @@ impl TypeBinding {
 pub struct Inferencer {
     substitutions: BTreeMap<String, Type>,
     next_var: usize,
+    next_param: usize,
     /// Type variables seeding recursive definitions currently being inferred.
     /// A self-call must not speculate that the function under definition is
     /// a latent predicate; only finished evidence may classify it.
     recursion_seeds: BTreeSet<String>,
+    /// How many lambda bodies enclose the expression being inferred. Unbound
+    /// variables under a lambda are legal R5RS forward references, since the
+    /// definition only has to exist by the time the procedure is called.
+    lambda_depth: usize,
+    /// Forward-referenced names awaiting their top-level definitions, each
+    /// holding the type variable every prior reference shares.
+    pending_globals: BTreeMap<String, Type>,
     /// Optional trace buffer. Shared across branch-clone inferencers via `Rc`
     /// so occurrence-typed branches record their steps in execution order.
     trace: Option<Rc<RefCell<Vec<TraceStep>>>>,
@@ -421,7 +446,13 @@ fn case_key_refinement_name(name: &str, env: &TypeEnv) -> String {
     }
 
     match env.get(name) {
-        Some(Type::Var(alias)) => alias.clone(),
+        // The generated key temp aliases the scrutinee variable; refine the
+        // source binding sharing that variable rather than the temp itself.
+        Some(Type::Var(alias)) => env
+            .names_bound_to_var(alias)
+            .into_iter()
+            .find(|source| source != name && !source.starts_with("#%lavu_"))
+            .unwrap_or_else(|| alias.clone()),
         _ => name.to_string(),
     }
 }
@@ -473,11 +504,89 @@ impl Inferencer {
         program: &Program,
         env: &mut TypeEnv,
     ) -> Result<Vec<Type>, TypeError> {
-        program
+        // R5RS top-level programs behave like letrec* over their
+        // definitions, so seed procedure defines up front and let forward
+        // references share one variable per name.
+        for form in &program.forms {
+            if let TopLevel::Define { name, value } = &form.node
+                && matches!(value.node, Expr::Lambda { .. })
+            {
+                self.preseed_forward_definition(&name.node, env);
+            }
+        }
+
+        let types = program
             .forms
             .iter()
             .map(|form| self.infer_top_level(form, env))
-            .collect()
+            .collect::<Result<Vec<_>, _>>();
+        self.clear_unsolved_preseeds(env);
+
+        Ok(types?.into_iter().map(|ty| self.resolve(ty)).collect())
+    }
+
+    /// Bind a not-yet-defined top-level procedure name to a shared seed
+    /// variable so earlier forms can reference it before its definition.
+    pub fn preseed_forward_definition(&mut self, name: &str, env: &mut TypeEnv) {
+        if env.binding(name).is_some() || self.pending_globals.contains_key(name) {
+            return;
+        }
+
+        let seed = self.fresh_type_var();
+        if let Type::Var(var) = &seed {
+            self.recursion_seeds.insert(var.clone());
+        }
+        self.pending_globals.insert(name.to_string(), seed.clone());
+        env.define(name, seed);
+    }
+
+    /// Whether a type shares variables with any unsolved forward-reference
+    /// seed. Such a type must stay monotype: its variables belong to a
+    /// definition still to come, so instantiating them as a polymorphic
+    /// scheme would disconnect them from that definition.
+    fn pending_tainted(&self, ty: &Type) -> bool {
+        if self.pending_globals.is_empty() {
+            return false;
+        }
+        let ty_vars = collect_type_vars(ty);
+        if ty_vars.is_empty() {
+            return false;
+        }
+
+        self.pending_globals.values().any(|seed| {
+            let mut seed_vars = collect_type_vars(&self.resolve(seed.clone()));
+            seed_vars.extend(collect_type_vars(seed));
+            seed_vars.intersection(&ty_vars).next().is_some()
+        })
+    }
+
+    /// Drop seeded bindings whose definitions never arrived, so an aborted
+    /// or mis-scanned input does not leave phantom names behind.
+    pub fn clear_unsolved_preseeds(&mut self, env: &mut TypeEnv) {
+        for (name, seed) in std::mem::take(&mut self.pending_globals) {
+            if env.get(&name) == Some(&seed) {
+                env.remove(&name);
+            }
+        }
+    }
+
+    /// Re-resolve every inferred binding, folding in constraints discovered
+    /// after the binding was first recorded (forward references in
+    /// particular). Bindings kept monotype while tainted by an unsolved
+    /// forward reference generalize once their variables settle.
+    pub fn resolve_env(&self, env: &mut TypeEnv) {
+        for binding in env.bindings.values_mut() {
+            if binding.primitive {
+                continue;
+            }
+            binding.ty = self.resolve(binding.ty.clone());
+            if !binding.scheme
+                && has_type_var(&binding.ty)
+                && !self.pending_tainted(&binding.ty)
+            {
+                binding.scheme = true;
+            }
+        }
     }
 
     pub fn infer_top_level(
@@ -507,8 +616,22 @@ impl Inferencer {
                     }
                     None => ty,
                 };
+                let ty = match self.pending_globals.remove(&name.node) {
+                    Some(pending) => {
+                        let ty = self.unify(ty, pending, value.span.clone())?;
+                        // The forward reference is now solved; repair the
+                        // bindings that were inferred while it was open.
+                        self.resolve_env(env);
+                        ty
+                    }
+                    None => ty,
+                };
                 let ty = self.resolve(ty);
-                env.define_inferred(name.node.clone(), ty.clone());
+                if self.pending_tainted(&ty) {
+                    env.define(name.node.clone(), ty.clone());
+                } else {
+                    env.define_inferred(name.node.clone(), ty.clone());
+                }
                 Ok(ty)
             }
             TopLevel::Expr(expr) => self.infer_expr(&form.with_node(expr.clone()), env),
@@ -644,11 +767,15 @@ impl Inferencer {
             else_inferencer.infer_expr(alternate, &else_env)?
         };
 
-        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer, env);
         self.next_var = self
             .next_var
             .max(then_inferencer.next_var)
             .max(else_inferencer.next_var);
+        self.next_param = self
+            .next_param
+            .max(then_inferencer.next_param)
+            .max(else_inferencer.next_param);
 
         Ok(Type::union(vec![
             then_inferencer.resolve(consequent_ty),
@@ -797,22 +924,39 @@ impl Inferencer {
         body: &[Spanned<Expr>],
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
+        self.lambda_depth += 1;
+        let result = self.infer_lambda_body(params, rest, body, env);
+        self.lambda_depth -= 1;
+        result
+    }
+
+    fn infer_lambda_body(
+        &mut self,
+        params: &[Spanned<String>],
+        rest: Option<&Spanned<String>>,
+        body: &[Spanned<Expr>],
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
         let mut local = env.clone();
-        for param in params {
-            local.define(param.node.clone(), Type::Var(param.node.clone()));
-        }
-        if let Some(rest) = rest {
-            local.define(
-                rest.node.clone(),
-                Type::ListOf(Box::new(Type::Var(rest.node.clone()))),
-            );
-        }
+        let param_vars = params
+            .iter()
+            .map(|param| {
+                let var = self.fresh_param_var(&param.node);
+                local.define(param.node.clone(), var.clone());
+                var
+            })
+            .collect::<Vec<_>>();
+        let rest_var = rest.map(|rest| {
+            let var = self.fresh_param_var(&rest.node);
+            local.define(rest.node.clone(), Type::ListOf(Box::new(var.clone())));
+            var
+        });
 
         let predicate_positive = self.lambda_predicate_positive(params, rest, body, &local);
         let result = self.infer_sequence(body, &local)?;
-        let param_types = params
+        let param_types = param_vars
             .iter()
-            .map(|param| self.resolve(Type::Var(param.node.clone())))
+            .map(|var| self.resolve(var.clone()))
             .collect::<Vec<_>>();
 
         let result = self.resolve(result);
@@ -821,18 +965,24 @@ impl Inferencer {
             && result == Type::Boolean
             && let Some(positive) = predicate_positive
         {
-            let param = predicate_lambda_param_type(&params[0].node, param_types[0].clone());
+            let param = predicate_lambda_param_type(&param_vars[0], param_types[0].clone());
             return Ok(Type::predicate_procedure(param, self.resolve(positive)));
         }
 
-        Ok(match rest {
-            Some(rest) => Type::rest_procedure(
-                param_types,
-                self.resolve(Type::Var(rest.node.clone())),
-                result,
-            ),
+        Ok(match rest_var {
+            Some(var) => Type::rest_procedure(param_types, self.resolve(var), result),
             None => Type::procedure(param_types, result),
         })
+    }
+
+    /// A unique type variable for one lambda's parameter. The source name
+    /// keeps displays readable while the ordinal keeps separate lambdas
+    /// reusing a parameter name from sharing constraints; `#` cannot appear
+    /// in an R5RS identifier, so user code cannot collide with these.
+    fn fresh_param_var(&mut self, name: &str) -> Type {
+        let var = format!("{name}#{}", self.next_param);
+        self.next_param += 1;
+        Type::Var(var)
     }
 
     fn lambda_predicate_positive(
@@ -852,6 +1002,22 @@ impl Inferencer {
     }
 
     fn infer_lambda_with_argument_types(
+        &mut self,
+        params: &[Spanned<String>],
+        rest: Option<&Spanned<String>>,
+        body: &[Spanned<Expr>],
+        argument_tys: Vec<Type>,
+        span: SourceSpan,
+        env: &TypeEnv,
+    ) -> Result<Type, TypeError> {
+        self.lambda_depth += 1;
+        let result =
+            self.infer_lambda_body_with_argument_types(params, rest, body, argument_tys, span, env);
+        self.lambda_depth -= 1;
+        result
+    }
+
+    fn infer_lambda_body_with_argument_types(
         &mut self,
         params: &[Spanned<String>],
         rest: Option<&Spanned<String>>,
@@ -961,11 +1127,15 @@ impl Inferencer {
             None => Type::Unspecified,
         };
 
-        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer, env);
         self.next_var = self
             .next_var
             .max(then_inferencer.next_var)
             .max(else_inferencer.next_var);
+        self.next_param = self
+            .next_param
+            .max(then_inferencer.next_param)
+            .max(else_inferencer.next_param);
 
         Ok(Type::union(vec![
             then_inferencer.resolve(consequent_ty),
@@ -1005,11 +1175,15 @@ impl Inferencer {
             None => Type::Unspecified,
         };
 
-        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer);
+        self.merge_branch_substitutions(&refinements, &then_inferencer, &else_inferencer, env);
         self.next_var = self
             .next_var
             .max(then_inferencer.next_var)
             .max(else_inferencer.next_var);
+        self.next_param = self
+            .next_param
+            .max(then_inferencer.next_param)
+            .max(else_inferencer.next_param);
 
         Ok(Type::union(vec![
             then_inferencer.resolve(consequent_ty),
@@ -1022,15 +1196,23 @@ impl Inferencer {
         refinements: &[BranchRefinement],
         then_inferencer: &Inferencer,
         else_inferencer: &Inferencer,
+        env: &TypeEnv,
     ) {
+        // Refinements name source bindings while substitutions key type
+        // variables, so bridge refined names to the variables they bind.
         let mut names = BTreeSet::new();
+        let mut sources = BTreeMap::new();
         for refinement in refinements {
-            names.insert(refinement.name.clone());
+            if let Some(Type::Var(var)) = env.get(&refinement.name) {
+                sources.insert(var.clone(), refinement.name.clone());
+                names.insert(var.clone());
+            }
         }
         names.extend(then_inferencer.substitutions.keys().cloned());
         names.extend(else_inferencer.substitutions.keys().cloned());
 
         for name in names {
+            let source = sources.get(&name).map_or(name.as_str(), String::as_str);
             let mut then_ty = then_inferencer
                 .substitutions
                 .get(&name)
@@ -1045,14 +1227,14 @@ impl Inferencer {
             if then_ty.is_none()
                 && else_ty.is_some()
                 && let Some(positive) =
-                    branch_refinement_type(refinements, &name, RefinedBranch::Then)
+                    branch_refinement_type(refinements, source, RefinedBranch::Then)
             {
                 then_ty = Some(positive);
             }
             if else_ty.is_none()
                 && then_ty.is_some()
                 && let Some(positive) =
-                    branch_refinement_type(refinements, &name, RefinedBranch::Else)
+                    branch_refinement_type(refinements, source, RefinedBranch::Else)
             {
                 else_ty = Some(positive);
             }
@@ -1507,12 +1689,25 @@ impl Inferencer {
         span: SourceSpan,
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
-        let binding = env
-            .binding(name)
-            .ok_or_else(|| TypeError::UnboundVariable {
+        let Some(binding) = env.binding(name) else {
+            // R5RS allows a procedure body to reference definitions that
+            // arrive later, so unbound names under a lambda become pending
+            // forward references instead of errors. Every reference shares
+            // one variable, unified once the definition appears.
+            if self.lambda_depth > 0 {
+                if let Some(pending) = self.pending_globals.get(name) {
+                    return Ok(self.resolve(pending.clone()));
+                }
+                let pending = self.fresh_type_var();
+                self.pending_globals
+                    .insert(name.to_string(), pending.clone());
+                return Ok(pending);
+            }
+            return Err(TypeError::UnboundVariable {
                 name: name.to_string(),
                 span,
-            })?;
+            });
+        };
         let ty = if binding.scheme {
             self.instantiate_scheme(&binding.ty)
         } else {
@@ -3545,6 +3740,61 @@ fn contains_var(ty: &Type, name: &str) -> bool {
     }
 }
 
+fn collect_type_vars(ty: &Type) -> BTreeSet<String> {
+    fn walk(ty: &Type, vars: &mut BTreeSet<String>) {
+        match ty {
+            Type::Var(name) => {
+                vars.insert(name.clone());
+            }
+            Type::Pair(car, cdr) => {
+                walk(car, vars);
+                walk(cdr, vars);
+            }
+            Type::ListOf(element) | Type::VectorOf(element) | Type::PromiseOf(element) => {
+                walk(element, vars)
+            }
+            Type::Values(types) | Type::Union(types) => {
+                types.iter().for_each(|ty| walk(ty, vars))
+            }
+            Type::Procedure(ProcedureType::Fixed { params, result }) => {
+                params.iter().for_each(|ty| walk(ty, vars));
+                walk(result, vars);
+            }
+            Type::Procedure(ProcedureType::Optional {
+                required,
+                optional,
+                result,
+            }) => {
+                required.iter().for_each(|ty| walk(ty, vars));
+                optional.iter().for_each(|ty| walk(ty, vars));
+                walk(result, vars);
+            }
+            Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
+                walk(param, vars);
+                walk(result, vars);
+            }
+            Type::Procedure(ProcedureType::Rest {
+                required,
+                rest,
+                result,
+            }) => {
+                required.iter().for_each(|ty| walk(ty, vars));
+                walk(rest, vars);
+                walk(result, vars);
+            }
+            Type::Procedure(ProcedureType::Predicate { param, positive }) => {
+                walk(param, vars);
+                walk(positive, vars);
+            }
+            _ => {}
+        }
+    }
+
+    let mut vars = BTreeSet::new();
+    walk(ty, &mut vars);
+    vars
+}
+
 fn has_type_var(ty: &Type) -> bool {
     match ty {
         Type::Var(_) => true,
@@ -3611,8 +3861,8 @@ fn call_with_values_result_for_params(params: Vec<Type>) -> Type {
     }
 }
 
-fn predicate_lambda_param_type(param_name: &str, ty: Type) -> Type {
-    if same_type_var(&ty, &Type::Var(param_name.to_string())) {
+fn predicate_lambda_param_type(param_var: &Type, ty: Type) -> Type {
+    if same_type_var(&ty, param_var) {
         Type::Any
     } else {
         wildcard_type_vars(ty)
@@ -4094,14 +4344,24 @@ fn refined_branch_env(
 fn refinement_target_names(env: &TypeEnv, name: &str) -> Vec<String> {
     let mut names = vec![name.to_string()];
     let mut seen = BTreeSet::from([name.to_string()]);
-    let mut current = name.to_string();
+    let mut pending = vec![name.to_string()];
 
-    while let Some(Type::Var(alias)) = env.get(&current) {
-        if !seen.insert(alias.clone()) {
-            break;
+    while let Some(current) = pending.pop() {
+        let Some(Type::Var(alias)) = env.get(&current) else {
+            continue;
+        };
+        if seen.insert(alias.clone()) {
+            names.push(alias.clone());
+            pending.push(alias.clone());
         }
-        names.push(alias.clone());
-        current = alias.clone();
+        // Every source binding holding this same variable aliases the same
+        // value, so branch refinements apply to all of them.
+        for source in env.names_bound_to_var(alias) {
+            if seen.insert(source.clone()) {
+                names.push(source.clone());
+                pending.push(source);
+            }
+        }
     }
 
     names
@@ -4575,17 +4835,17 @@ mod tests {
     fn folds_recursive_list_walks_into_listof_types() {
         assert_eq!(
             infer_one("(define (len l) (if (null? l) 0 (+ 1 (len (cdr l)))))"),
-            "(-> (listof t1) number?)"
+            "(-> (listof t2) number?)"
         );
         assert_eq!(
             infer_all("(define (len l) (if (null? l) 0 (+ 1 (len (cdr l))))) (len '(1 2 3))"),
-            vec!["(-> (listof t1) number?)".to_string(), "number?".to_string()]
+            vec!["(-> (listof t2) number?)".to_string(), "number?".to_string()]
         );
         assert_eq!(
             infer_one(
                 "(define (my-map f l) (if (null? l) '() (cons (f (car l)) (my-map f (cdr l)))))"
             ),
-            "(-> (-> t1 t3) (listof t1) (listof t3))"
+            "(-> (-> t2 t4) (listof t2) (listof t4))"
         );
         assert_eq!(
             infer_one(
@@ -4593,7 +4853,7 @@ mod tests {
                    (if (null? al) #f \
                        (if (eq? k (car (car al))) (car al) (my-assq k (cdr al)))))"
             ),
-            "(-> k (listof (pair? t3 t4)) (U #f (pair? t3 t4)))"
+            "(-> k (listof (pair? t4 t5)) (U #f (pair? t4 t5)))"
         );
     }
 
@@ -4601,7 +4861,7 @@ mod tests {
     fn unfoldable_recursive_bindings_collapse_to_unknown() {
         assert_eq!(
             infer_one("(define (rev l acc) (if (null? l) acc (rev (cdr l) (cons (car l) acc))))"),
-            "(-> (listof t1) unknown? unknown?)"
+            "(-> (listof t2) unknown? unknown?)"
         );
     }
 
@@ -4614,12 +4874,35 @@ mod tests {
     }
 
     #[test]
+    fn infers_mutually_recursive_top_level_procedures() {
+        assert_eq!(
+            infer_all(
+                "(define (evn? n) (if (zero? n) #t (od? (- n 1)))) \
+                 (define (od? n) (if (zero? n) #f (evn? (- n 1)))) \
+                 (evn? 10)"
+            ),
+            vec![
+                "(-> number? boolean?)".to_string(),
+                "(-> number? boolean?)".to_string(),
+                "boolean?".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn unsolved_forward_references_stay_permissive() {
+        // Referencing a procedure that is never defined in this program is
+        // legal R5RS until the call happens, so inference stays advisory.
+        assert_eq!(infer_one("(define (f n) (g n))"), "(-> n t3)");
+    }
+
+    #[test]
     fn self_recursive_calls_do_not_classify_latent_predicates() {
         // A function whose body only tests itself must not become a
         // predicate through circular speculation.
         assert_eq!(
             infer_one("(define (f l) (f (cdr l)))"),
-            "(-> unknown? t3)"
+            "(-> unknown? t4)"
         );
         // Finished predicate evidence still classifies later uses.
         assert_eq!(
@@ -4643,7 +4926,7 @@ mod tests {
                          ((p (car l)) (cons (car l) (filt p (cdr l)))) \
                          (else (filt p (cdr l)))))"
             ),
-            "(-> (-> any? boolean? : t1) (listof t2) (listof t1))"
+            "(-> (-> any? boolean? : t2) (listof t3) (listof t2))"
         );
     }
 
@@ -4778,7 +5061,7 @@ mod tests {
             ),
             vec![
                 "(-> any? boolean? : string?)".to_string(),
-                "(-> (-> string? t1) any? (U #f t1))".to_string(),
+                "(-> (-> string? t2) any? (U #f t2))".to_string(),
             ]
         );
         assert_eq!(
