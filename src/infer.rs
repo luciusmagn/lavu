@@ -1042,7 +1042,7 @@ impl Inferencer {
                 (None, None) => continue,
             };
 
-            self.substitutions.insert(name, self.resolve(merged));
+            self.insert_substitution(name, merged);
         }
     }
 
@@ -1343,7 +1343,7 @@ impl Inferencer {
         for (name, ty) in &probe.substitutions {
             let ty = probe.resolve(ty.clone());
             if matches!(ty, Type::Procedure(ProcedureType::Predicate { .. })) {
-                self.substitutions.insert(name.clone(), ty);
+                self.insert_substitution(name.clone(), ty);
             }
         }
     }
@@ -1428,7 +1428,7 @@ impl Inferencer {
             return;
         };
         if let Some(Type::Var(var)) = env.get(name).cloned().map(|ty| self.resolve(ty)) {
-            self.substitutions.insert(var, Type::Any);
+            self.insert_substitution(var, Type::Any);
         }
     }
 
@@ -1443,7 +1443,7 @@ impl Inferencer {
             Type::Procedure(procedure) => self.apply_procedure(procedure, operands, operand_tys),
             Type::Var(name) => {
                 let result = self.fresh_type_var();
-                self.substitutions.insert(
+                self.insert_substitution(
                     name,
                     Type::procedure(
                         operand_tys
@@ -1703,7 +1703,7 @@ impl Inferencer {
             Type::Var(name) => {
                 let escape = self.fresh_type_var();
                 let direct = self.fresh_type_var();
-                self.substitutions.insert(
+                self.insert_substitution(
                     name,
                     Type::procedure(
                         vec![Type::procedure(vec![escape.clone()], Type::Never)],
@@ -2499,7 +2499,7 @@ impl Inferencer {
             Type::Var(name) => {
                 let car = self.fresh_type_var();
                 let cdr = self.fresh_type_var();
-                self.substitutions.insert(
+                self.insert_substitution(
                     name,
                     Type::Pair(Box::new(car.clone()), Box::new(cdr.clone())),
                 );
@@ -2670,7 +2670,7 @@ impl Inferencer {
                             Type::rest_procedure(arguments, element, result.clone())
                         }
                     };
-                    self.substitutions.insert(name, procedure);
+                    self.insert_substitution(name, procedure);
                     return Ok(self.resolve(result));
                 };
                 self.unify(final_list, Type::List, final_operand.span.clone())?;
@@ -2678,7 +2678,7 @@ impl Inferencer {
                 let mut params = arguments;
                 params.extend(final_arguments.into_iter().map(|ty| self.resolve(ty)));
                 let result = self.fresh_type_var();
-                self.substitutions.insert(
+                self.insert_substitution(
                     name,
                     Type::procedure(
                         params
@@ -3181,13 +3181,26 @@ impl Inferencer {
     }
 
     fn bind_var(&mut self, name: String, ty: Type) -> Result<Type, TypeError> {
+        let ty = self.resolve(ty);
         if ty == Type::Var(name.clone()) {
             return Ok(ty);
         }
 
-        let ty = strip_recursive_var(ty, &name);
+        let ty = fold_recursive_var(ty, &name);
         self.substitutions.insert(name, ty.clone());
         Ok(ty)
+    }
+
+    /// Insert a substitution while keeping the map cycle-free: the type is
+    /// fully resolved first so self-references surface, then folded away.
+    fn insert_substitution(&mut self, name: String, ty: Type) {
+        let ty = self.resolve(ty);
+        if ty == Type::Var(name.clone()) {
+            return;
+        }
+
+        let ty = fold_recursive_var(ty, &name);
+        self.substitutions.insert(name, ty);
     }
 
     fn fresh_type_var(&mut self) -> Type {
@@ -3197,31 +3210,44 @@ impl Inferencer {
     }
 
     fn resolve(&self, ty: Type) -> Type {
+        self.resolve_guarded(ty, &mut BTreeSet::new())
+    }
+
+    /// Substitution maps should stay cycle-free, but resolution still guards
+    /// against self-referential entries: a variable already being resolved
+    /// on this path stops as itself instead of recursing forever.
+    fn resolve_guarded(&self, ty: Type, active: &mut BTreeSet<String>) -> Type {
         match ty {
-            Type::Var(name) => self
-                .substitutions
-                .get(&name)
-                .cloned()
-                .map(|ty| self.resolve(ty))
-                .unwrap_or(Type::Var(name)),
-            Type::ListOf(item) => Type::ListOf(Box::new(self.resolve(*item))),
-            Type::VectorOf(item) => Type::VectorOf(Box::new(self.resolve(*item))),
-            Type::PromiseOf(item) => Type::PromiseOf(Box::new(self.resolve(*item))),
-            Type::Pair(car, cdr) => {
-                Type::Pair(Box::new(self.resolve(*car)), Box::new(self.resolve(*cdr)))
+            Type::Var(name) => {
+                let Some(ty) = self.substitutions.get(&name) else {
+                    return Type::Var(name);
+                };
+                if !active.insert(name.clone()) {
+                    return Type::Var(name);
+                }
+                let resolved = self.resolve_guarded(ty.clone(), active);
+                active.remove(&name);
+                resolved
             }
+            Type::ListOf(item) => Type::ListOf(Box::new(self.resolve_guarded(*item, active))),
+            Type::VectorOf(item) => Type::VectorOf(Box::new(self.resolve_guarded(*item, active))),
+            Type::PromiseOf(item) => Type::PromiseOf(Box::new(self.resolve_guarded(*item, active))),
+            Type::Pair(car, cdr) => Type::Pair(
+                Box::new(self.resolve_guarded(*car, active)),
+                Box::new(self.resolve_guarded(*cdr, active)),
+            ),
             Type::Values(types) => Type::Values(
                 types
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
             ),
             Type::Procedure(ProcedureType::Fixed { params, result }) => Type::procedure(
                 params
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
-                self.resolve(*result),
+                self.resolve_guarded(*result, active),
             ),
             Type::Procedure(ProcedureType::Optional {
                 required,
@@ -3230,16 +3256,19 @@ impl Inferencer {
             }) => Type::optional_procedure(
                 required
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
                 optional
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
-                self.resolve(*result),
+                self.resolve_guarded(*result, active),
             ),
             Type::Procedure(ProcedureType::UniformVariadic { param, result }) => {
-                Type::uniform_variadic(self.resolve(*param), self.resolve(*result))
+                Type::uniform_variadic(
+                    self.resolve_guarded(*param, active),
+                    self.resolve_guarded(*result, active),
+                )
             }
             Type::Procedure(ProcedureType::Rest {
                 required,
@@ -3248,18 +3277,21 @@ impl Inferencer {
             }) => Type::rest_procedure(
                 required
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
-                self.resolve(*rest),
-                self.resolve(*result),
+                self.resolve_guarded(*rest, active),
+                self.resolve_guarded(*result, active),
             ),
             Type::Procedure(ProcedureType::Predicate { param, positive }) => {
-                Type::predicate_procedure(self.resolve(*param), self.resolve(*positive))
+                Type::predicate_procedure(
+                    self.resolve_guarded(*param, active),
+                    self.resolve_guarded(*positive, active),
+                )
             }
             Type::Union(types) => Type::union(
                 types
                     .into_iter()
-                    .map(|ty| self.resolve(ty))
+                    .map(|ty| self.resolve_guarded(ty, active))
                     .collect::<Vec<_>>(),
             ),
             ty => ty,
@@ -3267,22 +3299,85 @@ impl Inferencer {
     }
 }
 
-fn strip_recursive_var(ty: Type, name: &str) -> Type {
-    match ty {
-        Type::Union(types) => {
-            let finite = types
-                .into_iter()
-                .filter(|ty| !matches!(ty, Type::Var(var) if var == name))
-                .collect::<Vec<_>>();
-
-            match finite.as_slice() {
-                [] => Type::Unknown,
-                _ => Type::union(finite),
-            }
-        }
-        ty if contains_var(&ty, name) => Type::Unknown,
-        ty => ty,
+/// Solve the equation `name = ty` when `name` occurs inside `ty`.
+///
+/// A direct union member `name` is redundant (`t = (U t A)` solves to
+/// `t = A`), and the recursive list equation `t = (U null? (pair? e t))`
+/// has the proper-list least solution `(listof e)`. Any self-reference we
+/// cannot fold collapses to `unknown?` so the substitution map stays
+/// cycle-free.
+fn fold_recursive_var(ty: Type, name: &str) -> Type {
+    if !contains_var(&ty, name) {
+        return ty;
     }
+
+    let Type::Union(types) = ty else {
+        return Type::Unknown;
+    };
+
+    let (recursive, finite): (Vec<_>, Vec<_>) = types
+        .into_iter()
+        .filter(|ty| !matches!(ty, Type::Var(var) if var == name))
+        .partition(|ty| contains_var(ty, name));
+
+    if recursive.is_empty() {
+        return match finite.as_slice() {
+            [] => Type::Unknown,
+            _ => Type::union(finite),
+        };
+    }
+
+    let Some(elements) = recursive
+        .iter()
+        .map(|member| recursive_list_element(member, name))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Type::Unknown;
+    };
+
+    fold_recursive_list(elements, finite, name)
+}
+
+/// The element type of a pair-chain union member whose final tail is the
+/// recursive variable itself, as in `(pair? e (pair? e2 name))`.
+fn recursive_list_element(ty: &Type, name: &str) -> Option<Type> {
+    let Type::Pair(car, cdr) = ty else {
+        return None;
+    };
+    if contains_var(car, name) {
+        return None;
+    }
+
+    match cdr.as_ref() {
+        Type::Var(var) if var == name => Some((**car).clone()),
+        cdr => recursive_list_element(cdr, name)
+            .map(|rest| Type::union(vec![(**car).clone(), rest])),
+    }
+}
+
+/// Fold `t = (U <finite>... (pair? e t)...)` into `(listof ...)` when every
+/// finite member is a proper-list terminator.
+fn fold_recursive_list(mut elements: Vec<Type>, finite: Vec<Type>, name: &str) -> Type {
+    if finite.iter().any(|ty| matches!(ty, Type::List)) {
+        return Type::List;
+    }
+    if finite.is_empty() {
+        return Type::Unknown;
+    }
+
+    for terminator in finite {
+        match terminator {
+            Type::Null => {}
+            Type::ListOf(element) => elements.push(*element),
+            _ => return Type::Unknown,
+        }
+    }
+
+    let folded = Type::ListOf(Box::new(Type::union(elements)));
+    if contains_var(&folded, name) {
+        return Type::Unknown;
+    }
+    folded
 }
 
 fn contains_var(ty: &Type, name: &str) -> bool {
@@ -4348,6 +4443,40 @@ mod tests {
         assert_eq!(
             infer_all("(define (count n) (if (= n 0) n (count (- n 1)))) (count 5)"),
             vec!["(-> number? number?)".to_string(), "number?".to_string()]
+        );
+    }
+
+    #[test]
+    fn folds_recursive_list_walks_into_listof_types() {
+        assert_eq!(
+            infer_one("(define (len l) (if (null? l) 0 (+ 1 (len (cdr l)))))"),
+            "(-> (listof t1) number?)"
+        );
+        assert_eq!(
+            infer_all("(define (len l) (if (null? l) 0 (+ 1 (len (cdr l))))) (len '(1 2 3))"),
+            vec!["(-> (listof t1) number?)".to_string(), "number?".to_string()]
+        );
+        assert_eq!(
+            infer_one(
+                "(define (my-map f l) (if (null? l) '() (cons (f (car l)) (my-map f (cdr l)))))"
+            ),
+            "(-> (-> t1 t3) (listof t1) (listof t3))"
+        );
+        assert_eq!(
+            infer_one(
+                "(define (my-assq k al) \
+                   (if (null? al) #f \
+                       (if (eq? k (car (car al))) (car al) (my-assq k (cdr al)))))"
+            ),
+            "(-> k (listof (pair? t3 t4)) (U #f (pair? t3 t4)))"
+        );
+    }
+
+    #[test]
+    fn unfoldable_recursive_bindings_collapse_to_unknown() {
+        assert_eq!(
+            infer_one("(define (rev l acc) (if (null? l) acc (rev (cdr l) (cons (car l) acc))))"),
+            "(-> (listof t1) unknown? unknown?)"
         );
     }
 
