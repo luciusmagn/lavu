@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::datum_parser::{parse as parse_datums, parse_one as parse_one_datum};
 use crate::lexer::{Token, tokenize_checked};
 use crate::stdlib::{primitive as primitive_metadata, r5rs_primitives};
-use crate::surface::{Expr, Program, TopLevel, classify_expr, classify_program};
+use crate::surface::{Expr, Program, TopLevel, base_identifier, classify_expr, classify_program};
 use crate::syntax::{Atom, Datum, SourceSpan, Spanned};
 use crate::types::{ProcedureType, Type};
 
@@ -292,15 +292,42 @@ impl Env {
     }
 
     pub fn lookup(&self, name: &str) -> Option<Value> {
+        self.lookup_lexical(name).or_else(|| {
+            // A hygiene-marked identifier free in its macro expansion
+            // resolves at the macro's definition environment; the top level
+            // is the best approximation available after expansion.
+            let base = base_identifier(name);
+            (base != name).then(|| self.root().lookup_lexical(base)).flatten()
+        })
+    }
+
+    fn lookup_lexical(&self, name: &str) -> Option<Value> {
         let frame = self.0.borrow();
-        frame
-            .bindings
-            .get(name)
-            .cloned()
-            .or_else(|| frame.parent.as_ref().and_then(|parent| parent.lookup(name)))
+        frame.bindings.get(name).cloned().or_else(|| {
+            frame
+                .parent
+                .as_ref()
+                .and_then(|parent| parent.lookup_lexical(name))
+        })
+    }
+
+    fn root(&self) -> Env {
+        let parent = self.0.borrow().parent.clone();
+        match parent {
+            Some(parent) => parent.root(),
+            None => self.clone(),
+        }
     }
 
     pub fn set(&self, name: &str, value: Value) -> bool {
+        if self.set_lexical(name, value.clone()) {
+            return true;
+        }
+        let base = base_identifier(name);
+        base != name && self.root().set_lexical(base, value)
+    }
+
+    fn set_lexical(&self, name: &str, value: Value) -> bool {
         if self.0.borrow().bindings.contains_key(name) {
             self.0.borrow_mut().bindings.insert(name.to_string(), value);
             true
@@ -309,7 +336,7 @@ impl Env {
                 .borrow()
                 .parent
                 .as_ref()
-                .is_some_and(|parent| parent.set(name, value))
+                .is_some_and(|parent| parent.set_lexical(name, value))
         }
     }
 
@@ -4884,7 +4911,9 @@ fn unary(
 fn datum_to_value(datum: &Spanned<Datum>) -> Result<Value, EvalError> {
     match &datum.node {
         Datum::Atom(atom) => Ok(match atom {
-            Atom::Identifier(name) => Value::Symbol(name.clone()),
+            // Quoted data sheds hygiene marks: '(a b) from a macro template
+            // means the same symbols as user-written data.
+            Atom::Identifier(name) => Value::Symbol(base_identifier(name).to_string()),
             _ => atom_to_value(atom),
         }),
         Datum::List(items) => items
@@ -5450,16 +5479,29 @@ mod tests {
             ),
             "4"
         );
+        // Hygiene: definitions a template introduces by name are renamed,
+        // so exporting bindings requires passing the names through the
+        // pattern.
         assert_eq!(
             eval_one(
+                "(define-syntax defs
+                   (syntax-rules ()
+                     ((defs a b) (begin (define a 1) (define b 2)))))
+                 (defs x y)
+                 (+ x y)"
+            ),
+            "3"
+        );
+        assert!(matches!(
+            eval_error(
                 "(define-syntax defs
                    (syntax-rules ()
                      ((defs) (begin (define x 1) (define y 2)))))
                  (defs)
                  (+ x y)"
             ),
-            "3"
-        );
+            EvalError::UnboundVariable { .. }
+        ));
         assert_eq!(
             eval_one(
                 "(let ((x 0))
@@ -5494,11 +5536,11 @@ mod tests {
             eval_one(
                 "(define-syntax install-id
                    (syntax-rules ()
-                     ((install-id)
-                      (define-syntax id
+                     ((install-id name)
+                      (define-syntax name
                         (syntax-rules ()
-                          ((id x) x))))))
-                 (install-id)
+                          ((name x) x))))))
+                 (install-id id)
                  (id 9)"
             ),
             "9"
@@ -5850,6 +5892,56 @@ mod tests {
     #[test]
     fn evaluates_lambda_application() {
         assert_eq!(eval_one("((lambda (x) (+ x 1)) 2)"), "3");
+    }
+
+    #[test]
+    fn expands_macros_hygienically() {
+        // Template identifiers resolve at the macro definition site even
+        // when the use site rebinds them (R5RS pitfall 3.1).
+        assert_eq!(
+            eval_one(
+                "(let-syntax ((foo (syntax-rules () ((_ expr) (+ expr 1)))))
+                   (let ((+ *))
+                     (foo 3)))"
+            ),
+            "4"
+        );
+        // Bindings a template introduces do not capture use-site
+        // identifiers passed into it (R5RS pitfall 3.3).
+        assert_eq!(
+            eval_one(
+                "(let ((x 1))
+                   (let-syntax
+                       ((foo (syntax-rules ()
+                               ((_ y) (let-syntax
+                                            ((bar (syntax-rules ()
+                                                  ((_) (let ((x 2)) y)))))
+                                        (bar))))))
+                     (foo x)))"
+            ),
+            "1"
+        );
+        // A template-introduced binder does not capture a same-named
+        // use-site identifier.
+        assert_eq!(
+            eval_one(
+                "(define-syntax swap-let
+                   (syntax-rules ()
+                     ((_ body) (let ((tmp 99)) body))))
+                 (let ((tmp 1)) (swap-let tmp))"
+            ),
+            "1"
+        );
+        // Quoted data from templates sheds hygiene renames.
+        assert_eq!(
+            eval_one(
+                "(define-syntax syms
+                   (syntax-rules ()
+                     ((_) '(alpha beta))))
+                 (syms)"
+            ),
+            "(alpha beta)"
+        );
     }
 
     #[test]

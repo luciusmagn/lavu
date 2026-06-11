@@ -263,18 +263,13 @@ impl fmt::Display for ProcedureType {
     }
 }
 
-/// Inference gives each lambda parameter a unique `name#ordinal` variable;
-/// `#` cannot appear inside an R5RS identifier, so stripping the ordinal
-/// recovers the source parameter name for display.
+/// Inference gives each lambda parameter a unique `name#ordinal` variable,
+/// and macro hygiene marks identifiers as `name#h<mark>`; `#` cannot appear
+/// inside an R5RS identifier, so the text before the first `#` is the
+/// source name to display.
 fn display_var_name(name: &str) -> &str {
-    match name.rsplit_once('#') {
-        Some((base, ordinal))
-            if !base.is_empty()
-                && !ordinal.is_empty()
-                && ordinal.bytes().all(|byte| byte.is_ascii_digit()) =>
-        {
-            base
-        }
+    match name.split_once('#') {
+        Some((base, _)) if !base.is_empty() => base,
         _ => name,
     }
 }

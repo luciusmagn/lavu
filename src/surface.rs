@@ -207,6 +207,15 @@ struct DottedDatum<'a> {
 }
 
 impl MacroExpander {
+    /// Find the transformer for a macro use. A hygiene-marked name refers
+    /// to the macro visible at its template's definition site, so marked
+    /// lookups fall back to the base name.
+    fn lookup_rules(&self, name: &str) -> Option<&SyntaxRules> {
+        self.bindings
+            .get(name)
+            .or_else(|| self.bindings.get(base_identifier(name)))
+    }
+
     fn define(&mut self, name: String, rules: SyntaxRules) {
         self.bindings.insert(name, rules);
     }
@@ -220,7 +229,10 @@ impl MacroExpander {
     }
 
     fn expand(&self, datum: &Spanned<Datum>) -> Result<Spanned<Datum>, SurfaceError> {
-        self.expand_with_depth(datum, 0)
+        // Use-site markers protect capture-substituted identifiers from
+        // re-marking during nested expansions; once expansion settles they
+        // are spent and peel away.
+        self.expand_with_depth(datum, 0).map(|datum| peel_use_site_marks(&datum))
     }
 
     fn expand_with_depth(
@@ -239,7 +251,7 @@ impl MacroExpander {
                 if is_quoted_list(items) {
                     return Ok(datum.clone());
                 }
-                if let Some(form) = items.first().and_then(identifier_name) {
+                if let Some(form) = items.first().and_then(keyword_name) {
                     match form.as_str() {
                         "lambda" => {
                             return self.expand_literal_prefixed_body_form(datum, 2, depth);
@@ -273,7 +285,7 @@ impl MacroExpander {
                 }
 
                 if let Some(name) = items.first().and_then(identifier_name)
-                    && let Some(rules) = self.bindings.get(&name)
+                    && let Some(rules) = self.lookup_rules(&name)
                 {
                     let expanded = apply_syntax_rules(&name, rules, datum)?;
                     return self.expand_with_depth(&expanded, depth + 1);
@@ -287,7 +299,7 @@ impl MacroExpander {
             }
             Datum::DottedList(items, tail) => {
                 if let Some(name) = items.first().and_then(identifier_name)
-                    && let Some(rules) = self.bindings.get(&name)
+                    && let Some(rules) = self.lookup_rules(&name)
                 {
                     let expanded = apply_syntax_rules(&name, rules, datum)?;
                     return self.expand_with_depth(&expanded, depth + 1);
@@ -485,7 +497,7 @@ impl MacroExpander {
             return Ok(clause.clone());
         };
 
-        let expanded = if identifier_name(test).as_deref() == Some("else") {
+        let expanded = if keyword_name(test).as_deref() == Some("else") {
             std::iter::once(test.clone())
                 .chain(
                     rest.iter()
@@ -493,7 +505,7 @@ impl MacroExpander {
                         .collect::<Result<Vec<_>, _>>()?,
                 )
                 .collect()
-        } else if rest.first().and_then(identifier_name).as_deref() == Some("=>") {
+        } else if rest.first().and_then(keyword_name).as_deref() == Some("=>") {
             let mut clause = vec![self.expand_with_depth(test, depth)?, rest[0].clone()];
             clause.extend(
                 rest[1..]
@@ -691,7 +703,7 @@ fn parse_define_syntax(
     let Some((head, rest)) = items.split_first() else {
         return Ok(None);
     };
-    if identifier_name(head).as_deref() != Some("define-syntax") {
+    if keyword_name(head).as_deref() != Some("define-syntax") {
         return Ok(None);
     }
     if rest.len() != 2 {
@@ -721,7 +733,7 @@ fn parse_syntax_rules(datum: &Spanned<Datum>) -> Result<SyntaxRules, SurfaceErro
             span: datum.span.clone(),
         });
     };
-    if identifier_name(head).as_deref() != Some("syntax-rules") || rest.is_empty() {
+    if keyword_name(head).as_deref() != Some("syntax-rules") || rest.is_empty() {
         return Err(SurfaceError::BadArity {
             form: "syntax-rules",
             expected: "literal identifiers and optional rules",
@@ -1100,7 +1112,7 @@ fn match_pattern(
             })
         }
         Datum::Atom(Atom::Identifier(name)) if literals.contains(name) => {
-            Ok(identifier_name(datum).as_deref() == Some(name.as_str()))
+            Ok(keyword_name(datum).as_deref() == Some(base_identifier(name)))
         }
         Datum::Atom(Atom::Identifier(name)) => bind_capture(name, datum.clone(), captures),
         Datum::Atom(atom) => Ok(matches!(&datum.node, Datum::Atom(actual) if actual == atom)),
@@ -1433,17 +1445,18 @@ fn expand_template(
     template: &Spanned<Datum>,
     captures: &BTreeMap<String, Capture>,
 ) -> Result<Spanned<Datum>, SurfaceError> {
-    expand_template_at(template, captures, None)
+    expand_template_at(template, captures, None, next_hygiene_mark())
 }
 
 fn expand_template_at(
     template: &Spanned<Datum>,
     captures: &BTreeMap<String, Capture>,
     repetition: Option<usize>,
+    mark: usize,
 ) -> Result<Spanned<Datum>, SurfaceError> {
     match &template.node {
         Datum::Atom(Atom::Identifier(name)) => match captures.get(name) {
-            Some(Capture::Single(value)) => Ok(value.clone()),
+            Some(Capture::Single(value)) => Ok(mark_use_site(value)),
             Some(Capture::Repeated(values)) => {
                 let Some(index) = repetition else {
                     return Err(SurfaceError::InvalidMacroTemplate {
@@ -1452,36 +1465,43 @@ fn expand_template_at(
                 };
                 values
                     .get(index)
-                    .cloned()
+                    .map(mark_use_site)
                     .ok_or_else(|| SurfaceError::InvalidMacroTemplate {
                         span: template.span.clone(),
                     })
             }
-            None => Ok(template.clone()),
+            // Hygiene: identifiers the template introduces are renamed with
+            // this expansion's mark, so they neither capture nor are
+            // captured by use-site bindings. Keyword matching, quoted-data
+            // conversion, and unresolved-variable lookup all strip marks.
+            // An identifier that entered this template from an earlier
+            // expansion's use site cancels its marker instead: it belongs
+            // to that original code, not to this template.
+            None => Ok(template.with_node(Datum::identifier(cancel_or_mark(name, mark)))),
         },
-        Datum::List(items) => expand_template_list(items, captures, repetition)
+        Datum::List(items) => expand_template_list(items, captures, repetition, mark)
             .map(|items| template.with_node(Datum::List(items))),
-        Datum::Vector(items) => expand_template_list(items, captures, repetition)
+        Datum::Vector(items) => expand_template_list(items, captures, repetition, mark)
             .map(|items| template.with_node(Datum::Vector(items))),
         Datum::DottedList(items, tail) => {
-            let items = expand_template_list(items, captures, repetition)?;
-            let tail = expand_template_at(tail, captures, repetition)?;
+            let items = expand_template_list(items, captures, repetition, mark)?;
+            let tail = expand_template_at(tail, captures, repetition, mark)?;
             Ok(template.with_node(Datum::DottedList(items, Box::new(tail))))
         }
         Datum::Quote(inner) => {
-            let inner = expand_template_at(inner, captures, repetition)?;
+            let inner = expand_template_at(inner, captures, repetition, mark)?;
             Ok(template.with_node(Datum::Quote(Box::new(inner))))
         }
         Datum::Quasiquote(inner) => {
-            let inner = expand_template_at(inner, captures, repetition)?;
+            let inner = expand_template_at(inner, captures, repetition, mark)?;
             Ok(template.with_node(Datum::Quasiquote(Box::new(inner))))
         }
         Datum::Unquote(inner) => {
-            let inner = expand_template_at(inner, captures, repetition)?;
+            let inner = expand_template_at(inner, captures, repetition, mark)?;
             Ok(template.with_node(Datum::Unquote(Box::new(inner))))
         }
         Datum::UnquoteSplicing(inner) => {
-            let inner = expand_template_at(inner, captures, repetition)?;
+            let inner = expand_template_at(inner, captures, repetition, mark)?;
             Ok(template.with_node(Datum::UnquoteSplicing(Box::new(inner))))
         }
         Datum::Atom(_) => Ok(template.clone()),
@@ -1492,6 +1512,7 @@ fn expand_template_list(
     items: &[Spanned<Datum>],
     captures: &BTreeMap<String, Capture>,
     repetition: Option<usize>,
+    mark: usize,
 ) -> Result<Vec<Spanned<Datum>>, SurfaceError> {
     let mut expanded = Vec::new();
     let mut index = 0;
@@ -1501,11 +1522,11 @@ fn expand_template_list(
         if items.get(index + 1).is_some_and(is_ellipsis) {
             let count = repeated_template_count(item, captures)?;
             for repetition in 0..count {
-                expanded.push(expand_template_at(item, captures, Some(repetition))?);
+                expanded.push(expand_template_at(item, captures, Some(repetition), mark)?);
             }
             index += 2;
         } else {
-            expanded.push(expand_template_at(item, captures, repetition)?);
+            expanded.push(expand_template_at(item, captures, repetition, mark)?);
             index += 1;
         }
     }
@@ -1561,13 +1582,13 @@ fn collect_repeated_template_counts(
 }
 
 fn is_ellipsis(datum: &Spanned<Datum>) -> bool {
-    identifier_name(datum).as_deref() == Some("...")
+    keyword_name(datum).as_deref() == Some("...")
 }
 
 fn is_quoted_list(items: &[Spanned<Datum>]) -> bool {
     items
         .first()
-        .and_then(identifier_name)
+        .and_then(keyword_name)
         .is_some_and(|name| matches!(name.as_str(), "quote" | "quasiquote"))
 }
 
@@ -1578,7 +1599,7 @@ fn is_definition_form(datum: &Spanned<Datum>) -> bool {
 
     items
         .first()
-        .and_then(identifier_name)
+        .and_then(keyword_name)
         .is_some_and(|name| matches!(name.as_str(), "define" | "define-syntax"))
 }
 
@@ -1601,7 +1622,7 @@ fn binding_names(datum: &Spanned<Datum>) -> BTreeSet<String> {
 fn top_level_begin_body(datum: &Spanned<Datum>) -> Option<&[Spanned<Datum>]> {
     if let Datum::List(items) = &datum.node
         && let Some((head, rest)) = items.split_first()
-        && identifier_name(head).as_deref() == Some("begin")
+        && keyword_name(head).as_deref() == Some("begin")
     {
         return Some(rest);
     }
@@ -1722,7 +1743,7 @@ fn classify_list(
         return parse_apply(origin, head, rest, scope);
     }
 
-    match head_name.as_deref() {
+    match head_name.as_deref().map(base_identifier) {
         Some("quote") => parse_quote(span, rest),
         Some("quasiquote") => parse_quasiquote(span, rest),
         Some("define") => Err(SurfaceError::DefinitionContext {
@@ -1764,7 +1785,7 @@ fn parse_define_in(
     let Some((head, rest)) = items.split_first() else {
         return Ok(None);
     };
-    if identifier_name(head).as_deref() != Some("define") {
+    if keyword_name(head).as_deref() != Some("define") {
         return Ok(None);
     }
 
@@ -2299,7 +2320,7 @@ fn parse_cond(
             });
         };
 
-        if identifier_name(test).as_deref() == Some("else") {
+        if keyword_name(test).as_deref() == Some("else") {
             if index != clauses.len() - 1 {
                 return Err(SurfaceError::BadArity {
                     form: "cond",
@@ -2326,7 +2347,7 @@ fn parse_cond(
         let condition = classify_expr_in(test, scope)?;
         let arrow_recipient = body
             .first()
-            .filter(|datum| identifier_name(datum).as_deref() == Some("=>"));
+            .filter(|datum| keyword_name(datum).as_deref() == Some("=>"));
         if arrow_recipient.is_some() && body.len() != 2 {
             return Err(SurfaceError::BadArity {
                 form: "cond => clause",
@@ -2437,7 +2458,7 @@ fn parse_case(
             });
         }
 
-        if identifier_name(head).as_deref() == Some("else") {
+        if keyword_name(head).as_deref() == Some("else") {
             if index != rest.len() - 2 {
                 return Err(SurfaceError::BadArity {
                     form: "case",
@@ -2975,6 +2996,105 @@ fn expect_identifier(
             span: datum.span.clone(),
         })
     }
+}
+
+thread_local! {
+    static NEXT_HYGIENE_MARK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn next_hygiene_mark() -> usize {
+    NEXT_HYGIENE_MARK.with(|cell| {
+        let mark = cell.get();
+        cell.set(mark.wrapping_add(1));
+        mark
+    })
+}
+
+/// Strip hygiene marks from an identifier. Macro template expansion renames
+/// introduced identifiers to `name#h<mark>`; `#` cannot appear in a read
+/// identifier, so the text before the first `#` is the source name. Names
+/// in the generated `#%` namespace pass through untouched.
+pub fn base_identifier(name: &str) -> &str {
+    if name.starts_with('#') {
+        return name;
+    }
+    name.split('#').next().unwrap_or(name)
+}
+
+/// An identifier's name with hygiene marks stripped, for matching against
+/// syntactic keywords and clause literals.
+fn keyword_name(datum: &Spanned<Datum>) -> Option<String> {
+    identifier_name(datum).map(|name| base_identifier(&name).to_string())
+}
+
+/// Apply one expansion's hygiene to a template identifier: cancel a pending
+/// use-site marker, keep an already-marked template identifier stable, or
+/// rename a fresh one with this expansion's mark.
+fn cancel_or_mark(name: &str, mark: usize) -> String {
+    if let Some(stripped) = name.strip_suffix("#u") {
+        return stripped.to_string();
+    }
+    if has_hygiene_mark(name) {
+        return name.to_string();
+    }
+    format!("{name}#h{mark}")
+}
+
+fn has_hygiene_mark(name: &str) -> bool {
+    match name.rsplit_once("#h") {
+        Some((_, digits)) => !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()),
+        None => false,
+    }
+}
+
+/// Tag every identifier in a capture's value as use-site code before it is
+/// spliced into a template, so a later expansion of that template will not
+/// mistake it for a template-introduced identifier.
+fn mark_use_site(datum: &Spanned<Datum>) -> Spanned<Datum> {
+    let node = match &datum.node {
+        Datum::Atom(Atom::Identifier(name)) if !name.starts_with('#') => {
+            Datum::identifier(format!("{name}#u"))
+        }
+        Datum::List(items) => Datum::List(items.iter().map(mark_use_site).collect()),
+        Datum::Vector(items) => Datum::Vector(items.iter().map(mark_use_site).collect()),
+        Datum::DottedList(items, tail) => Datum::DottedList(
+            items.iter().map(mark_use_site).collect(),
+            Box::new(mark_use_site(tail)),
+        ),
+        Datum::Quote(inner) => Datum::Quote(Box::new(mark_use_site(inner))),
+        Datum::Quasiquote(inner) => Datum::Quasiquote(Box::new(mark_use_site(inner))),
+        Datum::Unquote(inner) => Datum::Unquote(Box::new(mark_use_site(inner))),
+        Datum::UnquoteSplicing(inner) => Datum::UnquoteSplicing(Box::new(mark_use_site(inner))),
+        node => node.clone(),
+    };
+    datum.with_node(node)
+}
+
+/// Remove spent use-site markers once expansion has settled.
+fn peel_use_site_marks(datum: &Spanned<Datum>) -> Spanned<Datum> {
+    let node = match &datum.node {
+        Datum::Atom(Atom::Identifier(name)) if name.contains("#u") => {
+            let mut peeled = name.as_str();
+            while let Some(stripped) = peeled.strip_suffix("#u") {
+                peeled = stripped;
+            }
+            Datum::identifier(peeled)
+        }
+        Datum::List(items) => Datum::List(items.iter().map(peel_use_site_marks).collect()),
+        Datum::Vector(items) => Datum::Vector(items.iter().map(peel_use_site_marks).collect()),
+        Datum::DottedList(items, tail) => Datum::DottedList(
+            items.iter().map(peel_use_site_marks).collect(),
+            Box::new(peel_use_site_marks(tail)),
+        ),
+        Datum::Quote(inner) => Datum::Quote(Box::new(peel_use_site_marks(inner))),
+        Datum::Quasiquote(inner) => Datum::Quasiquote(Box::new(peel_use_site_marks(inner))),
+        Datum::Unquote(inner) => Datum::Unquote(Box::new(peel_use_site_marks(inner))),
+        Datum::UnquoteSplicing(inner) => {
+            Datum::UnquoteSplicing(Box::new(peel_use_site_marks(inner)))
+        }
+        node => node.clone(),
+    };
+    datum.with_node(node)
 }
 
 fn identifier_name(datum: &Spanned<Datum>) -> Option<String> {

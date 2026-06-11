@@ -111,7 +111,14 @@ impl TypeEnv {
     }
 
     fn binding(&self, name: &str) -> Option<&TypeBinding> {
-        self.bindings.get(name)
+        self.bindings.get(name).or_else(|| {
+            // Hygiene-marked identifiers free in their expansion resolve at
+            // the macro definition site; fall back to the unmarked binding.
+            let base = crate::surface::base_identifier(name);
+            (base != name)
+                .then(|| self.bindings.get(base))
+                .flatten()
+        })
     }
 
     fn is_primitive(&self, name: &str) -> bool {
