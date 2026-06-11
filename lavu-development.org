@@ -571,6 +571,36 @@ and output procedures. =any?= means any Scheme value is valid.
   when every appended operand is visibly proper. This keeps R5RS improper
   final tails conservative while allowing =(apply pred (append (list x)
   '()))= to refine like a direct one-argument predicate call.
+- Fix the recursive list-walk stack overflow: binding a variable to the
+  union equation =t = (U null? (pair? e t))= now folds into =(listof e)=
+  instead of cycling, so =length=, =map=, =assq=, and =filter=-style
+  recursions infer polymorphic list types. Unfoldable self-references
+  collapse to =unknown?=, resolution carries a cycle guard, and every
+  substitution insertion goes through the occurs-checked path.
+- Unify unions member-wise with substitution rollback: =(U number? x)=
+  against =number?= binds =x=, a non-union type fits a union when some
+  member accepts it, and union-vs-union requires the actual members to
+  embed. Failed attempts restore the substitution map, and whole-union
+  conflicts still report the union so callers know to narrow first.
+- Merge same-variable branch procedure bindings by unification instead of
+  unions, so recursive functions constrained by several =cond= branches
+  keep one procedure type; value types still merge as occurrence unions.
+- Fix =unify= to rewrap =listof=, =vectorof=, and =promiseof= results
+  instead of returning the unified element type.
+- Give each lambda parameter a unique =name#ordinal= type variable so
+  sibling lambdas reusing a parameter name no longer share constraints
+  across one input; displays strip the ordinal, and alias refinements
+  reverse-look-up source bindings holding the same variable.
+- Keep recursion seeds out of latent-predicate speculation, so a
+  diverging self-call like =(define (f l) (f (cdr l)))= no longer
+  masquerades as a predicate.
+- Treat the R5RS top level like =letrec*=: programs pre-seed their
+  procedure defines, unbound names under a lambda become pending forward
+  references sharing one variable, the later definition unifies with the
+  seed, and bindings tainted by unsolved forward references stay
+  monotype until they settle. Mutually recursive top-level procedures
+  such as =evn?=/=od?= now run and infer =(-> number? boolean?)= for
+  both.
 ** REPL Highlighting
 - Keep highlighter categories current with the active syntax, including
   =set!= and quote/quasiquote/unquote spellings.
