@@ -1036,7 +1036,7 @@ impl Inferencer {
             }
 
             let merged = match (then_ty, else_ty) {
-                (Some(then_ty), Some(else_ty)) => Type::union(vec![then_ty, else_ty]),
+                (Some(then_ty), Some(else_ty)) => self.merge_branch_types(then_ty, else_ty),
                 (Some(then_ty), None) => then_ty,
                 (None, Some(else_ty)) => else_ty,
                 (None, None) => continue,
@@ -1044,6 +1044,22 @@ impl Inferencer {
 
             self.insert_substitution(name, merged);
         }
+    }
+
+    /// Combine one variable's types from two branches. Procedure bindings
+    /// describe the same callable (a recursive seed constrained by each
+    /// branch), so they unify; value types stay occurrence-typed unions.
+    fn merge_branch_types(&mut self, then_ty: Type, else_ty: Type) -> Type {
+        if let (Type::Procedure(_), Type::Procedure(_)) = (&then_ty, &else_ty) {
+            let saved = self.substitutions.clone();
+            if let Ok(unified) = self.unify(then_ty.clone(), else_ty.clone(), SourceSpan::default())
+            {
+                return unified;
+            }
+            self.substitutions = saved;
+        }
+
+        Type::union(vec![then_ty, else_ty])
     }
 
     fn infer_sequence(
@@ -2911,7 +2927,10 @@ impl Inferencer {
             (Type::ListOf(_), Type::List) | (Type::List, Type::ListOf(_)) => Ok(Type::List),
             (Type::Null, Type::List) | (Type::List, Type::Null) => Ok(Type::List),
             (Type::Null, Type::ListOf(_)) | (Type::ListOf(_), Type::Null) => Ok(Type::Null),
-            (Type::ListOf(actual), Type::ListOf(expected)) => self.unify(*actual, *expected, span),
+            (Type::ListOf(actual), Type::ListOf(expected)) => {
+                let element = self.unify(*actual, *expected, span)?;
+                Ok(Type::ListOf(Box::new(element)))
+            }
             (Type::Pair(car, cdr), Type::ListOf(expected)) => {
                 let element = self.unify(*car, *expected, span.clone())?;
                 self.unify(*cdr, Type::ListOf(Box::new(element.clone())), span.clone())?;
@@ -2932,10 +2951,12 @@ impl Inferencer {
                 Ok(Type::Vector)
             }
             (Type::VectorOf(actual), Type::VectorOf(expected)) => {
-                self.unify(*actual, *expected, span)
+                let element = self.unify(*actual, *expected, span)?;
+                Ok(Type::VectorOf(Box::new(element)))
             }
             (Type::PromiseOf(actual), Type::PromiseOf(expected)) => {
-                self.unify(*actual, *expected, span)
+                let element = self.unify(*actual, *expected, span)?;
+                Ok(Type::PromiseOf(Box::new(element)))
             }
             (Type::Values(actual), Type::Values(expected)) => {
                 if actual.len() != expected.len() {
@@ -2962,11 +2983,93 @@ impl Inferencer {
                 self.unify_procedure(actual, expected, span)
             }
             (actual, expected) if actual == expected => Ok(actual),
+            (Type::Union(actual), Type::Union(expected)) => {
+                self.unify_union_subset(actual, expected, span)
+            }
+            (Type::Union(actual), expected) => self.unify_union_members(actual, expected, span),
+            (actual, Type::Union(expected)) => self.unify_into_union(actual, expected, span),
             (actual, expected) => Err(TypeError::Mismatch {
                 expected: Box::new(expected),
                 actual: Box::new(actual),
                 span,
             }),
+        }
+    }
+
+    /// Equate a union with a non-union type by making every member fit it,
+    /// so `(U number? x)` against `number?` binds `x` instead of failing.
+    /// A member that cannot fit reports the whole union, since the caller's
+    /// value needs narrowing rather than one member being wrong.
+    fn unify_union_members(
+        &mut self,
+        members: Vec<Type>,
+        expected: Type,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let saved = self.substitutions.clone();
+        let actual = Type::Union(members.clone());
+        let attempt = members
+            .into_iter()
+            .try_for_each(|member| self.unify(member, expected.clone(), span.clone()).map(drop));
+
+        match attempt {
+            Ok(()) => Ok(self.resolve(expected)),
+            Err(_) => {
+                self.substitutions = saved;
+                Err(TypeError::Mismatch {
+                    expected: Box::new(self.resolve(expected)),
+                    actual: Box::new(self.resolve(actual)),
+                    span,
+                })
+            }
+        }
+    }
+
+    /// Accept a non-union type wherever a union expects it, provided some
+    /// member unifies with it. Failed member attempts roll back their
+    /// speculative bindings.
+    fn unify_into_union(
+        &mut self,
+        actual: Type,
+        expected_members: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let expected = Type::Union(expected_members.clone());
+        for member in expected_members {
+            let saved = self.substitutions.clone();
+            if self.unify(actual.clone(), member, span.clone()).is_ok() {
+                return Ok(self.resolve(expected));
+            }
+            self.substitutions = saved;
+        }
+
+        Err(TypeError::Mismatch {
+            expected: Box::new(self.resolve(expected)),
+            actual: Box::new(self.resolve(actual)),
+            span,
+        })
+    }
+
+    /// Unify two unions by fitting every actual member into the expected
+    /// union, rolling all speculative bindings back if any member fails.
+    fn unify_union_subset(
+        &mut self,
+        actual: Vec<Type>,
+        expected: Vec<Type>,
+        span: SourceSpan,
+    ) -> Result<Type, TypeError> {
+        let saved = self.substitutions.clone();
+        let attempt = actual.into_iter().try_for_each(|member| {
+            self.unify_into_union(member, expected.clone(), span.clone())
+                .map(drop)
+        });
+
+        match attempt {
+            Ok(()) => Ok(self.resolve(Type::Union(expected))),
+            Err(error) => {
+                self.substitutions = saved;
+                Err(error)
+            }
         }
     }
 
@@ -4479,6 +4582,28 @@ mod tests {
             "(-> (listof t1) unknown? unknown?)"
         );
     }
+
+    #[test]
+    fn unifies_union_var_members_with_concrete_types() {
+        assert_eq!(
+            infer_one("(lambda (x) (apply + (list 1 2 x)))"),
+            "(-> number? number?)"
+        );
+    }
+
+    #[test]
+    fn merges_branch_procedure_bindings_by_unification() {
+        assert_eq!(
+            infer_one(
+                "(define (filt p l) \
+                   (cond ((null? l) '()) \
+                         ((p (car l)) (cons (car l) (filt p (cdr l)))) \
+                         (else (filt p (cdr l)))))"
+            ),
+            "(-> (-> any? boolean? : t1) (listof t2) (listof t1))"
+        );
+    }
+
 
     #[test]
     fn checks_set_assignment_types() {
