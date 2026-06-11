@@ -149,6 +149,10 @@ impl TypeBinding {
 pub struct Inferencer {
     substitutions: BTreeMap<String, Type>,
     next_var: usize,
+    /// Type variables seeding recursive definitions currently being inferred.
+    /// A self-call must not speculate that the function under definition is
+    /// a latent predicate; only finished evidence may classify it.
+    recursion_seeds: BTreeSet<String>,
     /// Optional trace buffer. Shared across branch-clone inferencers via `Rc`
     /// so occurrence-typed branches record their steps in execution order.
     trace: Option<Rc<RefCell<Vec<TraceStep>>>>,
@@ -486,12 +490,21 @@ impl Inferencer {
                 let mut local = env.clone();
                 let recursive_seed = matches!(value.node, Expr::Lambda { .. }).then(|| {
                     let seed = self.fresh_type_var();
+                    if let Type::Var(var) = &seed {
+                        self.recursion_seeds.insert(var.clone());
+                    }
                     local.define(name.node.clone(), seed.clone());
                     seed
                 });
                 let ty = self.infer_expr(value, &local)?;
                 let ty = match recursive_seed {
-                    Some(seed) => self.unify(ty, seed, value.span.clone())?,
+                    Some(seed) => {
+                        let ty = self.unify(ty, seed.clone(), value.span.clone())?;
+                        if let Type::Var(var) = &seed {
+                            self.recursion_seeds.remove(var);
+                        }
+                        ty
+                    }
                     None => ty,
                 };
                 let ty = self.resolve(ty);
@@ -890,8 +903,14 @@ impl Inferencer {
         env: &TypeEnv,
     ) -> Result<Type, TypeError> {
         let mut local = env.clone();
+        let mut seeds = Vec::new();
         for (name, _) in bindings {
-            local.define(name.node.clone(), self.fresh_type_var());
+            let seed = self.fresh_type_var();
+            if let Type::Var(var) = &seed {
+                self.recursion_seeds.insert(var.clone());
+                seeds.push(var.clone());
+            }
+            local.define(name.node.clone(), seed);
         }
 
         for (name, value) in bindings {
@@ -906,6 +925,9 @@ impl Inferencer {
             let actual = self.infer_expr(value, &local)?;
             let inferred = self.unify(actual, expected, value.span.clone())?;
             local.define(name.node.clone(), self.resolve(inferred));
+        }
+        for seed in seeds {
+            self.recursion_seeds.remove(&seed);
         }
 
         self.infer_sequence(body, &local)
@@ -1429,7 +1451,7 @@ impl Inferencer {
             Type::Procedure(ProcedureType::Predicate { positive, .. }) => {
                 Some(self.resolve(*positive))
             }
-            Type::Var(var) => {
+            Type::Var(var) if !self.recursion_seeds.contains(&var) => {
                 let positive = self.fresh_type_var();
                 self.bind_var(var, Type::predicate_procedure(Type::Any, positive.clone()))
                     .ok()?;
@@ -4588,6 +4610,27 @@ mod tests {
         assert_eq!(
             infer_one("(lambda (x) (apply + (list 1 2 x)))"),
             "(-> number? number?)"
+        );
+    }
+
+    #[test]
+    fn self_recursive_calls_do_not_classify_latent_predicates() {
+        // A function whose body only tests itself must not become a
+        // predicate through circular speculation.
+        assert_eq!(
+            infer_one("(define (f l) (f (cdr l)))"),
+            "(-> unknown? t3)"
+        );
+        // Finished predicate evidence still classifies later uses.
+        assert_eq!(
+            infer_all(
+                "(define (stringy? x) (string? x)) \
+                 (define (use x) (if (stringy? x) (string-length x) 0))"
+            ),
+            vec![
+                "(-> any? boolean? : string?)".to_string(),
+                "(-> any? number?)".to_string()
+            ]
         );
     }
 
