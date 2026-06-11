@@ -174,9 +174,17 @@ pub struct Procedure {
     env: Env,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Continuation {
     id: usize,
+    kont: Rc<Kont>,
+    winds: Rc<Winds>,
+}
+
+impl PartialEq for Continuation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
 }
 
 #[derive(Debug)]
@@ -195,14 +203,21 @@ impl Promise {
         }
     }
 
-    fn force(&self) -> Result<Value, EvalError> {
-        if let Some(value) = self.value.borrow().clone() {
-            return Ok(value);
-        }
+    fn memoized(&self) -> Option<Value> {
+        self.value.borrow().clone()
+    }
 
-        let value = eval_expr(&self.expr, &self.env)?;
-        *self.value.borrow_mut() = Some(value.clone());
-        Ok(value)
+    /// Keep the first settled value: R5RS promises that re-enter their own
+    /// computation must observe the earlier result.
+    fn memoize(&self, value: Value) -> Value {
+        let mut memo = self.value.borrow_mut();
+        match &*memo {
+            Some(value) => value.clone(),
+            None => {
+                *memo = Some(value.clone());
+                value
+            }
+        }
     }
 }
 
@@ -235,13 +250,6 @@ pub enum EvalError {
 
     #[error("read error: {message}")]
     ReadError { message: String, span: SourceSpan },
-
-    #[error("continuation used outside its dynamic extent")]
-    ContinuationJump {
-        id: usize,
-        value: Box<Value>,
-        span: SourceSpan,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -505,237 +513,960 @@ pub fn eval_top_level(form: &Spanned<TopLevel>, env: &Env) -> Result<Value, Eval
 }
 
 pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
-    match &expr.node {
-        Expr::Literal(atom) => Ok(atom_to_value(atom)),
-        Expr::Variable(name) => match env.lookup(name) {
-            Some(Value::Uninitialized) => Err(EvalError::UninitializedVariable {
-                name: name.clone(),
-                span: expr.span.clone(),
-            }),
-            Some(value) => Ok(value),
-            None => Err(EvalError::UnboundVariable {
-                name: name.clone(),
-                span: expr.span.clone(),
-            }),
-        },
-        Expr::Quote(datum) => datum_to_value(datum),
-        Expr::Quasiquote(datum) => eval_quasiquote(datum, env, 0),
-        Expr::Lambda { params, rest, body } => Ok(Value::Procedure(Rc::new(Procedure {
-            params: params.iter().map(|param| param.node.clone()).collect(),
-            rest: rest.as_ref().map(|param| param.node.clone()),
-            body: body.to_vec(),
-            env: env.clone(),
-        }))),
-        Expr::If {
-            condition,
-            consequent,
-            alternate,
-        } => {
-            if truthy(&eval_expr(condition, env)?) {
-                eval_expr(consequent, env)
-            } else if let Some(alternate) = alternate {
-                eval_expr(alternate, env)
-            } else {
-                Ok(Value::Unspecified)
-            }
+    Machine::start(expr.clone(), env.clone()).run()
+}
+
+/// The reified continuation: a persistent stack of pending frames. Sharing
+/// the spine through `Rc` makes `call/cc` capture O(1) and lets captured
+/// continuations re-enter long after their original extent returned.
+#[derive(Debug)]
+enum Kont {
+    Halt,
+    Frame(ContFrame, Rc<Kont>),
+}
+
+/// The active `dynamic-wind` extents, also persistent so continuations can
+/// remember the winds they were captured under.
+#[derive(Debug)]
+enum Winds {
+    Nil,
+    Node { wind: Wind, parent: Rc<Winds> },
+}
+
+/// One wound extent: R5RS thunks, or a current-port swap installed by the
+/// `with-*-file` procedures so re-entry restores their port too.
+#[derive(Debug, Clone)]
+enum Wind {
+    Thunks { before: Value, after: Value },
+    CurrentInput { outside: InputPort, inside: InputPort },
+    CurrentOutput { outside: OutputPort, inside: OutputPort },
+}
+
+/// One step of a continuation jump's wind transition.
+#[derive(Debug, Clone)]
+enum WindStep {
+    Thunk { thunk: Value, winds: Rc<Winds> },
+    SetInput(InputPort),
+    SetOutput(OutputPort),
+}
+
+/// Pending work to perform once the current expression yields a value.
+#[derive(Debug, Clone)]
+enum ContFrame {
+    Branch {
+        consequent: Rc<Spanned<Expr>>,
+        alternate: Option<Rc<Spanned<Expr>>>,
+        env: Env,
+    },
+    Sequence {
+        exprs: Rc<Vec<Spanned<Expr>>>,
+        index: usize,
+        env: Env,
+    },
+    Assign {
+        name: Rc<Spanned<String>>,
+        env: Env,
+    },
+    /// Collect one `letrec` initializer value. R5RS letrec evaluates every
+    /// initializer before assigning any variable, so re-entering an
+    /// initializer through a continuation re-runs the assignments with the
+    /// frozen earlier values.
+    LetrecInit {
+        bindings: Rc<Vec<(Spanned<String>, Spanned<Expr>)>>,
+        values: Vec<Value>,
+        body: Rc<Vec<Spanned<Expr>>>,
+        env: Env,
+    },
+    Application {
+        evaluated: Vec<Value>,
+        operands: Rc<Vec<Spanned<Expr>>>,
+        index: usize,
+        span: SourceSpan,
+        env: Env,
+    },
+    /// Evaluate a loaded program's forms in order, yielding unspecified.
+    ProgramForms {
+        forms: Rc<Vec<Spanned<TopLevel>>>,
+        index: usize,
+        env: Env,
+    },
+    /// Bind a loaded top-level definition.
+    DefineTop {
+        name: Rc<Spanned<String>>,
+        env: Env,
+    },
+    /// One `map`/`for-each` element application at a time, so captured
+    /// continuations can resume the traversal.
+    MapStep {
+        procedure: Value,
+        lists: Rc<Vec<Vec<Value>>>,
+        index: usize,
+        built: Vec<Value>,
+        collect: bool,
+        span: SourceSpan,
+    },
+    ConsumeValues {
+        consumer: Value,
+        span: SourceSpan,
+    },
+    Memoize {
+        promise: Rc<Promise>,
+    },
+    WindEnter {
+        before: Value,
+        thunk: Value,
+        after: Value,
+        span: SourceSpan,
+    },
+    WindExit {
+        after: Value,
+        span: SourceSpan,
+    },
+    WindReturn {
+        value: Box<Value>,
+    },
+    /// Walk a continuation jump's wind transition plan, then land on the
+    /// target continuation with the jump value.
+    JumpWinds {
+        plan: Rc<Vec<WindStep>>,
+        index: usize,
+        target_kont: Rc<Kont>,
+        target_winds: Rc<Winds>,
+        value: Box<Value>,
+        span: SourceSpan,
+    },
+    /// Close a `call-with-*-file` port once the procedure returns normally.
+    ClosePort {
+        port: PortToClose,
+    },
+    /// Leave a `with-*-file` extent: pop its wind, restore the current
+    /// port, and close the file port.
+    PopPortWind,
+}
+
+#[derive(Debug, Clone)]
+enum PortToClose {
+    Input(InputPort),
+    Output(OutputPort),
+}
+
+enum Control {
+    Eval(Spanned<Expr>, Env),
+    Value(Value),
+}
+
+struct Machine {
+    control: Control,
+    kont: Rc<Kont>,
+    winds: Rc<Winds>,
+}
+
+impl Machine {
+    fn start(expr: Spanned<Expr>, env: Env) -> Self {
+        Self {
+            control: Control::Eval(expr, env),
+            kont: Rc::new(Kont::Halt),
+            winds: Rc::new(Winds::Nil),
         }
-        Expr::Begin(exprs) => eval_sequence(exprs, env),
-        Expr::Set { name, value } => {
-            let value = eval_expr(value, env)?;
-            if env.set(&name.node, value) {
-                Ok(Value::Unspecified)
-            } else {
-                Err(EvalError::UnboundVariable {
-                    name: name.node.clone(),
-                    span: name.span.clone(),
-                })
-            }
-        }
-        Expr::Delay(expr) => Ok(Value::Promise(Rc::new(Promise::new(
-            expr.as_ref().clone(),
-            env.clone(),
-        )))),
-        Expr::LetRec { bindings, body } => {
-            let local = eval_letrec_bindings(bindings, env)?;
-            eval_sequence(body, &local)
-        }
-        Expr::Apply { operator, operands } => {
-            let procedure = eval_expr(operator, env)?;
-            let args = operands
-                .iter()
-                .map(|operand| eval_expr(operand, env))
-                .collect::<Result<Vec<_>, _>>()?;
-            match procedure {
-                Value::Primitive("load") => load(args, expr.span.clone(), env),
-                Value::Primitive("interaction-environment") => {
-                    interaction_environment(args, expr.span.clone(), env)
+    }
+
+    fn run(mut self) -> Result<Value, EvalError> {
+        loop {
+            match std::mem::replace(&mut self.control, Control::Value(Value::Unspecified)) {
+                Control::Eval(expr, env) => self.step_eval(expr, env)?,
+                Control::Value(value) => {
+                    let (frame, rest) = match &*self.kont {
+                        Kont::Halt => return Ok(value),
+                        Kont::Frame(frame, rest) => (frame.clone(), rest.clone()),
+                    };
+                    self.kont = rest;
+                    self.step_value(frame, value)?;
                 }
-                procedure => apply(procedure, args, expr.span.clone(), env),
             }
         }
     }
-}
 
-fn eval_tail_expr(mut expr: Spanned<Expr>, mut env: Env) -> Result<Value, EvalError> {
-    loop {
-        match expr.node {
-            Expr::Literal(atom) => return Ok(atom_to_value(&atom)),
-            Expr::Variable(name) => {
-                return match env.lookup(&name) {
-                    Some(Value::Uninitialized) => Err(EvalError::UninitializedVariable {
-                        name,
-                        span: expr.span,
-                    }),
-                    Some(value) => Ok(value),
-                    None => Err(EvalError::UnboundVariable {
-                        name,
-                        span: expr.span,
-                    }),
-                };
-            }
-            Expr::Quote(datum) => return datum_to_value(&datum),
-            Expr::Quasiquote(datum) => return eval_quasiquote(&datum, &env, 0),
+    fn push(&mut self, frame: ContFrame) {
+        self.kont = Rc::new(Kont::Frame(frame, self.kont.clone()));
+    }
+
+    fn step_eval(&mut self, expr: Spanned<Expr>, env: Env) -> Result<(), EvalError> {
+        let span = expr.span;
+        self.control = match expr.node {
+            Expr::Literal(atom) => Control::Value(atom_to_value(&atom)),
+            Expr::Variable(name) => match env.lookup(&name) {
+                Some(Value::Uninitialized) => {
+                    return Err(EvalError::UninitializedVariable { name, span });
+                }
+                Some(value) => Control::Value(value),
+                None => return Err(EvalError::UnboundVariable { name, span }),
+            },
+            Expr::Quote(datum) => Control::Value(datum_to_value(&datum)?),
+            Expr::Quasiquote(datum) => Control::Value(eval_quasiquote(&datum, &env, 0)?),
             Expr::Lambda { params, rest, body } => {
-                return Ok(Value::Procedure(Rc::new(Procedure {
+                Control::Value(Value::Procedure(Rc::new(Procedure {
                     params: params.into_iter().map(|param| param.node).collect(),
                     rest: rest.map(|param| param.node),
                     body,
                     env,
-                })));
+                })))
             }
             Expr::If {
                 condition,
                 consequent,
                 alternate,
             } => {
-                if truthy(&eval_expr(&condition, &env)?) {
-                    expr = *consequent;
-                } else if let Some(alternate) = alternate {
-                    expr = *alternate;
-                } else {
-                    return Ok(Value::Unspecified);
-                }
-            }
-            Expr::Begin(exprs) => {
-                if let Some(next) = eval_sequence_prefix(exprs, &env)? {
-                    expr = next;
-                } else {
-                    return Ok(Value::Unspecified);
-                }
-            }
-            Expr::Set { name, value } => {
-                let value = eval_expr(&value, &env)?;
-                if env.set(&name.node, value) {
-                    return Ok(Value::Unspecified);
-                }
-                return Err(EvalError::UnboundVariable {
-                    name: name.node,
-                    span: name.span,
+                self.push(ContFrame::Branch {
+                    consequent: Rc::new(*consequent),
+                    alternate: alternate.map(|alternate| Rc::new(*alternate)),
+                    env: env.clone(),
                 });
+                Control::Eval(*condition, env)
+            }
+            Expr::Begin(exprs) => return self.step_sequence(Rc::new(exprs), env),
+            Expr::Set { name, value } => {
+                self.push(ContFrame::Assign {
+                    name: Rc::new(name),
+                    env: env.clone(),
+                });
+                Control::Eval(*value, env)
             }
             Expr::Delay(delayed) => {
-                return Ok(Value::Promise(Rc::new(Promise::new(*delayed, env))));
+                Control::Value(Value::Promise(Rc::new(Promise::new(*delayed, env))))
             }
             Expr::LetRec { bindings, body } => {
-                env = eval_letrec_bindings(&bindings, &env)?;
-                if let Some(next) = eval_sequence_prefix(body, &env)? {
-                    expr = next;
-                } else {
-                    return Ok(Value::Unspecified);
+                let local = Env::child(env);
+                for (name, _) in &bindings {
+                    local.define(name.node.clone(), Value::Uninitialized);
                 }
+                if bindings.is_empty() {
+                    return self.step_sequence(Rc::new(body), local);
+                }
+                let bindings = Rc::new(bindings);
+                let first = bindings[0].1.clone();
+                self.push(ContFrame::LetrecInit {
+                    bindings,
+                    values: Vec::new(),
+                    body: Rc::new(body),
+                    env: local.clone(),
+                });
+                Control::Eval(first, local)
             }
             Expr::Apply { operator, operands } => {
-                let span = expr.span;
-                let procedure = eval_expr(&operator, &env)?;
-                let args = operands
-                    .iter()
-                    .map(|operand| eval_expr(operand, &env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                match procedure {
-                    Value::Primitive("load") => return load(args, span, &env),
-                    Value::Primitive("interaction-environment") => {
-                        return interaction_environment(args, span, &env);
+                self.push(ContFrame::Application {
+                    evaluated: Vec::new(),
+                    operands: Rc::new(operands),
+                    index: 0,
+                    span,
+                    env: env.clone(),
+                });
+                Control::Eval(*operator, env)
+            }
+        };
+        Ok(())
+    }
+
+    /// Continue a body or `begin` sequence: run every expression, keeping
+    /// only the last in tail position.
+    fn step_sequence(&mut self, exprs: Rc<Vec<Spanned<Expr>>>, env: Env) -> Result<(), EvalError> {
+        self.control = match exprs.len() {
+            0 => Control::Value(Value::Unspecified),
+            1 => Control::Eval(exprs[0].clone(), env),
+            _ => {
+                let first = exprs[0].clone();
+                self.push(ContFrame::Sequence {
+                    exprs,
+                    index: 1,
+                    env: env.clone(),
+                });
+                Control::Eval(first, env)
+            }
+        };
+        Ok(())
+    }
+
+    fn step_value(&mut self, frame: ContFrame, value: Value) -> Result<(), EvalError> {
+        match frame {
+            ContFrame::Branch {
+                consequent,
+                alternate,
+                env,
+            } => {
+                self.control = if truthy(&value) {
+                    Control::Eval((*consequent).clone(), env)
+                } else if let Some(alternate) = alternate {
+                    Control::Eval((*alternate).clone(), env)
+                } else {
+                    Control::Value(Value::Unspecified)
+                };
+            }
+            ContFrame::Sequence { exprs, index, env } => {
+                if index + 1 == exprs.len() {
+                    self.control = Control::Eval(exprs[index].clone(), env);
+                } else {
+                    let next = exprs[index].clone();
+                    self.push(ContFrame::Sequence {
+                        exprs,
+                        index: index + 1,
+                        env: env.clone(),
+                    });
+                    self.control = Control::Eval(next, env);
+                }
+            }
+            ContFrame::Assign { name, env } => {
+                if env.set(&name.node, value) {
+                    self.control = Control::Value(Value::Unspecified);
+                } else {
+                    return Err(EvalError::UnboundVariable {
+                        name: name.node.clone(),
+                        span: name.span.clone(),
+                    });
+                }
+            }
+            ContFrame::LetrecInit {
+                bindings,
+                mut values,
+                body,
+                env,
+            } => {
+                values.push(value);
+                if values.len() < bindings.len() {
+                    let next = bindings[values.len()].1.clone();
+                    self.push(ContFrame::LetrecInit {
+                        bindings,
+                        values,
+                        body,
+                        env: env.clone(),
+                    });
+                    self.control = Control::Eval(next, env);
+                } else {
+                    for ((name, _), value) in bindings.iter().zip(values) {
+                        env.set(&name.node, value);
                     }
-                    Value::Procedure(procedure) => {
-                        env = procedure_application_env(&procedure, args, span)?;
-                        if let Some(next) = eval_sequence_prefix(procedure.body.clone(), &env)? {
-                            expr = next;
-                        } else {
-                            return Ok(Value::Unspecified);
+                    return self.step_sequence(body, env);
+                }
+            }
+            ContFrame::Application {
+                mut evaluated,
+                operands,
+                index,
+                span,
+                env,
+            } => {
+                evaluated.push(value);
+                if index < operands.len() {
+                    let next = operands[index].clone();
+                    self.push(ContFrame::Application {
+                        evaluated,
+                        operands,
+                        index: index + 1,
+                        span,
+                        env: env.clone(),
+                    });
+                    self.control = Control::Eval(next, env);
+                } else {
+                    let mut args = evaluated.into_iter();
+                    let callee = args.next().expect("operator value present");
+                    return self.apply(callee, args.collect(), span, &env);
+                }
+            }
+            ContFrame::ProgramForms { forms, index, env } => {
+                if index < forms.len() {
+                    let form = forms[index].clone();
+                    self.push(ContFrame::ProgramForms {
+                        forms,
+                        index: index + 1,
+                        env: env.clone(),
+                    });
+                    let form_span = form.span.clone();
+                    match form.node {
+                        TopLevel::Define { name, value } => {
+                            self.push(ContFrame::DefineTop {
+                                name: Rc::new(name),
+                                env: env.clone(),
+                            });
+                            self.control = Control::Eval(value, env);
+                        }
+                        TopLevel::Expr(expr) => {
+                            self.control = Control::Eval(Spanned::new(expr, form_span), env);
                         }
                     }
-                    procedure => return apply(procedure, args, span, &env),
+                } else {
+                    self.control = Control::Value(Value::Unspecified);
+                }
+            }
+            ContFrame::DefineTop { name, env } => {
+                env.define(name.node.clone(), value);
+                self.control = Control::Value(Value::Unspecified);
+            }
+            ContFrame::MapStep {
+                procedure,
+                lists,
+                index,
+                mut built,
+                collect,
+                span,
+            } => {
+                if collect {
+                    built.push(value);
+                }
+                if index < lists[0].len() {
+                    let operands = lists
+                        .iter()
+                        .map(|items| items[index].clone())
+                        .collect::<Vec<_>>();
+                    self.push(ContFrame::MapStep {
+                        procedure: procedure.clone(),
+                        lists,
+                        index: index + 1,
+                        built,
+                        collect,
+                        span: span.clone(),
+                    });
+                    let env = Env::empty();
+                    return self.apply(procedure, operands, span, &env);
+                }
+                self.control = Control::Value(if collect {
+                    list_value(built)
+                } else {
+                    Value::Unspecified
+                });
+            }
+            ContFrame::ConsumeValues { consumer, span } => {
+                let args = match value {
+                    Value::Values(values) => values,
+                    value => vec![value],
+                };
+                let env = Env::empty();
+                return self.apply(consumer, args, span, &env);
+            }
+            ContFrame::Memoize { promise } => {
+                let memoized = promise.memoize(value);
+                self.control = Control::Value(memoized);
+            }
+            ContFrame::WindEnter {
+                before,
+                thunk,
+                after,
+                span,
+            } => {
+                self.winds = Rc::new(Winds::Node {
+                    wind: Wind::Thunks {
+                        before,
+                        after: after.clone(),
+                    },
+                    parent: self.winds.clone(),
+                });
+                self.push(ContFrame::WindExit {
+                    after,
+                    span: span.clone(),
+                });
+                let env = Env::empty();
+                return self.apply(thunk, Vec::new(), span, &env);
+            }
+            ContFrame::WindExit { after, span } => {
+                if let Winds::Node { parent, .. } = &*self.winds {
+                    self.winds = parent.clone();
+                }
+                self.push(ContFrame::WindReturn {
+                    value: Box::new(value),
+                });
+                let env = Env::empty();
+                return self.apply(after, Vec::new(), span, &env);
+            }
+            ContFrame::WindReturn { value } => {
+                self.control = Control::Value(*value);
+            }
+            ContFrame::JumpWinds {
+                plan,
+                mut index,
+                target_kont,
+                target_winds,
+                value,
+                span,
+            } => {
+                while index < plan.len() {
+                    match plan[index].clone() {
+                        WindStep::SetInput(port) => {
+                            CURRENT_INPUT_PORT.with(|current| {
+                                current.replace(port);
+                            });
+                            index += 1;
+                        }
+                        WindStep::SetOutput(port) => {
+                            CURRENT_OUTPUT_PORT.with(|current| {
+                                current.replace(port);
+                            });
+                            index += 1;
+                        }
+                        WindStep::Thunk { thunk, winds } => {
+                            self.winds = winds;
+                            self.kont = Rc::new(Kont::Frame(
+                                ContFrame::JumpWinds {
+                                    plan,
+                                    index: index + 1,
+                                    target_kont,
+                                    target_winds,
+                                    value,
+                                    span: span.clone(),
+                                },
+                                Rc::new(Kont::Halt),
+                            ));
+                            let env = Env::empty();
+                            return self.apply(thunk, Vec::new(), span, &env);
+                        }
+                    }
+                }
+                self.winds = target_winds;
+                self.kont = target_kont;
+                self.control = Control::Value(*value);
+            }
+            ContFrame::ClosePort { port } => {
+                match port {
+                    PortToClose::Input(port) => port.0.borrow_mut().closed = true,
+                    PortToClose::Output(port) => close_output_port_value(port),
+                }
+                self.control = Control::Value(value);
+            }
+            ContFrame::PopPortWind => {
+                let node = self.winds.clone();
+                if let Winds::Node { wind, parent } = &*node {
+                    self.winds = parent.clone();
+                    match wind {
+                        Wind::CurrentInput { outside, inside } => {
+                            CURRENT_INPUT_PORT.with(|current| {
+                                current.replace(outside.clone());
+                            });
+                            inside.0.borrow_mut().closed = true;
+                        }
+                        Wind::CurrentOutput { outside, inside } => {
+                            CURRENT_OUTPUT_PORT.with(|current| {
+                                current.replace(outside.clone());
+                            });
+                            close_output_port_value(inside.clone());
+                        }
+                        Wind::Thunks { .. } => {}
+                    }
+                }
+                self.control = Control::Value(value);
+            }
+        }
+        Ok(())
+    }
+
+    /// Apply a callee to evaluated arguments. Loops so `apply` chains and
+    /// continuation invocations re-dispatch without recursion.
+    fn apply(
+        &mut self,
+        callee: Value,
+        args: Vec<Value>,
+        span: SourceSpan,
+        env: &Env,
+    ) -> Result<(), EvalError> {
+        let mut callee = callee;
+        let mut args = args;
+        loop {
+            match callee {
+                Value::Procedure(procedure) => {
+                    let local = procedure_application_env(&procedure, args, span)?;
+                    return self.step_sequence(Rc::new(procedure.body.clone()), local);
+                }
+                Value::Continuation(continuation) => {
+                    return self.jump(continuation, args, span);
+                }
+                Value::Primitive(name) => match name {
+                    "call-with-current-continuation" | "call/cc" => {
+                        let receiver = single_argument(args, span.clone())?;
+                        let continuation = Value::Continuation(Continuation {
+                            id: next_continuation_id(),
+                            kont: self.kont.clone(),
+                            winds: self.winds.clone(),
+                        });
+                        callee = receiver;
+                        args = vec![continuation];
+                    }
+                    "apply" => {
+                        let (procedure, flattened) = flatten_apply_arguments(args, span.clone())?;
+                        callee = procedure;
+                        args = flattened;
+                    }
+                    "call-with-values" => {
+                        let actual = args.len();
+                        let [producer, consumer]: [Value; 2] =
+                            args.try_into().map_err(|_| EvalError::ArityMismatch {
+                                expected: 2,
+                                actual,
+                                span: span.clone(),
+                            })?;
+                        self.push(ContFrame::ConsumeValues {
+                            consumer,
+                            span: span.clone(),
+                        });
+                        callee = producer;
+                        args = Vec::new();
+                    }
+                    "dynamic-wind" => {
+                        let actual = args.len();
+                        let [before, thunk, after]: [Value; 3] =
+                            args.try_into().map_err(|_| EvalError::ArityMismatch {
+                                expected: 3,
+                                actual,
+                                span: span.clone(),
+                            })?;
+                        self.push(ContFrame::WindEnter {
+                            before: before.clone(),
+                            thunk,
+                            after,
+                            span: span.clone(),
+                        });
+                        callee = before;
+                        args = Vec::new();
+                    }
+                    "force" => {
+                        let value = single_argument(args, span.clone())?;
+                        let Value::Promise(promise) = value else {
+                            return Err(EvalError::TypeError {
+                                expected: "promise?",
+                                span,
+                            });
+                        };
+                        if let Some(value) = promise.memoized() {
+                            self.control = Control::Value(value);
+                            return Ok(());
+                        }
+                        let expr = promise.expr.clone();
+                        let env = promise.env.clone();
+                        self.push(ContFrame::Memoize { promise });
+                        self.control = Control::Eval(expr, env);
+                        return Ok(());
+                    }
+                    "map" | "for-each" => {
+                        let collect = name == "map";
+                        let (procedure, lists) = procedure_and_lists(args, span.clone())?;
+                        common_list_len(&lists, span.clone())?;
+                        if lists[0].is_empty() {
+                            self.control = Control::Value(if collect {
+                                list_value(Vec::new())
+                            } else {
+                                Value::Unspecified
+                            });
+                            return Ok(());
+                        }
+                        let operands = lists
+                            .iter()
+                            .map(|items| items[0].clone())
+                            .collect::<Vec<_>>();
+                        self.push(ContFrame::MapStep {
+                            procedure: procedure.clone(),
+                            lists: Rc::new(lists),
+                            index: 1,
+                            built: Vec::new(),
+                            collect,
+                            span: span.clone(),
+                        });
+                        callee = procedure;
+                        args = operands;
+                    }
+                    "eval" => {
+                        let (expr, env) = eval_arguments(args, span.clone())?;
+                        self.control = Control::Eval(expr, env);
+                        return Ok(());
+                    }
+                    "load" => {
+                        let forms = load_program(args, span.clone())?;
+                        self.push(ContFrame::ProgramForms {
+                            forms: Rc::new(forms),
+                            index: 0,
+                            env: env.clone(),
+                        });
+                        self.control = Control::Value(Value::Unspecified);
+                        return Ok(());
+                    }
+                    "interaction-environment" => {
+                        if !args.is_empty() {
+                            return Err(EvalError::ArityMismatch {
+                                expected: 0,
+                                actual: args.len(),
+                                span,
+                            });
+                        }
+                        self.control = Control::Value(Value::Environment(env.clone()));
+                        return Ok(());
+                    }
+                    "call-with-input-file" => {
+                        let (path, procedure) = path_and_procedure(args, span.clone())?;
+                        let port = input_port_from_path(&path, span.clone())?;
+                        self.push(ContFrame::ClosePort {
+                            port: PortToClose::Input(port.clone()),
+                        });
+                        callee = procedure;
+                        args = vec![Value::InputPort(port)];
+                    }
+                    "call-with-output-file" => {
+                        let (path, procedure) = path_and_procedure(args, span.clone())?;
+                        let port = output_port_from_path(&path, span.clone())?;
+                        self.push(ContFrame::ClosePort {
+                            port: PortToClose::Output(port.clone()),
+                        });
+                        callee = procedure;
+                        args = vec![Value::OutputPort(port)];
+                    }
+                    "with-input-from-file" => {
+                        let (path, thunk) = path_and_procedure(args, span.clone())?;
+                        let port = input_port_from_path(&path, span.clone())?;
+                        let outside =
+                            CURRENT_INPUT_PORT.with(|current| current.replace(port.clone()));
+                        self.winds = Rc::new(Winds::Node {
+                            wind: Wind::CurrentInput {
+                                outside,
+                                inside: port,
+                            },
+                            parent: self.winds.clone(),
+                        });
+                        self.push(ContFrame::PopPortWind);
+                        callee = thunk;
+                        args = Vec::new();
+                    }
+                    "with-output-to-file" => {
+                        let (path, thunk) = path_and_procedure(args, span.clone())?;
+                        let port = output_port_from_path(&path, span.clone())?;
+                        let outside =
+                            CURRENT_OUTPUT_PORT.with(|current| current.replace(port.clone()));
+                        self.winds = Rc::new(Winds::Node {
+                            wind: Wind::CurrentOutput {
+                                outside,
+                                inside: port,
+                            },
+                            parent: self.winds.clone(),
+                        });
+                        self.push(ContFrame::PopPortWind);
+                        callee = thunk;
+                        args = Vec::new();
+                    }
+                    _ => {
+                        let value = apply_primitive(name, args, span)?;
+                        self.control = Control::Value(value);
+                        return Ok(());
+                    }
+                },
+                _ => return Err(EvalError::NotProcedure { span }),
+            }
+        }
+    }
+
+    /// Invoke a captured continuation: plan the wind transition from the
+    /// current extents to the captured ones, then land on its frames.
+    fn jump(
+        &mut self,
+        continuation: Continuation,
+        args: Vec<Value>,
+        span: SourceSpan,
+    ) -> Result<(), EvalError> {
+        let value = match args.len() {
+            1 => args.into_iter().next().expect("one argument"),
+            _ => Value::Values(args),
+        };
+
+        if Rc::ptr_eq(&self.winds, &continuation.winds) {
+            self.kont = continuation.kont;
+            self.control = Control::Value(value);
+            return Ok(());
+        }
+
+        let plan = wind_transition(&self.winds, &continuation.winds);
+        self.kont = Rc::new(Kont::Frame(
+            ContFrame::JumpWinds {
+                plan: Rc::new(plan),
+                index: 0,
+                target_kont: continuation.kont,
+                target_winds: continuation.winds,
+                value: Box::new(value),
+                span,
+            },
+            Rc::new(Kont::Halt),
+        ));
+        self.control = Control::Value(Value::Unspecified);
+        Ok(())
+    }
+}
+
+/// The wind steps needed to move between two dynamic extents: unwind the
+/// current chain's `after` actions innermost-first down to the shared
+/// ancestor, then rewind the target chain's `before` actions outermost-first.
+fn wind_transition(current: &Rc<Winds>, target: &Rc<Winds>) -> Vec<WindStep> {
+    let current_chain = wind_chain(current);
+    let target_chain = wind_chain(target);
+    let shared = current_chain
+        .iter()
+        .find(|node| {
+            target_chain
+                .iter()
+                .any(|candidate| Rc::ptr_eq(node, candidate))
+        })
+        .cloned()
+        .unwrap_or_else(|| Rc::new(Winds::Nil));
+
+    let mut plan = Vec::new();
+    for node in &current_chain {
+        if Rc::ptr_eq(node, &shared) {
+            break;
+        }
+        if let Winds::Node { wind, parent } = &**node {
+            match wind {
+                Wind::Thunks { after, .. } => plan.push(WindStep::Thunk {
+                    thunk: after.clone(),
+                    winds: parent.clone(),
+                }),
+                Wind::CurrentInput { outside, .. } => {
+                    plan.push(WindStep::SetInput(outside.clone()));
+                }
+                Wind::CurrentOutput { outside, .. } => {
+                    plan.push(WindStep::SetOutput(outside.clone()));
                 }
             }
         }
     }
-}
 
-fn eval_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError> {
-    let mut result = Value::Unspecified;
-    for expr in exprs {
-        result = eval_expr(expr, env)?;
-    }
-    Ok(result)
-}
-
-fn eval_tail_sequence(exprs: &[Spanned<Expr>], env: &Env) -> Result<Value, EvalError> {
-    match exprs.split_last() {
-        Some((last, prefix)) => {
-            for expr in prefix {
-                eval_expr(expr, env)?;
-            }
-            eval_tail_expr(last.clone(), env.clone())
+    let mut rewinds = Vec::new();
+    for node in &target_chain {
+        if Rc::ptr_eq(node, &shared) {
+            break;
         }
-        None => Ok(Value::Unspecified),
+        if let Winds::Node { wind, parent } = &**node {
+            match wind {
+                Wind::Thunks { before, .. } => rewinds.push(WindStep::Thunk {
+                    thunk: before.clone(),
+                    winds: parent.clone(),
+                }),
+                Wind::CurrentInput { inside, .. } => {
+                    rewinds.push(WindStep::SetInput(inside.clone()));
+                }
+                Wind::CurrentOutput { inside, .. } => {
+                    rewinds.push(WindStep::SetOutput(inside.clone()));
+                }
+            }
+        }
     }
+    rewinds.reverse();
+    plan.extend(rewinds);
+    plan
 }
 
-fn eval_sequence_prefix(
-    mut exprs: Vec<Spanned<Expr>>,
-    env: &Env,
-) -> Result<Option<Spanned<Expr>>, EvalError> {
-    let Some(last) = exprs.pop() else {
-        return Ok(None);
-    };
-    for expr in &exprs {
-        eval_expr(expr, env)?;
+fn wind_chain(winds: &Rc<Winds>) -> Vec<Rc<Winds>> {
+    let mut chain = vec![winds.clone()];
+    let mut current = winds.clone();
+    while let Winds::Node { parent, .. } = &*current {
+        chain.push(parent.clone());
+        current = {
+            let Winds::Node { parent, .. } = &*current else {
+                unreachable!()
+            };
+            parent.clone()
+        };
     }
-    Ok(Some(last))
+    chain
 }
 
-fn eval_letrec_bindings(
-    bindings: &[(Spanned<String>, Spanned<Expr>)],
-    env: &Env,
-) -> Result<Env, EvalError> {
-    let local = Env::child(env.clone());
-    for (name, _) in bindings {
-        local.define(name.node.clone(), Value::Uninitialized);
-    }
-
-    for (name, value_expr) in bindings {
-        let value = eval_expr(value_expr, &local)?;
-        local.set(&name.node, value);
-    }
-
-    Ok(local)
+fn single_argument(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
+    let actual = args.len();
+    let [value]: [Value; 1] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 1,
+        actual,
+        span,
+    })?;
+    Ok(value)
 }
 
-fn apply(
-    procedure: Value,
+/// Split `apply`'s arguments into the procedure and its flattened operand
+/// list, splicing the final list argument.
+fn flatten_apply_arguments(
     args: Vec<Value>,
     span: SourceSpan,
-    env: &Env,
-) -> Result<Value, EvalError> {
-    match procedure {
-        Value::Primitive(name) => apply_primitive(name, args, span, env),
-        Value::Continuation(continuation) => apply_continuation(continuation, args, span),
-        Value::Procedure(procedure) => {
-            let env = procedure_application_env(&procedure, args, span)?;
-            eval_tail_sequence(&procedure.body, &env)
-        }
-        _ => Err(EvalError::NotProcedure { span }),
+) -> Result<(Value, Vec<Value>), EvalError> {
+    if args.len() < 2 {
+        return Err(EvalError::ArityMismatch {
+            expected: 2,
+            actual: args.len(),
+            span,
+        });
     }
+
+    let mut args = args.into_iter();
+    let procedure = args
+        .next()
+        .expect("arity check ensures a procedure argument");
+    let mut operands = args.collect::<Vec<_>>();
+    let final_operand = operands
+        .pop()
+        .expect("arity check ensures a final list argument");
+    let final_operands = expect_list_items(&final_operand, span)?;
+
+    operands.extend(final_operands);
+    Ok((procedure, operands))
+}
+
+fn eval_arguments(args: Vec<Value>, span: SourceSpan) -> Result<(Spanned<Expr>, Env), EvalError> {
+    let actual = args.len();
+    let [expr, environment]: [Value; 2] =
+        args.try_into().map_err(|_| EvalError::ArityMismatch {
+            expected: 2,
+            actual,
+            span: span.clone(),
+        })?;
+    let Value::Environment(env) = environment else {
+        return Err(EvalError::TypeError {
+            expected: "environment?",
+            span,
+        });
+    };
+
+    let datum = value_to_datum(expr, span.clone())?;
+    let expr = classify_expr(&datum).map_err(|error| EvalError::ReadError {
+        message: error.to_string(),
+        span,
+    })?;
+    Ok((expr, env))
+}
+
+fn load_program(args: Vec<Value>, span: SourceSpan) -> Result<Vec<Spanned<TopLevel>>, EvalError> {
+    let value = single_argument(args, span.clone())?;
+    let Value::String(path) = value else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let source =
+        fs::read_to_string(path.borrow().as_str()).map_err(|error| EvalError::IoError {
+            message: error.to_string(),
+            span: span.clone(),
+        })?;
+    let datums = parse_datums(&source).map_err(|error| EvalError::ReadError {
+        message: error.to_string(),
+        span: span.clone(),
+    })?;
+    let program = classify_program(&datums).map_err(|error| EvalError::ReadError {
+        message: error.to_string(),
+        span: span.clone(),
+    })?;
+    Ok(program.forms)
+}
+
+fn path_and_procedure(args: Vec<Value>, span: SourceSpan) -> Result<(String, Value), EvalError> {
+    let actual = args.len();
+    let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
+        expected: 2,
+        actual,
+        span: span.clone(),
+    })?;
+    let Value::String(path) = path else {
+        return Err(EvalError::TypeError {
+            expected: "string?",
+            span,
+        });
+    };
+    let path = path.borrow().clone();
+    Ok((path, procedure))
 }
 
 fn procedure_application_env(
@@ -783,7 +1514,6 @@ fn apply_primitive(
     name: &'static str,
     args: Vec<Value>,
     span: SourceSpan,
-    env: &Env,
 ) -> Result<Value, EvalError> {
     match name {
         "+" => add(args, span),
@@ -936,17 +1666,8 @@ fn apply_primitive(
         "current-output-port" => current_output_port(args, span),
         "open-input-file" => open_input_file(args, span),
         "open-output-file" => open_output_file(args, span),
-        "call-with-input-file" => call_with_input_file(args, span, env),
-        "call-with-output-file" => call_with_output_file(args, span, env),
-        "with-input-from-file" => with_input_from_file(args, span, env),
-        "with-output-to-file" => with_output_to_file(args, span, env),
-        "load" => load(args, span, env),
-        "eval" => eval_value(args, span),
         "scheme-report-environment" => scheme_report_environment(args, span),
         "null-environment" => null_environment(args, span),
-        "interaction-environment" => interaction_environment(args, span, env),
-        "dynamic-wind" => dynamic_wind(args, span, env),
-        "call-with-current-continuation" | "call/cc" => call_cc(args, span, env),
         "close-input-port" => close_input_port(args, span),
         "close-output-port" => close_output_port(args, span),
         "read" => read_datum(args, span),
@@ -964,10 +1685,7 @@ fn apply_primitive(
         "eqv?" => eqv(args, span),
         "eq?" => eq(args, span),
         "equal?" => equal(args, span),
-        "force" => force(args, span),
         "values" => Ok(Value::Values(args)),
-        "call-with-values" => call_with_values(args, span, env),
-        "apply" => apply_procedure_argument(args, span, env),
         "symbol->string" => unary(args, span.clone(), |value| match value {
             Value::Symbol(name) => Ok(string_value(name)),
             _ => Err(EvalError::TypeError {
@@ -1023,8 +1741,6 @@ fn apply_primitive(
         "assq" => assoc(args, span, eq_value),
         "assv" => assoc(args, span, eqv_value),
         "assoc" => assoc(args, span, equal_value),
-        "map" => map_list(args, span, env),
-        "for-each" => for_each(args, span, env),
         "string-length" => unary(args, span.clone(), |value| match value {
             Value::String(text) => Ok(Value::Integer(BigInt::from(text.borrow().chars().count()))),
             _ => Err(EvalError::TypeError {
@@ -2854,33 +3570,6 @@ fn equal(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     Ok(Value::Boolean(equal_value(&left, &right)))
 }
 
-fn force(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    unary(args, span.clone(), |value| match value {
-        Value::Promise(promise) => promise.force(),
-        _ => Err(EvalError::TypeError {
-            expected: "promise?",
-            span,
-        }),
-    })
-}
-
-fn call_with_values(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [producer, consumer]: [Value; 2] =
-        args.try_into().map_err(|_| EvalError::ArityMismatch {
-            expected: 2,
-            actual,
-            span: span.clone(),
-        })?;
-
-    let produced = apply(producer, Vec::new(), span.clone(), env)?;
-    let consumer_args = match produced {
-        Value::Values(values) => values,
-        value => vec![value],
-    };
-    apply(consumer, consumer_args, span, env)
-}
-
 fn current_input_port(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     if !args.is_empty() {
         return Err(EvalError::ArityMismatch {
@@ -3086,211 +3775,11 @@ fn output_port_from_path(path: &str, span: SourceSpan) -> Result<OutputPort, Eva
         })
 }
 
-fn call_with_input_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
-        expected: 2,
-        actual,
-        span: span.clone(),
-    })?;
-    let Value::String(path) = path else {
-        return Err(EvalError::TypeError {
-            expected: "string?",
-            span,
-        });
-    };
-
-    let port = input_port_from_path(path.borrow().as_str(), span.clone())?;
-    let result = apply(
-        procedure,
-        vec![Value::InputPort(port.clone())],
-        span.clone(),
-        env,
-    );
-    port.0.borrow_mut().closed = true;
-    result
-}
-
-fn call_with_output_file(
-    args: Vec<Value>,
-    span: SourceSpan,
-    env: &Env,
-) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [path, procedure]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
-        expected: 2,
-        actual,
-        span: span.clone(),
-    })?;
-    let Value::String(path) = path else {
-        return Err(EvalError::TypeError {
-            expected: "string?",
-            span,
-        });
-    };
-
-    let port = output_port_from_path(path.borrow().as_str(), span.clone())?;
-    let result = apply(
-        procedure,
-        vec![Value::OutputPort(port.clone())],
-        span.clone(),
-        env,
-    );
-    close_output_port_value(port);
-    result
-}
-
-fn with_input_from_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
-        expected: 2,
-        actual,
-        span: span.clone(),
-    })?;
-    let Value::String(path) = path else {
-        return Err(EvalError::TypeError {
-            expected: "string?",
-            span,
-        });
-    };
-
-    let port = input_port_from_path(path.borrow().as_str(), span.clone())?;
-    let old = CURRENT_INPUT_PORT.with(|current| current.replace(port.clone()));
-    let result = apply(thunk, Vec::new(), span, env);
-    CURRENT_INPUT_PORT.with(|current| {
-        current.replace(old);
-    });
-    port.0.borrow_mut().closed = true;
-    result
-}
-
-fn with_output_to_file(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [path, thunk]: [Value; 2] = args.try_into().map_err(|_| EvalError::ArityMismatch {
-        expected: 2,
-        actual,
-        span: span.clone(),
-    })?;
-    let Value::String(path) = path else {
-        return Err(EvalError::TypeError {
-            expected: "string?",
-            span,
-        });
-    };
-
-    let port = output_port_from_path(path.borrow().as_str(), span.clone())?;
-    let old = CURRENT_OUTPUT_PORT.with(|current| current.replace(port.clone()));
-    let result = apply(thunk, Vec::new(), span, env);
-    CURRENT_OUTPUT_PORT.with(|current| {
-        current.replace(old);
-    });
-    close_output_port_value(port);
-    result
-}
-
-fn load(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    unary(args, span.clone(), |value| {
-        let Value::String(path) = value else {
-            return Err(EvalError::TypeError {
-                expected: "string?",
-                span,
-            });
-        };
-        let source =
-            fs::read_to_string(path.borrow().as_str()).map_err(|error| EvalError::IoError {
-                message: error.to_string(),
-                span: span.clone(),
-            })?;
-        let datums = parse_datums(&source).map_err(|error| EvalError::ReadError {
-            message: error.to_string(),
-            span: span.clone(),
-        })?;
-        let program = classify_program(&datums).map_err(|error| EvalError::ReadError {
-            message: error.to_string(),
-            span: span.clone(),
-        })?;
-        eval_program(&program, env).map(|_| Value::Unspecified)
-    })
-}
-
-fn eval_value(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [expr, environment]: [Value; 2] =
-        args.try_into().map_err(|_| EvalError::ArityMismatch {
-            expected: 2,
-            actual,
-            span: span.clone(),
-        })?;
-    let Value::Environment(env) = environment else {
-        return Err(EvalError::TypeError {
-            expected: "environment?",
-            span,
-        });
-    };
-
-    let datum = value_to_datum(expr, span.clone())?;
-    let expr = classify_expr(&datum).map_err(|error| EvalError::ReadError {
-        message: error.to_string(),
-        span: span.clone(),
-    })?;
-    eval_expr(&expr, &env)
-}
-
-fn dynamic_wind(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [before, thunk, after]: [Value; 3] =
-        args.try_into().map_err(|_| EvalError::ArityMismatch {
-            expected: 3,
-            actual,
-            span: span.clone(),
-        })?;
-
-    apply(before, Vec::new(), span.clone(), env)?;
-    let result = apply(thunk, Vec::new(), span.clone(), env);
-    let after_result = apply(after, Vec::new(), span, env);
-    match (result, after_result) {
-        (Ok(value), Ok(_)) => Ok(value),
-        (_, Err(error)) => Err(error),
-        (Err(error), Ok(_)) => Err(error),
-    }
-}
-
-fn call_cc(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    unary(args, span.clone(), |procedure| {
-        let id = next_continuation_id();
-        let continuation = Value::Continuation(Continuation { id });
-        match apply(procedure, vec![continuation], span.clone(), env) {
-            Err(EvalError::ContinuationJump {
-                id: jump_id, value, ..
-            }) if jump_id == id => Ok(*value),
-            result => result,
-        }
-    })
-}
-
 fn next_continuation_id() -> usize {
     NEXT_CONTINUATION_ID.with(|cell| {
         let id = cell.get();
         cell.set(id.wrapping_add(1));
         id
-    })
-}
-
-fn apply_continuation(
-    continuation: Continuation,
-    args: Vec<Value>,
-    span: SourceSpan,
-) -> Result<Value, EvalError> {
-    let actual = args.len();
-    let [value]: [Value; 1] = args.try_into().map_err(|_| EvalError::ArityMismatch {
-        expected: 1,
-        actual,
-        span: span.clone(),
-    })?;
-    Err(EvalError::ContinuationJump {
-        id: continuation.id,
-        value: Box::new(value),
-        span,
     })
 }
 
@@ -3302,22 +3791,6 @@ fn scheme_report_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value
 fn null_environment(args: Vec<Value>, span: SourceSpan) -> Result<Value, EvalError> {
     require_environment_version(args, span)?;
     Ok(Value::Environment(Env::empty()))
-}
-
-fn interaction_environment(
-    args: Vec<Value>,
-    span: SourceSpan,
-    env: &Env,
-) -> Result<Value, EvalError> {
-    if !args.is_empty() {
-        return Err(EvalError::ArityMismatch {
-            expected: 0,
-            actual: args.len(),
-            span,
-        });
-    }
-
-    Ok(Value::Environment(env.clone()))
 }
 
 fn require_environment_version(args: Vec<Value>, span: SourceSpan) -> Result<(), EvalError> {
@@ -3524,33 +3997,6 @@ fn write_output_raw(text: &str, port: &OutputPort, span: SourceSpan) -> Result<(
             Ok(())
         }
     }
-}
-
-fn apply_procedure_argument(
-    args: Vec<Value>,
-    span: SourceSpan,
-    env: &Env,
-) -> Result<Value, EvalError> {
-    if args.len() < 2 {
-        return Err(EvalError::ArityMismatch {
-            expected: 2,
-            actual: args.len(),
-            span,
-        });
-    }
-
-    let mut args = args.into_iter();
-    let procedure = args
-        .next()
-        .expect("arity check ensures a procedure argument");
-    let mut operands = args.collect::<Vec<_>>();
-    let final_operand = operands
-        .pop()
-        .expect("arity check ensures a final list argument");
-    let final_operands = expect_list_items(&final_operand, span.clone())?;
-
-    operands.extend(final_operands);
-    apply(procedure, operands, span, env)
 }
 
 fn integer_to_char(n: BigInt, span: SourceSpan) -> Result<Value, EvalError> {
@@ -4194,37 +4640,6 @@ fn assoc(
     }
 
     Ok(Value::Boolean(false))
-}
-
-fn map_list(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let (procedure, lists) = procedure_and_lists(args, span.clone())?;
-    let len = common_list_len(&lists, span.clone())?;
-    let mut results = Vec::with_capacity(len);
-
-    for index in 0..len {
-        let operands = lists
-            .iter()
-            .map(|items| items[index].clone())
-            .collect::<Vec<_>>();
-        results.push(apply(procedure.clone(), operands, span.clone(), env)?);
-    }
-
-    Ok(list_value(results))
-}
-
-fn for_each(args: Vec<Value>, span: SourceSpan, env: &Env) -> Result<Value, EvalError> {
-    let (procedure, lists) = procedure_and_lists(args, span.clone())?;
-    let len = common_list_len(&lists, span.clone())?;
-
-    for index in 0..len {
-        let operands = lists
-            .iter()
-            .map(|items| items[index].clone())
-            .collect::<Vec<_>>();
-        apply(procedure.clone(), operands, span.clone(), env)?;
-    }
-
-    Ok(Value::Unspecified)
 }
 
 fn procedure_and_lists(
@@ -5617,6 +6032,86 @@ mod tests {
                      0))"
             ),
             "3"
+        );
+    }
+
+    #[test]
+    fn evaluates_reentrant_continuations() {
+        // A continuation invoked after its capture site returned re-enters
+        // the captured extent.
+        assert_eq!(
+            eval_one(
+                "(let ((k #f) (n 0) (r 0))
+                   (set! r (+ 1 (call/cc (lambda (c) (set! k c) 0))))
+                   (set! n (+ n 1))
+                   (if (< n 3) (k r) #f)
+                   r)"
+            ),
+            "3"
+        );
+        // R5RS letrec evaluates all inits before assigning any variable.
+        assert_eq!(
+            eval_one(
+                "(let ((cont #f))
+                   (letrec ((x (call/cc (lambda (c) (set! cont c) 0)))
+                            (y (call/cc (lambda (c) (set! cont c) 0))))
+                     (if cont
+                         (let ((c cont))
+                           (set! cont #f)
+                           (set! x 1)
+                           (set! y 1)
+                           (c 0))
+                         (+ x y))))"
+            ),
+            "0"
+        );
+    }
+
+    #[test]
+    fn evaluates_callcc_safe_map() {
+        // Re-entering a continuation captured inside map resumes the
+        // traversal with the earlier elements intact.
+        assert_eq!(
+            eval_one(
+                "(define executed-k #f)
+                 (define cont #f)
+                 (define res1 #f)
+                 (define res2 #f)
+                 (set! res1 (map (lambda (x)
+                                   (if (= x 0)
+                                       (call/cc (lambda (k) (set! cont k) 0))
+                                       0))
+                                 '(1 0 2)))
+                 (if (not executed-k)
+                     (begin (set! executed-k #t)
+                            (set! res2 res1)
+                            (cont 1)))
+                 res2"
+            ),
+            "(0 0 0)"
+        );
+    }
+
+    #[test]
+    fn winds_dynamic_extents_across_continuation_jumps() {
+        // Jumping out runs the after thunk; jumping back in runs before.
+        assert_eq!(
+            eval_one(
+                "(define trace '())
+                 (define (log x) (set! trace (cons x trace)))
+                 (define k #f)
+                 (define entered 0)
+                 (dynamic-wind
+                   (lambda () (log 'before))
+                   (lambda ()
+                     (set! entered (+ entered 1))
+                     (call/cc (lambda (c) (set! k c)))
+                     (log 'body))
+                   (lambda () (log 'after)))
+                 (if (< entered 2) (k #f) #f)
+                 (reverse trace)"
+            ),
+            "(before body after before body after)"
         );
     }
 

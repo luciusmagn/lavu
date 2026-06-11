@@ -26,16 +26,29 @@ fn sisc_r5rs_pitfall_fixture_is_parseable() {
 #[test]
 #[ignore = "manual R5RS compliance corpus; current Lavu still has known gaps"]
 fn sisc_r5rs_pitfall_suite() {
+    // The fixture is one program: setup forms (defines and the should-be
+    // macro definition) interleave with the cases, all sharing one
+    // environment, exactly as a Scheme implementation would load the file.
     let datums = parse(PITFALL_SOURCE).expect("fixture should parse as Scheme datums");
-    let cases = should_be_cases(&datums);
-    let failures = cases
-        .iter()
-        .filter_map(|case| match run_case(case) {
-            Ok(true) => None,
-            Ok(false) => Some(format!("{}: value did not match expected result", case.id)),
-            Err(error) => Some(format!("{}: {error}", case.id)),
-        })
-        .collect::<Vec<_>>();
+    let env = Env::new();
+    let mut failures = Vec::new();
+
+    for datum in &datums {
+        match should_be_case(datum) {
+            Some(case) => match run_case(&env, &case) {
+                Ok(true) => {}
+                Ok(false) => {
+                    failures.push(format!("{}: value did not match expected result", case.id));
+                }
+                Err(error) => failures.push(format!("{}: {error}", case.id)),
+            },
+            None => {
+                if let Err(error) = eval_datum(&env, datum.clone()) {
+                    failures.push(format!("setup form failed: {error}"));
+                }
+            }
+        }
+    }
 
     assert!(
         failures.is_empty(),
@@ -67,9 +80,8 @@ fn should_be_case(datum: &Spanned<Datum>) -> Option<PitfallCase> {
     })
 }
 
-fn run_case(case: &PitfallCase) -> Result<bool, String> {
-    let env = Env::new();
-    match eval_datum(&env, equality_check(case))? {
+fn run_case(env: &Env, case: &PitfallCase) -> Result<bool, String> {
+    match eval_datum(env, equality_check(case))? {
         Value::Boolean(passed) => Ok(passed),
         other => Err(format!("comparison returned non-boolean {other}")),
     }
@@ -77,11 +89,12 @@ fn run_case(case: &PitfallCase) -> Result<bool, String> {
 
 fn eval_datum(env: &Env, datum: Spanned<Datum>) -> Result<Value, String> {
     let program = classify_program(&[datum]).map_err(|error| error.to_string())?;
-    eval_program(&program, env)
+    Ok(eval_program(&program, env)
         .map_err(|error| error.to_string())?
         .into_iter()
         .last()
-        .ok_or_else(|| "program produced no values".to_string())
+        // Forms like define-syntax classify into zero runtime forms.
+        .unwrap_or(Value::Unspecified))
 }
 
 fn equality_check(case: &PitfallCase) -> Spanned<Datum> {
