@@ -232,7 +232,8 @@ impl MacroExpander {
         // Use-site markers protect capture-substituted identifiers from
         // re-marking during nested expansions; once expansion settles they
         // are spent and peel away.
-        self.expand_with_depth(datum, 0).map(|datum| peel_use_site_marks(&datum))
+        self.expand_with_depth(datum, 0)
+            .map(|datum| peel_use_site_marks(&datum))
     }
 
     fn expand_with_depth(
@@ -655,7 +656,10 @@ impl MacroExpander {
         body: &[Spanned<Datum>],
         depth: usize,
     ) -> Result<Vec<Spanned<Datum>>, SurfaceError> {
-        let mut local = self.clone();
+        // Internal definitions bind across the whole body, so the names
+        // they define shadow any same-named macros, including definitions
+        // spliced in through `begin`.
+        let mut local = self.without_syntax_names(&body_definition_names(body));
         let mut expanded = Vec::new();
         let mut index = 0;
 
@@ -1463,12 +1467,11 @@ fn expand_template_at(
                         span: template.span.clone(),
                     });
                 };
-                values
-                    .get(index)
-                    .map(mark_use_site)
-                    .ok_or_else(|| SurfaceError::InvalidMacroTemplate {
+                values.get(index).map(mark_use_site).ok_or_else(|| {
+                    SurfaceError::InvalidMacroTemplate {
                         span: template.span.clone(),
-                    })
+                    }
+                })
             }
             // Hygiene: identifiers the template introduces are renamed with
             // this expansion's mark, so they neither capture nor are
@@ -1597,10 +1600,46 @@ fn is_definition_form(datum: &Spanned<Datum>) -> bool {
         return false;
     };
 
-    items
-        .first()
-        .and_then(keyword_name)
-        .is_some_and(|name| matches!(name.as_str(), "define" | "define-syntax"))
+    match items.first().and_then(keyword_name).as_deref() {
+        Some("define" | "define-syntax") => true,
+        // R5RS 5.2.2: a body-level begin whose forms are all definitions
+        // splices into the surrounding definition sequence.
+        Some("begin") => items.len() > 1 && items[1..].iter().all(is_definition_form),
+        _ => false,
+    }
+}
+
+/// Names defined by a body's internal definitions, looking through
+/// definition-only `begin` splices.
+fn body_definition_names(body: &[Spanned<Datum>]) -> BTreeSet<String> {
+    fn collect(datum: &Spanned<Datum>, names: &mut BTreeSet<String>) {
+        let Datum::List(items) = &datum.node else {
+            return;
+        };
+        match items.first().and_then(keyword_name).as_deref() {
+            Some("define") => {
+                let name = match items.get(1).map(|target| &target.node) {
+                    Some(Datum::List(formals) | Datum::DottedList(formals, _)) => {
+                        formals.first().and_then(identifier_name)
+                    }
+                    _ => items.get(1).and_then(identifier_name),
+                };
+                names.extend(name);
+            }
+            Some("begin") => {
+                for item in &items[1..] {
+                    collect(item, names);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut names = BTreeSet::new();
+    for item in body {
+        collect(item, &mut names);
+    }
+    names
 }
 
 fn binding_names(datum: &Spanned<Datum>) -> BTreeSet<String> {
@@ -2728,11 +2767,17 @@ fn parse_body(
     let mut index = 0;
 
     while index < body.len() {
-        let Some(binding) = parse_define_in(&body[index], scope)? else {
-            break;
-        };
-        bindings.push(binding);
-        index += 1;
+        if let Some(binding) = parse_define_in(&body[index], scope)? {
+            bindings.push(binding);
+            index += 1;
+            continue;
+        }
+        if let Some(spliced) = parse_begin_definitions(&body[index], scope)? {
+            bindings.extend(spliced);
+            index += 1;
+            continue;
+        }
+        break;
     }
 
     if bindings.is_empty() {
@@ -2759,6 +2804,35 @@ fn parse_body(
         span,
         origin,
     )])
+}
+
+/// Parse a body-level `(begin <definition>...)` splice (R5RS 5.2.2),
+/// returning its definitions when every form is one.
+fn parse_begin_definitions(
+    datum: &Spanned<Datum>,
+    scope: &LexicalScope,
+) -> Result<Option<Vec<DefineBinding>>, SurfaceError> {
+    let Datum::List(items) = &datum.node else {
+        return Ok(None);
+    };
+    let Some((head, rest)) = items.split_first() else {
+        return Ok(None);
+    };
+    if keyword_name(head).as_deref() != Some("begin") || rest.is_empty() {
+        return Ok(None);
+    }
+
+    let mut bindings = Vec::new();
+    for item in rest {
+        if let Some(binding) = parse_define_in(item, scope)? {
+            bindings.push(binding);
+        } else if let Some(spliced) = parse_begin_definitions(item, scope)? {
+            bindings.extend(spliced);
+        } else {
+            return Ok(None);
+        }
+    }
+    Ok(Some(bindings))
 }
 
 fn body_sequence_expr(

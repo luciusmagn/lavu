@@ -297,7 +297,9 @@ impl Env {
             // resolves at the macro's definition environment; the top level
             // is the best approximation available after expansion.
             let base = base_identifier(name);
-            (base != name).then(|| self.root().lookup_lexical(base)).flatten()
+            (base != name)
+                .then(|| self.root().lookup_lexical(base))
+                .flatten()
         })
     }
 
@@ -549,7 +551,7 @@ pub fn eval_expr(expr: &Spanned<Expr>, env: &Env) -> Result<Value, EvalError> {
 #[derive(Debug)]
 enum Kont {
     Halt,
-    Frame(ContFrame, Rc<Kont>),
+    Frame(Box<ContFrame>, Rc<Kont>),
 }
 
 /// The active `dynamic-wind` extents, also persistent so continuations can
@@ -557,16 +559,25 @@ enum Kont {
 #[derive(Debug)]
 enum Winds {
     Nil,
-    Node { wind: Wind, parent: Rc<Winds> },
+    Node { wind: Box<Wind>, parent: Rc<Winds> },
 }
 
 /// One wound extent: R5RS thunks, or a current-port swap installed by the
 /// `with-*-file` procedures so re-entry restores their port too.
 #[derive(Debug, Clone)]
 enum Wind {
-    Thunks { before: Value, after: Value },
-    CurrentInput { outside: InputPort, inside: InputPort },
-    CurrentOutput { outside: OutputPort, inside: OutputPort },
+    Thunks {
+        before: Box<Value>,
+        after: Box<Value>,
+    },
+    CurrentInput {
+        outside: InputPort,
+        inside: InputPort,
+    },
+    CurrentOutput {
+        outside: OutputPort,
+        inside: OutputPort,
+    },
 }
 
 /// One step of a continuation jump's wind transition.
@@ -640,9 +651,9 @@ enum ContFrame {
         promise: Rc<Promise>,
     },
     WindEnter {
-        before: Value,
+        before: Box<Value>,
         thunk: Value,
-        after: Value,
+        after: Box<Value>,
         span: SourceSpan,
     },
     WindExit {
@@ -704,7 +715,7 @@ impl Machine {
                 Control::Value(value) => {
                     let (frame, rest) = match &*self.kont {
                         Kont::Halt => return Ok(value),
-                        Kont::Frame(frame, rest) => (frame.clone(), rest.clone()),
+                        Kont::Frame(frame, rest) => (frame.as_ref().clone(), rest.clone()),
                     };
                     self.kont = rest;
                     self.step_value(frame, value)?;
@@ -714,7 +725,7 @@ impl Machine {
     }
 
     fn push(&mut self, frame: ContFrame) {
-        self.kont = Rc::new(Kont::Frame(frame, self.kont.clone()));
+        self.kont = Rc::new(Kont::Frame(Box::new(frame), self.kont.clone()));
     }
 
     fn step_eval(&mut self, expr: Spanned<Expr>, env: Env) -> Result<(), EvalError> {
@@ -978,14 +989,14 @@ impl Machine {
                 span,
             } => {
                 self.winds = Rc::new(Winds::Node {
-                    wind: Wind::Thunks {
+                    wind: Box::new(Wind::Thunks {
                         before,
                         after: after.clone(),
-                    },
+                    }),
                     parent: self.winds.clone(),
                 });
                 self.push(ContFrame::WindExit {
-                    after,
+                    after: *after,
                     span: span.clone(),
                 });
                 let env = Env::empty();
@@ -1029,14 +1040,14 @@ impl Machine {
                         WindStep::Thunk { thunk, winds } => {
                             self.winds = winds;
                             self.kont = Rc::new(Kont::Frame(
-                                ContFrame::JumpWinds {
+                                Box::new(ContFrame::JumpWinds {
                                     plan,
                                     index: index + 1,
                                     target_kont,
                                     target_winds,
                                     value,
                                     span: span.clone(),
-                                },
+                                }),
                                 Rc::new(Kont::Halt),
                             ));
                             let env = Env::empty();
@@ -1059,7 +1070,7 @@ impl Machine {
                 let node = self.winds.clone();
                 if let Winds::Node { wind, parent } = &*node {
                     self.winds = parent.clone();
-                    match wind {
+                    match wind.as_ref() {
                         Wind::CurrentInput { outside, inside } => {
                             CURRENT_INPUT_PORT.with(|current| {
                                 current.replace(outside.clone());
@@ -1141,9 +1152,9 @@ impl Machine {
                                 span: span.clone(),
                             })?;
                         self.push(ContFrame::WindEnter {
-                            before: before.clone(),
+                            before: Box::new(before.clone()),
                             thunk,
-                            after,
+                            after: Box::new(after),
                             span: span.clone(),
                         });
                         callee = before;
@@ -1244,10 +1255,10 @@ impl Machine {
                         let outside =
                             CURRENT_INPUT_PORT.with(|current| current.replace(port.clone()));
                         self.winds = Rc::new(Winds::Node {
-                            wind: Wind::CurrentInput {
+                            wind: Box::new(Wind::CurrentInput {
                                 outside,
                                 inside: port,
-                            },
+                            }),
                             parent: self.winds.clone(),
                         });
                         self.push(ContFrame::PopPortWind);
@@ -1260,10 +1271,10 @@ impl Machine {
                         let outside =
                             CURRENT_OUTPUT_PORT.with(|current| current.replace(port.clone()));
                         self.winds = Rc::new(Winds::Node {
-                            wind: Wind::CurrentOutput {
+                            wind: Box::new(Wind::CurrentOutput {
                                 outside,
                                 inside: port,
-                            },
+                            }),
                             parent: self.winds.clone(),
                         });
                         self.push(ContFrame::PopPortWind);
@@ -1302,14 +1313,14 @@ impl Machine {
 
         let plan = wind_transition(&self.winds, &continuation.winds);
         self.kont = Rc::new(Kont::Frame(
-            ContFrame::JumpWinds {
+            Box::new(ContFrame::JumpWinds {
                 plan: Rc::new(plan),
                 index: 0,
                 target_kont: continuation.kont,
                 target_winds: continuation.winds,
                 value: Box::new(value),
                 span,
-            },
+            }),
             Rc::new(Kont::Halt),
         ));
         self.control = Control::Value(Value::Unspecified);
@@ -1339,9 +1350,9 @@ fn wind_transition(current: &Rc<Winds>, target: &Rc<Winds>) -> Vec<WindStep> {
             break;
         }
         if let Winds::Node { wind, parent } = &**node {
-            match wind {
+            match wind.as_ref() {
                 Wind::Thunks { after, .. } => plan.push(WindStep::Thunk {
-                    thunk: after.clone(),
+                    thunk: after.as_ref().clone(),
                     winds: parent.clone(),
                 }),
                 Wind::CurrentInput { outside, .. } => {
@@ -1360,9 +1371,9 @@ fn wind_transition(current: &Rc<Winds>, target: &Rc<Winds>) -> Vec<WindStep> {
             break;
         }
         if let Winds::Node { wind, parent } = &**node {
-            match wind {
+            match wind.as_ref() {
                 Wind::Thunks { before, .. } => rewinds.push(WindStep::Thunk {
-                    thunk: before.clone(),
+                    thunk: before.as_ref().clone(),
                     winds: parent.clone(),
                 }),
                 Wind::CurrentInput { inside, .. } => {
@@ -5941,6 +5952,33 @@ mod tests {
                  (syms)"
             ),
             "(alpha beta)"
+        );
+    }
+
+    #[test]
+    fn splices_begin_definitions_into_bodies() {
+        // R5RS 5.2.2: a body-level begin of definitions splices into the
+        // internal definition sequence, and the spliced define shadows an
+        // outer macro of the same name (R5RS pitfall 3.2).
+        assert_eq!(
+            eval_one(
+                "(let ((x 0))
+                   (begin (define y 1)
+                          (define z 2))
+                   (+ x y z))"
+            ),
+            "3"
+        );
+        assert_eq!(
+            eval_one(
+                "(let-syntax ((foo (syntax-rules ()
+                                     ((_ var) (define var 1)))))
+                   (let ((x 2))
+                     (begin (define foo +))
+                     (cond (else (foo x)))
+                     x))"
+            ),
+            "2"
         );
     }
 

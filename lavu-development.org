@@ -951,7 +951,7 @@ and output procedures. =any?= means any Scheme value is valid.
   =(should-be id expected expression)= cases in a Rust integration
   runner, because the original harness uses SISC-specific exception
   syntax.
-- Mark the full pitfall runner ignored for now, so it can document
+- Initially mark the full pitfall runner ignored, so it can document
   remaining R5RS gaps without making ordinary unit tests red:
   =cargo test sisc_r5rs_pitfall_suite -- --ignored=.
 - First baseline: 7 of 22 extracted cases pass. The current failures
@@ -975,11 +975,13 @@ and output procedures. =any?= means any Scheme value is valid.
   rule-head syntax, matching R5RS and allowing common heads such as =_=.
   The remaining macro pitfall failures now expose actual hygiene and
   definition-context gaps instead of failing to match the rule.
-- Pin the pitfall work while occurrence typing is the priority. The
-  ignored corpus currently has 11 failures: reusable continuation
+- Pin the pitfall work while occurrence typing is the priority. At that
+  point the ignored corpus still had 11 failures: reusable continuation
   dynamic-extent cases, macro hygiene/definition-context cases 3.1-3.3,
   first-class continuation cases 7.1-7.4, and continuation-safe =map=.
-  Return here after the inference plan advances.
+- Unpin the SISC pitfall corpus after the explicit continuation machine,
+  hygienic rename marks, and R5RS body-level =begin= definition splicing;
+  the full 22-case runner now passes as part of ordinary =cargo test=.
 ** Equality Primitives
 - Add typed and native =eq?= and =equal?= alongside =eqv?=, using
   runtime identity where available and structural equality for =equal?=.

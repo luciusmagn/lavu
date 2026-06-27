@@ -24,7 +24,6 @@ fn sisc_r5rs_pitfall_fixture_is_parseable() {
 }
 
 #[test]
-#[ignore = "manual R5RS compliance corpus; current Lavu still has known gaps"]
 fn sisc_r5rs_pitfall_suite() {
     // The fixture is one program: setup forms (defines and the should-be
     // macro definition) interleave with the cases, all sharing one
