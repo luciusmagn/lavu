@@ -115,9 +115,7 @@ impl TypeEnv {
             // Hygiene-marked identifiers free in their expansion resolve at
             // the macro definition site; fall back to the unmarked binding.
             let base = crate::surface::base_identifier(name);
-            (base != name)
-                .then(|| self.bindings.get(base))
-                .flatten()
+            (base != name).then(|| self.bindings.get(base)).flatten()
         })
     }
 
@@ -587,10 +585,7 @@ impl Inferencer {
                 continue;
             }
             binding.ty = self.resolve(binding.ty.clone());
-            if !binding.scheme
-                && has_type_var(&binding.ty)
-                && !self.pending_tainted(&binding.ty)
-            {
+            if !binding.scheme && has_type_var(&binding.ty) && !self.pending_tainted(&binding.ty) {
                 binding.scheme = true;
             }
         }
@@ -3677,8 +3672,9 @@ fn recursive_list_element(ty: &Type, name: &str) -> Option<Type> {
 
     match cdr.as_ref() {
         Type::Var(var) if var == name => Some((**car).clone()),
-        cdr => recursive_list_element(cdr, name)
-            .map(|rest| Type::union(vec![(**car).clone(), rest])),
+        cdr => {
+            recursive_list_element(cdr, name).map(|rest| Type::union(vec![(**car).clone(), rest]))
+        }
     }
 }
 
@@ -3760,9 +3756,7 @@ fn collect_type_vars(ty: &Type) -> BTreeSet<String> {
             Type::ListOf(element) | Type::VectorOf(element) | Type::PromiseOf(element) => {
                 walk(element, vars)
             }
-            Type::Values(types) | Type::Union(types) => {
-                types.iter().for_each(|ty| walk(ty, vars))
-            }
+            Type::Values(types) | Type::Union(types) => types.iter().for_each(|ty| walk(ty, vars)),
             Type::Procedure(ProcedureType::Fixed { params, result }) => {
                 params.iter().for_each(|ty| walk(ty, vars));
                 walk(result, vars);
@@ -4846,7 +4840,10 @@ mod tests {
         );
         assert_eq!(
             infer_all("(define (len l) (if (null? l) 0 (+ 1 (len (cdr l))))) (len '(1 2 3))"),
-            vec!["(-> (listof t2) number?)".to_string(), "number?".to_string()]
+            vec![
+                "(-> (listof t2) number?)".to_string(),
+                "number?".to_string()
+            ]
         );
         assert_eq!(
             infer_one(
@@ -4907,10 +4904,7 @@ mod tests {
     fn self_recursive_calls_do_not_classify_latent_predicates() {
         // A function whose body only tests itself must not become a
         // predicate through circular speculation.
-        assert_eq!(
-            infer_one("(define (f l) (f (cdr l)))"),
-            "(-> unknown? t4)"
-        );
+        assert_eq!(infer_one("(define (f l) (f (cdr l)))"), "(-> unknown? t4)");
         // Finished predicate evidence still classifies later uses.
         assert_eq!(
             infer_all(
@@ -4936,7 +4930,6 @@ mod tests {
             "(-> (-> any? boolean? : t2) (listof t3) (listof t2))"
         );
     }
-
 
     #[test]
     fn checks_set_assignment_types() {
