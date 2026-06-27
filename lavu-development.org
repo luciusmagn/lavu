@@ -571,6 +571,9 @@ and output procedures. =any?= means any Scheme value is valid.
   when every appended operand is visibly proper. This keeps R5RS improper
   final tails conservative while allowing =(apply pred (append (list x)
   '()))= to refine like a direct one-argument predicate call.
+- Apply visible final argument lists to fixed-plus-rest procedure types too,
+  so =(apply max (list x 0))= constrains =x= to =number?= and visible empty
+  lists can report arity errors for procedures that require an argument.
 - Fix the recursive list-walk stack overflow: binding a variable to the
   union equation =t = (U null? (pair? e t))= now folds into =(listof e)=
   instead of cycling, so =length=, =map=, =assq=, and =filter=-style

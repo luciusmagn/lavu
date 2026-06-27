@@ -2953,7 +2953,28 @@ impl Inferencer {
                 required,
                 rest,
                 result,
-            }) if arguments.len() >= required.len() => {
+            }) => {
+                if let Some(final_arguments) = visible_final_arguments {
+                    self.unify(final_list, Type::List, final_operand.span.clone())?;
+
+                    let mut combined_tys = arguments;
+                    combined_tys.extend(final_arguments.iter().cloned());
+                    let mut combined_operands = fixed_operands.to_vec();
+                    combined_operands.extend(final_arguments.iter().map(|_| final_operand.clone()));
+
+                    return self.apply_procedure(
+                        ProcedureType::Rest {
+                            required,
+                            rest,
+                            result,
+                        },
+                        &combined_operands,
+                        combined_tys,
+                    );
+                }
+                if arguments.len() < required.len() {
+                    return Ok(Type::Any);
+                }
                 for ((actual, expected), operand) in arguments
                     .iter()
                     .cloned()
@@ -5777,6 +5798,15 @@ mod tests {
             infer_one("(apply (lambda (x y) (+ x y)) (append (list 1) (list 2)))"),
             "number?"
         );
+        assert_eq!(infer_one("(apply max '(1 2))"), "number?");
+        assert_eq!(
+            infer_one("(lambda (x) (apply max (list x 0)))"),
+            "(-> number? number?)"
+        );
+        assert_eq!(
+            infer_one("(lambda (x) (apply min (list x 0)))"),
+            "(-> number? number?)"
+        );
         assert_eq!(
             infer_one("(apply (lambda (x y) (+ x y)) (vector->list (vector 1 2)))"),
             "number?"
@@ -5800,6 +5830,10 @@ mod tests {
         assert_eq!(
             infer_error("(apply (lambda (x y) (+ x y)) (list 1 2 3))").to_string(),
             "wrong number of arguments: expected 2, got 3"
+        );
+        assert_eq!(
+            infer_error("(apply max '())").to_string(),
+            "wrong number of arguments: expected at least 1, got 0"
         );
         assert_eq!(
             infer_one("(apply (lambda (x radix) (number->string x radix)) '(10 16))"),
