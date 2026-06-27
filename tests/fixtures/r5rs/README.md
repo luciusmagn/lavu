@@ -11,8 +11,8 @@ R5RS cases. The Rust integration test keeps this file verbatim and
 extracts the `(should-be id expected expression)` forms for evaluation
 through Lavu.
 
-Run the current manual compliance corpus with:
+Run the compliance corpus with:
 
 ```sh
-cargo test sisc_r5rs_pitfall_suite -- --ignored
+cargo test sisc_r5rs_pitfall_suite
 ```

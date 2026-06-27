@@ -1182,6 +1182,12 @@ and output procedures. =any?= means any Scheme value is valid.
 - Re-trace a previously defined name's definition for =?? name= instead of
   reporting the one-step variable lookup, by remembering each top-level
   definition's source text in the REPL.
+** Inference Stress Fixtures
+- Promote the occurrence-typing and recursion stress corpora into
+  line-oriented integration fixtures under =tests/fixtures/infer=. Each
+  non-comment line is inferred in a fresh session, giving broad coverage
+  without pinning every temporary type-variable name in a brittle display
+  expectation.
 ** Interactive Inference Stepper
 - Replace the single overlapping-label =??= report with an interactive
   alternate-screen stepper, since long inferences produced dozens of Ariadne

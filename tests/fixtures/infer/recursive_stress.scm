@@ -1,0 +1,18 @@
+# Recursion and union-unification stress corpus. Lines starting with "#"
+# are comments. Each non-comment line is inferred in a fresh session.
+(define my-len (lambda (l) (if (null? l) 0 (+ 1 (my-len (cdr l))))))
+(define my-append (lambda (a b) (if (null? a) b (cons (car a) (my-append (cdr a) b)))))
+(define my-rev (lambda (l acc) (if (null? l) acc (my-rev (cdr l) (cons (car l) acc)))))
+(define my-map (lambda (f l) (if (null? l) '() (cons (f (car l)) (my-map f (cdr l))))))
+(define sum (lambda (l) (if (pair? l) (+ (car l) (sum (cdr l))) 0)))
+(define my-assq (lambda (k al) (if (null? al) #f (if (eq? k (car (car al))) (car al) (my-assq k (cdr al))))))
+(define evn? (lambda (n) (if (zero? n) #t (od? (- n 1)))))
+(letrec ((e? (lambda (n) (if (zero? n) #t (o? (- n 1))))) (o? (lambda (n) (if (zero? n) #f (e? (- n 1)))))) e?)
+(define count-up (lambda (n) (let loop ((i 0) (acc '())) (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc))))))
+(define flatten (lambda (x) (if (pair? x) (my-append (flatten (car x)) (flatten (cdr x))) (if (null? x) '() (list x)))))
+(define depth (lambda (x) (if (pair? x) (max (+ 1 (depth (car x))) (depth (cdr x))) 0)))
+(lambda (x) (apply + (list 1 2 x)))
+(lambda (x) (apply max (list x 0)))
+(define last (lambda (l) (if (null? (cdr l)) (car l) (last (cdr l)))))
+(define tree-sum (lambda (t) (if (number? t) t (if (pair? t) (+ (tree-sum (car t)) (tree-sum (cdr t))) 0))))
+(define filt (lambda (p l) (cond ((null? l) '()) ((p (car l)) (cons (car l) (filt p (cdr l)))) (else (filt p (cdr l))))))
